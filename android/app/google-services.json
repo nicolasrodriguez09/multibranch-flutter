@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "283076267267",
+    "project_id": "multibranch-692b7",
+    "storage_bucket": "multibranch-692b7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:283076267267:android:c12436d83e0ce5c088ad36",
+        "android_client_info": {
+          "package_name": "com.example.flutter_multibranch_proyect"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAtQKkOhMO2iYngDrg5rvMP7mjs1j6vv5Y"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

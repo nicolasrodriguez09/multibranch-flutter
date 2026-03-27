@@ -1,0 +1,787 @@
+import '../../../core/firestore_serialization.dart';
+
+enum UserRole {
+  seller,
+  supervisor,
+  admin;
+
+  static UserRole fromValue(String value) {
+    return UserRole.values.firstWhere(
+      (role) => role.name == value,
+      orElse: () => UserRole.seller,
+    );
+  }
+}
+
+enum TransferStatus {
+  pending,
+  approved,
+  rejected,
+  inTransit,
+  received,
+  cancelled;
+
+  String get firestoreValue => switch (this) {
+    TransferStatus.inTransit => 'in_transit',
+    _ => name,
+  };
+
+  static TransferStatus fromValue(String value) {
+    return TransferStatus.values.firstWhere(
+      (status) => status.firestoreValue == value,
+      orElse: () => TransferStatus.pending,
+    );
+  }
+}
+
+enum ReservationStatus {
+  active,
+  expired,
+  completed,
+  cancelled;
+
+  static ReservationStatus fromValue(String value) {
+    return ReservationStatus.values.firstWhere(
+      (status) => status.name == value,
+      orElse: () => ReservationStatus.active,
+    );
+  }
+}
+
+class BranchLocation {
+  const BranchLocation({
+    required this.lat,
+    required this.lng,
+  });
+
+  final double lat;
+  final double lng;
+
+  Map<String, dynamic> toFirestore() => {
+        'lat': lat,
+        'lng': lng,
+      };
+
+  factory BranchLocation.fromFirestore(Map<String, dynamic> data) {
+    return BranchLocation(
+      lat: readDouble(data, 'lat'),
+      lng: readDouble(data, 'lng'),
+    );
+  }
+}
+
+class AppUser {
+  const AppUser({
+    required this.id,
+    required this.fullName,
+    required this.email,
+    required this.phone,
+    required this.role,
+    required this.branchId,
+    required this.isActive,
+    required this.photoUrl,
+    required this.lastLoginAt,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final String fullName;
+  final String email;
+  final String phone;
+  final UserRole role;
+  final String branchId;
+  final bool isActive;
+  final String photoUrl;
+  final DateTime? lastLoginAt;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  Map<String, dynamic> toFirestore() => {
+        'fullName': fullName,
+        'email': email,
+        'phone': phone,
+        'role': role.name,
+        'branchId': branchId,
+        'isActive': isActive,
+        'photoUrl': photoUrl,
+        'lastLoginAt': writeDateTime(lastLoginAt),
+        'createdAt': writeDateTime(createdAt),
+        'updatedAt': writeDateTime(updatedAt),
+      };
+
+  factory AppUser.fromFirestore(String id, Map<String, dynamic> data) {
+    return AppUser(
+      id: id,
+      fullName: readString(data, 'fullName'),
+      email: readString(data, 'email'),
+      phone: readString(data, 'phone'),
+      role: UserRole.fromValue(readString(data, 'role')),
+      branchId: readString(data, 'branchId'),
+      isActive: readBool(data, 'isActive'),
+      photoUrl: readString(data, 'photoUrl'),
+      lastLoginAt: readDateTime(data, 'lastLoginAt'),
+      createdAt: readDateTime(data, 'createdAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      updatedAt: readDateTime(data, 'updatedAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+    );
+  }
+}
+
+class Branch {
+  const Branch({
+    required this.id,
+    required this.name,
+    required this.code,
+    required this.address,
+    required this.city,
+    required this.phone,
+    required this.email,
+    required this.location,
+    required this.isActive,
+    required this.managerName,
+    required this.openingHours,
+    required this.lastSyncAt,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final String name;
+  final String code;
+  final String address;
+  final String city;
+  final String phone;
+  final String email;
+  final BranchLocation location;
+  final bool isActive;
+  final String managerName;
+  final String openingHours;
+  final DateTime? lastSyncAt;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  Map<String, dynamic> toFirestore() => {
+        'name': name,
+        'code': code,
+        'address': address,
+        'city': city,
+        'phone': phone,
+        'email': email,
+        'location': location.toFirestore(),
+        'isActive': isActive,
+        'managerName': managerName,
+        'openingHours': openingHours,
+        'lastSyncAt': writeDateTime(lastSyncAt),
+        'createdAt': writeDateTime(createdAt),
+        'updatedAt': writeDateTime(updatedAt),
+      };
+
+  factory Branch.fromFirestore(String id, Map<String, dynamic> data) {
+    return Branch(
+      id: id,
+      name: readString(data, 'name'),
+      code: readString(data, 'code'),
+      address: readString(data, 'address'),
+      city: readString(data, 'city'),
+      phone: readString(data, 'phone'),
+      email: readString(data, 'email'),
+      location: BranchLocation.fromFirestore(
+        (data['location'] as Map?)?.cast<String, dynamic>() ?? const {},
+      ),
+      isActive: readBool(data, 'isActive'),
+      managerName: readString(data, 'managerName'),
+      openingHours: readString(data, 'openingHours'),
+      lastSyncAt: readDateTime(data, 'lastSyncAt'),
+      createdAt: readDateTime(data, 'createdAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      updatedAt: readDateTime(data, 'updatedAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+    );
+  }
+}
+
+class Category {
+  const Category({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.isActive,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final String name;
+  final String description;
+  final bool isActive;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  Map<String, dynamic> toFirestore() => {
+        'name': name,
+        'description': description,
+        'isActive': isActive,
+        'createdAt': writeDateTime(createdAt),
+        'updatedAt': writeDateTime(updatedAt),
+      };
+
+  factory Category.fromFirestore(String id, Map<String, dynamic> data) {
+    return Category(
+      id: id,
+      name: readString(data, 'name'),
+      description: readString(data, 'description'),
+      isActive: readBool(data, 'isActive'),
+      createdAt: readDateTime(data, 'createdAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      updatedAt: readDateTime(data, 'updatedAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+    );
+  }
+}
+
+class Product {
+  const Product({
+    required this.id,
+    required this.sku,
+    required this.barcode,
+    required this.name,
+    required this.description,
+    required this.categoryId,
+    required this.brand,
+    required this.imageUrl,
+    required this.price,
+    required this.cost,
+    required this.currency,
+    required this.tags,
+    required this.isActive,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final String sku;
+  final String barcode;
+  final String name;
+  final String description;
+  final String categoryId;
+  final String brand;
+  final String imageUrl;
+  final double price;
+  final double cost;
+  final String currency;
+  final List<String> tags;
+  final bool isActive;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  Map<String, dynamic> toFirestore() => {
+        'sku': sku,
+        'barcode': barcode,
+        'name': name,
+        'description': description,
+        'categoryId': categoryId,
+        'brand': brand,
+        'imageUrl': imageUrl,
+        'price': price,
+        'cost': cost,
+        'currency': currency,
+        'tags': tags,
+        'isActive': isActive,
+        'createdAt': writeDateTime(createdAt),
+        'updatedAt': writeDateTime(updatedAt),
+      };
+
+  factory Product.fromFirestore(String id, Map<String, dynamic> data) {
+    return Product(
+      id: id,
+      sku: readString(data, 'sku'),
+      barcode: readString(data, 'barcode'),
+      name: readString(data, 'name'),
+      description: readString(data, 'description'),
+      categoryId: readString(data, 'categoryId'),
+      brand: readString(data, 'brand'),
+      imageUrl: readString(data, 'imageUrl'),
+      price: readDouble(data, 'price'),
+      cost: readDouble(data, 'cost'),
+      currency: readString(data, 'currency'),
+      tags: readStringList(data, 'tags'),
+      isActive: readBool(data, 'isActive'),
+      createdAt: readDateTime(data, 'createdAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      updatedAt: readDateTime(data, 'updatedAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+    );
+  }
+}
+
+class InventoryItem {
+  const InventoryItem({
+    required this.id,
+    required this.branchId,
+    required this.branchName,
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.stock,
+    required this.reservedStock,
+    required this.availableStock,
+    required this.incomingStock,
+    required this.minimumStock,
+    required this.lastMovementAt,
+    required this.lastSyncAt,
+    required this.updatedBy,
+    required this.isActive,
+    required this.updatedAt,
+    required this.isLowStock,
+  });
+
+  final String id;
+  final String branchId;
+  final String branchName;
+  final String productId;
+  final String productName;
+  final String sku;
+  final int stock;
+  final int reservedStock;
+  final int availableStock;
+  final int incomingStock;
+  final int minimumStock;
+  final DateTime? lastMovementAt;
+  final DateTime? lastSyncAt;
+  final String updatedBy;
+  final bool isActive;
+  final DateTime updatedAt;
+  final bool isLowStock;
+
+  factory InventoryItem.create({
+    required String branchId,
+    required String branchName,
+    required String productId,
+    required String productName,
+    required String sku,
+    required int stock,
+    required int reservedStock,
+    required int incomingStock,
+    required int minimumStock,
+    required String updatedBy,
+    required bool isActive,
+    required DateTime updatedAt,
+    DateTime? lastMovementAt,
+    DateTime? lastSyncAt,
+  }) {
+    final id = inventoryId(branchId, productId);
+    final availableStock = stock - reservedStock;
+    return InventoryItem(
+      id: id,
+      branchId: branchId,
+      branchName: branchName,
+      productId: productId,
+      productName: productName,
+      sku: sku,
+      stock: stock,
+      reservedStock: reservedStock,
+      availableStock: availableStock,
+      incomingStock: incomingStock,
+      minimumStock: minimumStock,
+      lastMovementAt: lastMovementAt,
+      lastSyncAt: lastSyncAt,
+      updatedBy: updatedBy,
+      isActive: isActive,
+      updatedAt: updatedAt,
+      isLowStock: availableStock <= minimumStock,
+    );
+  }
+
+  static String inventoryId(String branchId, String productId) => '${branchId}_$productId';
+
+  InventoryItem recalculate({
+    int? stock,
+    int? reservedStock,
+    int? incomingStock,
+    int? minimumStock,
+    String? updatedBy,
+    DateTime? updatedAt,
+    DateTime? lastMovementAt,
+    DateTime? lastSyncAt,
+    bool? isActive,
+  }) {
+    final nextStock = stock ?? this.stock;
+    final nextReservedStock = reservedStock ?? this.reservedStock;
+    final nextAvailableStock = nextStock - nextReservedStock;
+    final nextMinimumStock = minimumStock ?? this.minimumStock;
+
+    return InventoryItem(
+      id: id,
+      branchId: branchId,
+      branchName: branchName,
+      productId: productId,
+      productName: productName,
+      sku: sku,
+      stock: nextStock,
+      reservedStock: nextReservedStock,
+      availableStock: nextAvailableStock,
+      incomingStock: incomingStock ?? this.incomingStock,
+      minimumStock: nextMinimumStock,
+      lastMovementAt: lastMovementAt ?? this.lastMovementAt,
+      lastSyncAt: lastSyncAt ?? this.lastSyncAt,
+      updatedBy: updatedBy ?? this.updatedBy,
+      isActive: isActive ?? this.isActive,
+      updatedAt: updatedAt ?? this.updatedAt,
+      isLowStock: nextAvailableStock <= nextMinimumStock,
+    );
+  }
+
+  Map<String, dynamic> toFirestore() => {
+        'branchId': branchId,
+        'branchName': branchName,
+        'productId': productId,
+        'productName': productName,
+        'sku': sku,
+        'stock': stock,
+        'reservedStock': reservedStock,
+        'availableStock': availableStock,
+        'incomingStock': incomingStock,
+        'minimumStock': minimumStock,
+        'lastMovementAt': writeDateTime(lastMovementAt),
+        'lastSyncAt': writeDateTime(lastSyncAt),
+        'updatedBy': updatedBy,
+        'isActive': isActive,
+        'updatedAt': writeDateTime(updatedAt),
+        'isLowStock': isLowStock,
+      };
+
+  factory InventoryItem.fromFirestore(String id, Map<String, dynamic> data) {
+    return InventoryItem(
+      id: id,
+      branchId: readString(data, 'branchId'),
+      branchName: readString(data, 'branchName'),
+      productId: readString(data, 'productId'),
+      productName: readString(data, 'productName'),
+      sku: readString(data, 'sku'),
+      stock: readInt(data, 'stock'),
+      reservedStock: readInt(data, 'reservedStock'),
+      availableStock: readInt(data, 'availableStock'),
+      incomingStock: readInt(data, 'incomingStock'),
+      minimumStock: readInt(data, 'minimumStock'),
+      lastMovementAt: readDateTime(data, 'lastMovementAt'),
+      lastSyncAt: readDateTime(data, 'lastSyncAt'),
+      updatedBy: readString(data, 'updatedBy'),
+      isActive: readBool(data, 'isActive'),
+      updatedAt: readDateTime(data, 'updatedAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      isLowStock: readBool(data, 'isLowStock'),
+    );
+  }
+}
+
+class TransferRequest {
+  const TransferRequest({
+    required this.id,
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.fromBranchId,
+    required this.fromBranchName,
+    required this.toBranchId,
+    required this.toBranchName,
+    required this.requestedBy,
+    required this.approvedBy,
+    required this.quantity,
+    required this.status,
+    required this.reason,
+    required this.notes,
+    required this.requestedAt,
+    required this.approvedAt,
+    required this.shippedAt,
+    required this.receivedAt,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final String productId;
+  final String productName;
+  final String sku;
+  final String fromBranchId;
+  final String fromBranchName;
+  final String toBranchId;
+  final String toBranchName;
+  final String requestedBy;
+  final String? approvedBy;
+  final int quantity;
+  final TransferStatus status;
+  final String reason;
+  final String notes;
+  final DateTime requestedAt;
+  final DateTime? approvedAt;
+  final DateTime? shippedAt;
+  final DateTime? receivedAt;
+  final DateTime updatedAt;
+
+  TransferRequest copyWith({
+    String? id,
+    String? approvedBy,
+    TransferStatus? status,
+    DateTime? approvedAt,
+    DateTime? shippedAt,
+    DateTime? receivedAt,
+    DateTime? updatedAt,
+  }) {
+    return TransferRequest(
+      id: id ?? this.id,
+      productId: productId,
+      productName: productName,
+      sku: sku,
+      fromBranchId: fromBranchId,
+      fromBranchName: fromBranchName,
+      toBranchId: toBranchId,
+      toBranchName: toBranchName,
+      requestedBy: requestedBy,
+      approvedBy: approvedBy ?? this.approvedBy,
+      quantity: quantity,
+      status: status ?? this.status,
+      reason: reason,
+      notes: notes,
+      requestedAt: requestedAt,
+      approvedAt: approvedAt ?? this.approvedAt,
+      shippedAt: shippedAt ?? this.shippedAt,
+      receivedAt: receivedAt ?? this.receivedAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
+  Map<String, dynamic> toFirestore() => {
+        'productId': productId,
+        'productName': productName,
+        'sku': sku,
+        'fromBranchId': fromBranchId,
+        'fromBranchName': fromBranchName,
+        'toBranchId': toBranchId,
+        'toBranchName': toBranchName,
+        'requestedBy': requestedBy,
+        'approvedBy': approvedBy,
+        'quantity': quantity,
+        'status': status.firestoreValue,
+        'reason': reason,
+        'notes': notes,
+        'requestedAt': writeDateTime(requestedAt),
+        'approvedAt': writeDateTime(approvedAt),
+        'shippedAt': writeDateTime(shippedAt),
+        'receivedAt': writeDateTime(receivedAt),
+        'updatedAt': writeDateTime(updatedAt),
+      };
+
+  factory TransferRequest.fromFirestore(String id, Map<String, dynamic> data) {
+    return TransferRequest(
+      id: id,
+      productId: readString(data, 'productId'),
+      productName: readString(data, 'productName'),
+      sku: readString(data, 'sku'),
+      fromBranchId: readString(data, 'fromBranchId'),
+      fromBranchName: readString(data, 'fromBranchName'),
+      toBranchId: readString(data, 'toBranchId'),
+      toBranchName: readString(data, 'toBranchName'),
+      requestedBy: readString(data, 'requestedBy'),
+      approvedBy: data['approvedBy'] as String?,
+      quantity: readInt(data, 'quantity'),
+      status: TransferStatus.fromValue(readString(data, 'status')),
+      reason: readString(data, 'reason'),
+      notes: readString(data, 'notes'),
+      requestedAt: readDateTime(data, 'requestedAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      approvedAt: readDateTime(data, 'approvedAt'),
+      shippedAt: readDateTime(data, 'shippedAt'),
+      receivedAt: readDateTime(data, 'receivedAt'),
+      updatedAt: readDateTime(data, 'updatedAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+    );
+  }
+}
+
+class Reservation {
+  const Reservation({
+    required this.id,
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.branchId,
+    required this.branchName,
+    required this.customerName,
+    required this.customerPhone,
+    required this.quantity,
+    required this.status,
+    required this.reservedBy,
+    required this.expiresAt,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final String productId;
+  final String productName;
+  final String sku;
+  final String branchId;
+  final String branchName;
+  final String customerName;
+  final String customerPhone;
+  final int quantity;
+  final ReservationStatus status;
+  final String reservedBy;
+  final DateTime expiresAt;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  Reservation copyWith({
+    ReservationStatus? status,
+    DateTime? updatedAt,
+  }) {
+    return Reservation(
+      id: id,
+      productId: productId,
+      productName: productName,
+      sku: sku,
+      branchId: branchId,
+      branchName: branchName,
+      customerName: customerName,
+      customerPhone: customerPhone,
+      quantity: quantity,
+      status: status ?? this.status,
+      reservedBy: reservedBy,
+      expiresAt: expiresAt,
+      createdAt: createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
+  Map<String, dynamic> toFirestore() => {
+        'productId': productId,
+        'productName': productName,
+        'sku': sku,
+        'branchId': branchId,
+        'branchName': branchName,
+        'customerName': customerName,
+        'customerPhone': customerPhone,
+        'quantity': quantity,
+        'status': status.name,
+        'reservedBy': reservedBy,
+        'expiresAt': writeDateTime(expiresAt),
+        'createdAt': writeDateTime(createdAt),
+        'updatedAt': writeDateTime(updatedAt),
+      };
+
+  factory Reservation.fromFirestore(String id, Map<String, dynamic> data) {
+    return Reservation(
+      id: id,
+      productId: readString(data, 'productId'),
+      productName: readString(data, 'productName'),
+      sku: readString(data, 'sku'),
+      branchId: readString(data, 'branchId'),
+      branchName: readString(data, 'branchName'),
+      customerName: readString(data, 'customerName'),
+      customerPhone: readString(data, 'customerPhone'),
+      quantity: readInt(data, 'quantity'),
+      status: ReservationStatus.fromValue(readString(data, 'status')),
+      reservedBy: readString(data, 'reservedBy'),
+      expiresAt: readDateTime(data, 'expiresAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      createdAt: readDateTime(data, 'createdAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      updatedAt: readDateTime(data, 'updatedAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+    );
+  }
+}
+
+class SyncLog {
+  const SyncLog({
+    required this.id,
+    required this.branchId,
+    required this.branchName,
+    required this.type,
+    required this.status,
+    required this.recordsProcessed,
+    required this.startedAt,
+    required this.finishedAt,
+    required this.message,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String branchId;
+  final String branchName;
+  final String type;
+  final String status;
+  final int recordsProcessed;
+  final DateTime startedAt;
+  final DateTime finishedAt;
+  final String message;
+  final DateTime createdAt;
+
+  Map<String, dynamic> toFirestore() => {
+        'branchId': branchId,
+        'branchName': branchName,
+        'type': type,
+        'status': status,
+        'recordsProcessed': recordsProcessed,
+        'startedAt': writeDateTime(startedAt),
+        'finishedAt': writeDateTime(finishedAt),
+        'message': message,
+        'createdAt': writeDateTime(createdAt),
+      };
+
+  factory SyncLog.fromFirestore(String id, Map<String, dynamic> data) {
+    return SyncLog(
+      id: id,
+      branchId: readString(data, 'branchId'),
+      branchName: readString(data, 'branchName'),
+      type: readString(data, 'type'),
+      status: readString(data, 'status'),
+      recordsProcessed: readInt(data, 'recordsProcessed'),
+      startedAt: readDateTime(data, 'startedAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      finishedAt: readDateTime(data, 'finishedAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      message: readString(data, 'message'),
+      createdAt: readDateTime(data, 'createdAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+    );
+  }
+}
+
+class AppNotification {
+  const AppNotification({
+    required this.id,
+    required this.userId,
+    required this.title,
+    required this.message,
+    required this.type,
+    required this.referenceId,
+    required this.isRead,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String userId;
+  final String title;
+  final String message;
+  final String type;
+  final String referenceId;
+  final bool isRead;
+  final DateTime createdAt;
+
+  Map<String, dynamic> toFirestore() => {
+        'userId': userId,
+        'title': title,
+        'message': message,
+        'type': type,
+        'referenceId': referenceId,
+        'isRead': isRead,
+        'createdAt': writeDateTime(createdAt),
+      };
+
+  factory AppNotification.fromFirestore(String id, Map<String, dynamic> data) {
+    return AppNotification(
+      id: id,
+      userId: readString(data, 'userId'),
+      title: readString(data, 'title'),
+      message: readString(data, 'message'),
+      type: readString(data, 'type'),
+      referenceId: readString(data, 'referenceId'),
+      isRead: readBool(data, 'isRead'),
+      createdAt: readDateTime(data, 'createdAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+    );
+  }
+}
+
+class InventoryException implements Exception {
+  const InventoryException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}

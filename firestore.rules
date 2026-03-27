@@ -1,0 +1,103 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDocumentPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function hasUserProfile() {
+      return signedIn() && exists(userDocumentPath());
+    }
+
+    function currentUser() {
+      return get(userDocumentPath()).data;
+    }
+
+    function isAdmin() {
+      return hasUserProfile() && currentUser().role == 'admin';
+    }
+
+    function hasSameBranch(branchId) {
+      return hasUserProfile() && currentUser().branchId == branchId;
+    }
+
+    function canReadBranch(branchId) {
+      return isAdmin() || hasSameBranch(branchId);
+    }
+
+    function validInventoryDerivedFields(data) {
+      return data.availableStock == data.stock - data.reservedStock
+        && data.isLowStock == (data.availableStock <= data.minimumStock)
+        && data.updatedBy == request.auth.uid;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /branches/{branchId} {
+      allow read: if hasUserProfile();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /categories/{categoryId} {
+      allow read: if hasUserProfile();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /products/{productId} {
+      allow read: if hasUserProfile();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /inventories/{inventoryId} {
+      allow read: if canReadBranch(resource.data.branchId);
+      allow create: if signedIn()
+        && canReadBranch(request.resource.data.branchId)
+        && validInventoryDerivedFields(request.resource.data);
+      allow update: if signedIn()
+        && canReadBranch(request.resource.data.branchId)
+        && validInventoryDerivedFields(request.resource.data)
+        && request.resource.data.branchId == resource.data.branchId
+        && request.resource.data.productId == resource.data.productId;
+      allow delete: if isAdmin();
+    }
+
+    match /transfers/{transferId} {
+      allow read: if isAdmin()
+        || canReadBranch(resource.data.fromBranchId)
+        || canReadBranch(resource.data.toBranchId);
+      allow create: if hasUserProfile()
+        && request.resource.data.requestedBy == request.auth.uid
+        && (isAdmin() || hasSameBranch(request.resource.data.toBranchId));
+      allow update: if isAdmin()
+        || canReadBranch(resource.data.fromBranchId)
+        || canReadBranch(resource.data.toBranchId);
+      allow delete: if isAdmin();
+    }
+
+    match /reservations/{reservationId} {
+      allow read: if isAdmin() || canReadBranch(resource.data.branchId);
+      allow create: if hasUserProfile()
+        && request.resource.data.reservedBy == request.auth.uid
+        && (isAdmin() || hasSameBranch(request.resource.data.branchId));
+      allow update: if isAdmin() || canReadBranch(resource.data.branchId);
+      allow delete: if isAdmin();
+    }
+
+    match /sync_logs/{syncId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if signedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create, update, delete: if isAdmin();
+    }
+  }
+}
