@@ -24,6 +24,16 @@ class UserRepository {
     return AppUser.fromFirestore(snapshot.id, data);
   }
 
+  Stream<AppUser?> watchUser(String uid) {
+    return _collection.doc(uid).snapshots().map((snapshot) {
+      final data = snapshot.data();
+      if (data == null) {
+        return null;
+      }
+      return AppUser.fromFirestore(snapshot.id, data);
+    });
+  }
+
   Stream<List<AppUser>> watchUsers() {
     return _collection
         .orderBy('fullName')
