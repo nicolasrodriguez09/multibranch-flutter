@@ -6,11 +6,18 @@ enum UserRole {
   admin;
 
   static UserRole fromValue(String value) {
+    final normalizedValue = value.trim().toLowerCase();
     return UserRole.values.firstWhere(
-      (role) => role.name == value,
+      (role) => role.name == normalizedValue,
       orElse: () => UserRole.seller,
     );
   }
+
+  String get sectionTitle => switch (this) {
+    UserRole.admin => 'Panel Administrativo',
+    UserRole.supervisor => 'Panel Supervisor',
+    UserRole.seller => 'Panel de Ventas',
+  };
 }
 
 enum TransferStatus {

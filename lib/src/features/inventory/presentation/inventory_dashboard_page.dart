@@ -132,7 +132,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Ingreso ${widget.currentUser.role.name}'),
+        title: Text(widget.currentUser.role.sectionTitle),
         actions: [
           IconButton(
             onPressed: widget.authService.signOut,

@@ -14,8 +14,15 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Login'), findsWidgets);
+    expect(find.text('Conecta y gestiona tu inventario entre sucursales.'), findsOneWidget);
+    expect(find.text('Iniciar Sesion'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('Iniciar Sesion'));
+    await tester.tap(find.text('Iniciar Sesion'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Inicio de sesion'), findsOneWidget);
+    expect(find.text('Correo corporativo'), findsOneWidget);
     expect(find.text('Ingresar'), findsOneWidget);
-    expect(find.text('Crear base inicial'), findsOneWidget);
   });
 }
