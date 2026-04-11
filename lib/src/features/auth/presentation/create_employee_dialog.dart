@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/app_theme.dart';
 import '../../inventory/domain/models.dart';
+import '../../inventory/domain/role_permissions.dart';
 
 class CreateEmployeeRequest {
   const CreateEmployeeRequest({
@@ -21,10 +23,7 @@ class CreateEmployeeRequest {
 }
 
 class CreateEmployeeDialog extends StatefulWidget {
-  const CreateEmployeeDialog({
-    super.key,
-    required this.branches,
-  });
+  const CreateEmployeeDialog({super.key, required this.branches});
 
   final List<Branch> branches;
 
@@ -86,23 +85,73 @@ class _CreateEmployeeDialogState extends State<CreateEmployeeDialog> {
   @override
   Widget build(BuildContext context) {
     final branches = widget.branches;
+    final textTheme = Theme.of(context).textTheme;
 
-    return AlertDialog(
-      title: const Text('Ingresar nuevo empleado'),
-      content: SizedBox(
-        width: 420,
+    return Dialog(
+      insetPadding: const EdgeInsets.all(20),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 620),
+        padding: const EdgeInsets.all(26),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xEE122A4E), Color(0xEE08172D)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(30),
+          border: Border.all(color: AppPalette.panelBorder),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x66050E1E),
+              blurRadius: 36,
+              offset: Offset(0, 20),
+            ),
+          ],
+        ),
         child: Form(
           key: _formKey,
           child: SingleChildScrollView(
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextFormField(
-                  controller: _fullNameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Nombre completo',
-                    border: OutlineInputBorder(),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
                   ),
+                  decoration: BoxDecoration(
+                    color: const Color(0x1F7FD1FF),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: AppPalette.panelBorder),
+                  ),
+                  child: Text(
+                    'ALTA DE EMPLEADO',
+                    style: textTheme.labelMedium?.copyWith(
+                      color: AppPalette.cyan,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.1,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Ingresar nuevo empleado',
+                  style: textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Mantiene la misma identidad visual del login, pero enfocado en altas rapidas y claras.',
+                  style: textTheme.bodyMedium?.copyWith(
+                    color: AppPalette.textMuted,
+                  ),
+                ),
+                const SizedBox(height: 22),
+                _field(
+                  controller: _fullNameController,
+                  label: 'Nombre completo',
                   validator: (value) {
                     if (value == null || value.trim().isEmpty) {
                       return 'Ingresa el nombre completo.';
@@ -111,13 +160,10 @@ class _CreateEmployeeDialogState extends State<CreateEmployeeDialog> {
                   },
                 ),
                 const SizedBox(height: 16),
-                TextFormField(
+                _field(
                   controller: _emailController,
+                  label: 'Correo',
                   keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(
-                    labelText: 'Correo',
-                    border: OutlineInputBorder(),
-                  ),
                   validator: (value) {
                     if (value == null || value.trim().isEmpty) {
                       return 'Ingresa el correo.';
@@ -126,29 +172,25 @@ class _CreateEmployeeDialogState extends State<CreateEmployeeDialog> {
                   },
                 ),
                 const SizedBox(height: 16),
-                TextFormField(
+                _field(
                   controller: _phoneController,
+                  label: 'Telefono',
                   keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    labelText: 'Telefono',
-                    border: OutlineInputBorder(),
-                  ),
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<UserRole>(
                   initialValue: _selectedRole,
-                  decoration: const InputDecoration(
-                    labelText: 'Rol',
-                    border: OutlineInputBorder(),
-                  ),
+                  dropdownColor: AppPalette.storm,
+                  style: const TextStyle(color: AppPalette.textPrimary),
+                  decoration: const InputDecoration(labelText: 'Rol'),
                   items: UserRole.values
                       .map(
                         (role) => DropdownMenuItem<UserRole>(
                           value: role,
-                          child: Text(role.name),
+                          child: Text(role.displayName),
                         ),
                       )
-                      .toList(),
+                      .toList(growable: false),
                   onChanged: (value) {
                     if (value == null) {
                       return;
@@ -161,10 +203,9 @@ class _CreateEmployeeDialogState extends State<CreateEmployeeDialog> {
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
                   initialValue: _selectedBranchId,
-                  decoration: const InputDecoration(
-                    labelText: 'Sucursal',
-                    border: OutlineInputBorder(),
-                  ),
+                  dropdownColor: AppPalette.storm,
+                  style: const TextStyle(color: AppPalette.textPrimary),
+                  decoration: const InputDecoration(labelText: 'Sucursal'),
                   items: branches
                       .map(
                         (branch) => DropdownMenuItem<String>(
@@ -172,7 +213,7 @@ class _CreateEmployeeDialogState extends State<CreateEmployeeDialog> {
                           child: Text(branch.name),
                         ),
                       )
-                      .toList(),
+                      .toList(growable: false),
                   onChanged: branches.isEmpty
                       ? null
                       : (value) {
@@ -188,13 +229,10 @@ class _CreateEmployeeDialogState extends State<CreateEmployeeDialog> {
                   },
                 ),
                 const SizedBox(height: 16),
-                TextFormField(
+                _field(
                   controller: _passwordController,
+                  label: 'Contrasena temporal',
                   obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Contrasena temporal',
-                    border: OutlineInputBorder(),
-                  ),
                   validator: (value) {
                     if (value == null || value.isEmpty) {
                       return 'Ingresa una contrasena.';
@@ -206,13 +244,10 @@ class _CreateEmployeeDialogState extends State<CreateEmployeeDialog> {
                   },
                 ),
                 const SizedBox(height: 16),
-                TextFormField(
+                _field(
                   controller: _confirmPasswordController,
+                  label: 'Confirmar contrasena',
                   obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Confirmar contrasena',
-                    border: OutlineInputBorder(),
-                  ),
                   validator: (value) {
                     if (value != _passwordController.text) {
                       return 'Las contrasenas no coinciden.';
@@ -220,21 +255,54 @@ class _CreateEmployeeDialogState extends State<CreateEmployeeDialog> {
                     return null;
                   },
                 ),
+                const SizedBox(height: 22),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: AppPalette.panelBorder),
+                          foregroundColor: AppPalette.textPrimary,
+                          padding: const EdgeInsets.symmetric(vertical: 18),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                        ),
+                        child: const Text('Cancelar'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: branches.isEmpty ? null : _submit,
+                        child: const Text('Crear empleado'),
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancelar'),
-        ),
-        FilledButton(
-          onPressed: branches.isEmpty ? null : _submit,
-          child: const Text('Crear empleado'),
-        ),
-      ],
+    );
+  }
+
+  Widget _field({
+    required TextEditingController controller,
+    required String label,
+    TextInputType? keyboardType,
+    bool obscureText = false,
+    String? Function(String?)? validator,
+  }) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      obscureText: obscureText,
+      style: const TextStyle(color: AppPalette.textPrimary),
+      decoration: InputDecoration(labelText: label),
+      validator: validator,
     );
   }
 }

@@ -4,16 +4,18 @@ import 'package:firebase_core/firebase_core.dart';
 
 import '../../inventory/data/repositories.dart';
 import '../../inventory/domain/models.dart';
+import '../../inventory/domain/role_permissions.dart';
 
 class AuthService {
   AuthService({
     required FirebaseAuth auth,
     required FirebaseFirestore firestore,
     EmployeeAccountCreator? employeeAccountCreator,
-  })  : _auth = auth,
-        users = UserRepository(firestore),
-        catalog = CatalogRepository(firestore),
-        _employeeAccountCreator = employeeAccountCreator ?? FirebaseEmployeeAccountCreator();
+  }) : _auth = auth,
+       users = UserRepository(firestore),
+       catalog = CatalogRepository(firestore),
+       _employeeAccountCreator =
+           employeeAccountCreator ?? FirebaseEmployeeAccountCreator();
 
   final FirebaseAuth _auth;
   final EmployeeAccountCreator _employeeAccountCreator;
@@ -27,10 +29,7 @@ class AuthService {
 
   Stream<AppUser?> watchProfile(String uid) => users.watchUser(uid);
 
-  Future<void> signIn({
-    required String email,
-    required String password,
-  }) async {
+  Future<void> signIn({required String email, required String password}) async {
     try {
       await _auth.signInWithEmailAndPassword(
         email: email.trim(),
@@ -52,7 +51,7 @@ class AuthService {
     required UserRole role,
     String phone = '',
   }) async {
-    if (currentUser.role != UserRole.admin) {
+    if (!currentUser.can(AppPermission.manageEmployees)) {
       throw const AuthException('Solo un administrador puede crear empleados.');
     }
 
@@ -87,7 +86,9 @@ class AuthService {
       await createdAccount.complete();
     } catch (_) {
       await createdAccount.rollback();
-      throw const AuthException('La cuenta se creo en Authentication, pero fallo el perfil en Firestore.');
+      throw const AuthException(
+        'La cuenta se creo en Authentication, pero fallo el perfil en Firestore.',
+      );
     }
   }
 
@@ -202,8 +203,8 @@ class CreatedEmployeeAccount {
     required this.uid,
     required Future<void> Function() completeAction,
     required Future<void> Function() rollbackAction,
-  })  : _completeAction = completeAction,
-        _rollbackAction = rollbackAction;
+  }) : _completeAction = completeAction,
+       _rollbackAction = rollbackAction;
 
   final String uid;
   final Future<void> Function() _completeAction;

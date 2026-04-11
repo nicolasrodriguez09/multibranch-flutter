@@ -4,19 +4,20 @@ import '../../../core/firestore_collections.dart';
 import '../data/repositories.dart';
 import '../data/sample_seed_data.dart';
 import '../domain/models.dart';
+import '../domain/role_permissions.dart';
 
 class InventoryWorkflowService {
   InventoryWorkflowService({
     required FirebaseFirestore firestore,
     DateTime Function()? clock,
-  })  : _firestore = firestore,
-        _clock = clock ?? DateTime.now,
-        users = UserRepository(firestore),
-        catalog = CatalogRepository(firestore),
-        inventories = InventoryRepository(firestore),
-        reservations = ReservationRepository(firestore),
-        transfers = TransferRepository(firestore),
-        system = SystemRepository(firestore);
+  }) : _firestore = firestore,
+       _clock = clock ?? DateTime.now,
+       users = UserRepository(firestore),
+       catalog = CatalogRepository(firestore),
+       inventories = InventoryRepository(firestore),
+       reservations = ReservationRepository(firestore),
+       transfers = TransferRepository(firestore),
+       system = SystemRepository(firestore);
 
   final FirebaseFirestore _firestore;
   final DateTime Function() _clock;
@@ -37,7 +38,29 @@ class InventoryWorkflowService {
   CollectionReference<Map<String, dynamic>> get _notificationsCollection =>
       _firestore.collection(FirestoreCollections.notifications);
 
-  Future<void> seedMasterData() async {
+  void _ensurePermission(AppUser actorUser, AppPermission permission) {
+    if (actorUser.can(permission)) {
+      return;
+    }
+
+    throw InventoryException(
+      'El rol ${actorUser.role.displayName} no tiene permiso para ${permission.label.toLowerCase()}.',
+    );
+  }
+
+  void _ensureBranchAccess(AppUser actorUser, String branchId) {
+    if (actorUser.canAccessBranch(branchId)) {
+      return;
+    }
+
+    throw const InventoryException(
+      'No puedes operar sobre una sucursal diferente a la asignada.',
+    );
+  }
+
+  Future<void> seedMasterData({required AppUser actorUser}) async {
+    _ensurePermission(actorUser, AppPermission.seedMasterData);
+
     final now = _clock();
     final seed = SampleSeedData.build(now);
     final batch = _firestore.batch();
@@ -82,30 +105,64 @@ class InventoryWorkflowService {
       );
     }
 
+    for (final reservation in seed.reservations) {
+      batch.set(
+        _reservationsCollection.doc(reservation.id),
+        reservation.toFirestore(),
+        SetOptions(merge: true),
+      );
+    }
+
+    for (final transfer in seed.transfers) {
+      batch.set(
+        _transfersCollection.doc(transfer.id),
+        transfer.toFirestore(),
+        SetOptions(merge: true),
+      );
+    }
+
+    for (final syncLog in seed.syncLogs) {
+      batch.set(
+        _firestore.collection(FirestoreCollections.syncLogs).doc(syncLog.id),
+        syncLog.toFirestore(),
+        SetOptions(merge: true),
+      );
+    }
+
     await batch.commit();
   }
 
   Future<InventoryItem> setInventoryStock({
+    required AppUser actorUser,
     required String branchId,
     required String productId,
-    required String actorUserId,
     required int stock,
     int? minimumStock,
   }) async {
+    _ensurePermission(actorUser, AppPermission.manageInventory);
+    _ensureBranchAccess(actorUser, branchId);
+
     final now = _clock();
-    final inventoryRef = _inventoriesCollection.doc(inventories.inventoryId(branchId, productId));
+    final inventoryRef = _inventoriesCollection.doc(
+      inventories.inventoryId(branchId, productId),
+    );
 
     return _firestore.runTransaction((transaction) async {
       final inventorySnapshot = await transaction.get(inventoryRef);
       if (!inventorySnapshot.exists) {
-        throw const InventoryException('El inventario no existe para la sucursal y producto indicados.');
+        throw const InventoryException(
+          'El inventario no existe para la sucursal y producto indicados.',
+        );
       }
 
-      final inventory = InventoryItem.fromFirestore(inventorySnapshot.id, inventorySnapshot.data()!);
+      final inventory = InventoryItem.fromFirestore(
+        inventorySnapshot.id,
+        inventorySnapshot.data()!,
+      );
       final updatedInventory = inventory.recalculate(
         stock: stock,
         minimumStock: minimumStock,
-        updatedBy: actorUserId,
+        updatedBy: actorUser.id,
         updatedAt: now,
         lastMovementAt: now,
       );
@@ -116,30 +173,42 @@ class InventoryWorkflowService {
   }
 
   Future<Reservation> createReservation({
+    required AppUser actorUser,
     required String branchId,
     required String productId,
-    required String actorUserId,
     required String customerName,
     required String customerPhone,
     required int quantity,
     required Duration expiresIn,
   }) async {
+    _ensurePermission(actorUser, AppPermission.createReservation);
+    _ensureBranchAccess(actorUser, branchId);
+
     if (quantity <= 0) {
-      throw const InventoryException('La cantidad reservada debe ser mayor que cero.');
+      throw const InventoryException(
+        'La cantidad reservada debe ser mayor que cero.',
+      );
     }
 
     final now = _clock();
     final expiresAt = now.add(expiresIn);
-    final inventoryRef = _inventoriesCollection.doc(inventories.inventoryId(branchId, productId));
+    final inventoryRef = _inventoriesCollection.doc(
+      inventories.inventoryId(branchId, productId),
+    );
     final reservationRef = _reservationsCollection.doc();
 
     return _firestore.runTransaction((transaction) async {
       final inventorySnapshot = await transaction.get(inventoryRef);
       if (!inventorySnapshot.exists) {
-        throw const InventoryException('No existe inventario para la sucursal y producto indicados.');
+        throw const InventoryException(
+          'No existe inventario para la sucursal y producto indicados.',
+        );
       }
 
-      final inventory = InventoryItem.fromFirestore(inventorySnapshot.id, inventorySnapshot.data()!);
+      final inventory = InventoryItem.fromFirestore(
+        inventorySnapshot.id,
+        inventorySnapshot.data()!,
+      );
 
       if (!inventory.isActive) {
         throw const InventoryException('El inventario se encuentra inactivo.');
@@ -153,7 +222,7 @@ class InventoryWorkflowService {
 
       final updatedInventory = inventory.recalculate(
         reservedStock: inventory.reservedStock + quantity,
-        updatedBy: actorUserId,
+        updatedBy: actorUser.id,
         updatedAt: now,
         lastMovementAt: now,
       );
@@ -169,7 +238,7 @@ class InventoryWorkflowService {
         customerPhone: customerPhone,
         quantity: quantity,
         status: ReservationStatus.active,
-        reservedBy: actorUserId,
+        reservedBy: actorUser.id,
         expiresAt: expiresAt,
         createdAt: now,
         updatedAt: now,
@@ -183,10 +252,12 @@ class InventoryWorkflowService {
   }
 
   Future<Reservation> updateReservationStatus({
+    required AppUser actorUser,
     required String reservationId,
-    required String actorUserId,
     required ReservationStatus nextStatus,
   }) async {
+    _ensurePermission(actorUser, AppPermission.updateReservation);
+
     if (nextStatus == ReservationStatus.active) {
       throw const InventoryException('La reserva ya se crea en estado activo.');
     }
@@ -200,31 +271,50 @@ class InventoryWorkflowService {
         throw const InventoryException('La reserva no existe.');
       }
 
-      final reservation = Reservation.fromFirestore(reservationSnapshot.id, reservationSnapshot.data()!);
+      final reservation = Reservation.fromFirestore(
+        reservationSnapshot.id,
+        reservationSnapshot.data()!,
+      );
+      _ensureBranchAccess(actorUser, reservation.branchId);
+
       if (reservation.status != ReservationStatus.active) {
-        throw InventoryException('Solo se pueden cerrar reservas activas. Estado actual: ${reservation.status.name}.');
+        throw InventoryException(
+          'Solo se pueden cerrar reservas activas. Estado actual: ${reservation.status.name}.',
+        );
       }
 
-      final inventoryRef =
-          _inventoriesCollection.doc(inventories.inventoryId(reservation.branchId, reservation.productId));
+      final inventoryRef = _inventoriesCollection.doc(
+        inventories.inventoryId(reservation.branchId, reservation.productId),
+      );
       final inventorySnapshot = await transaction.get(inventoryRef);
       if (!inventorySnapshot.exists) {
-        throw const InventoryException('El inventario vinculado a la reserva no existe.');
+        throw const InventoryException(
+          'El inventario vinculado a la reserva no existe.',
+        );
       }
 
-      final inventory = InventoryItem.fromFirestore(inventorySnapshot.id, inventorySnapshot.data()!);
-      final updatedReservedStock = inventory.reservedStock - reservation.quantity;
+      final inventory = InventoryItem.fromFirestore(
+        inventorySnapshot.id,
+        inventorySnapshot.data()!,
+      );
+      final updatedReservedStock =
+          inventory.reservedStock - reservation.quantity;
       if (updatedReservedStock < 0) {
-        throw const InventoryException('La reserva no puede liberar mas stock del que esta reservado.');
+        throw const InventoryException(
+          'La reserva no puede liberar mas stock del que esta reservado.',
+        );
       }
 
       final updatedInventory = inventory.recalculate(
         reservedStock: updatedReservedStock,
-        updatedBy: actorUserId,
+        updatedBy: actorUser.id,
         updatedAt: now,
         lastMovementAt: now,
       );
-      final updatedReservation = reservation.copyWith(status: nextStatus, updatedAt: now);
+      final updatedReservation = reservation.copyWith(
+        status: nextStatus,
+        updatedAt: now,
+      );
 
       transaction.set(inventoryRef, updatedInventory.toFirestore());
       transaction.set(reservationRef, updatedReservation.toFirestore());
@@ -234,19 +324,26 @@ class InventoryWorkflowService {
   }
 
   Future<TransferRequest> requestTransfer({
+    required AppUser actorUser,
     required String productId,
     required String fromBranchId,
     required String toBranchId,
-    required String actorUserId,
     required int quantity,
     required String reason,
     String notes = '',
   }) async {
+    _ensurePermission(actorUser, AppPermission.requestTransfer);
+    _ensureBranchAccess(actorUser, fromBranchId);
+
     if (quantity <= 0) {
-      throw const InventoryException('La cantidad del traslado debe ser mayor que cero.');
+      throw const InventoryException(
+        'La cantidad del traslado debe ser mayor que cero.',
+      );
     }
     if (fromBranchId == toBranchId) {
-      throw const InventoryException('El origen y destino del traslado no pueden ser iguales.');
+      throw const InventoryException(
+        'El origen y destino del traslado no pueden ser iguales.',
+      );
     }
 
     final product = await catalog.fetchProduct(productId);
@@ -254,7 +351,9 @@ class InventoryWorkflowService {
     final destinationBranch = await catalog.fetchBranch(toBranchId);
 
     if (product == null || sourceBranch == null || destinationBranch == null) {
-      throw const InventoryException('No se encontro el producto o alguna de las sucursales del traslado.');
+      throw const InventoryException(
+        'No se encontro el producto o alguna de las sucursales del traslado.',
+      );
     }
 
     final now = _clock();
@@ -268,7 +367,7 @@ class InventoryWorkflowService {
       fromBranchName: sourceBranch.name,
       toBranchId: destinationBranch.id,
       toBranchName: destinationBranch.name,
-      requestedBy: actorUserId,
+      requestedBy: actorUser.id,
       approvedBy: null,
       quantity: quantity,
       status: TransferStatus.pending,
@@ -286,9 +385,11 @@ class InventoryWorkflowService {
   }
 
   Future<TransferRequest> approveTransfer({
+    required AppUser actorUser,
     required String transferId,
-    required String approverUserId,
   }) async {
+    _ensurePermission(actorUser, AppPermission.approveTransfer);
+
     final now = _clock();
     final transferRef = _transfersCollection.doc(transferId);
     final notificationRef = _notificationsCollection.doc();
@@ -299,32 +400,50 @@ class InventoryWorkflowService {
         throw const InventoryException('El traslado no existe.');
       }
 
-      final transfer = TransferRequest.fromFirestore(transferSnapshot.id, transferSnapshot.data()!);
+      final transfer = TransferRequest.fromFirestore(
+        transferSnapshot.id,
+        transferSnapshot.data()!,
+      );
+      _ensureBranchAccess(actorUser, transfer.fromBranchId);
+
       if (transfer.status != TransferStatus.pending) {
-        throw InventoryException('Solo se pueden aprobar traslados pendientes. Estado: ${transfer.status.firestoreValue}.');
+        throw InventoryException(
+          'Solo se pueden aprobar traslados pendientes. Estado: ${transfer.status.firestoreValue}.',
+        );
       }
 
-      final sourceInventoryRef =
-          _inventoriesCollection.doc(inventories.inventoryId(transfer.fromBranchId, transfer.productId));
-      final destinationInventoryRef =
-          _inventoriesCollection.doc(inventories.inventoryId(transfer.toBranchId, transfer.productId));
+      final sourceInventoryRef = _inventoriesCollection.doc(
+        inventories.inventoryId(transfer.fromBranchId, transfer.productId),
+      );
+      final destinationInventoryRef = _inventoriesCollection.doc(
+        inventories.inventoryId(transfer.toBranchId, transfer.productId),
+      );
 
       final sourceInventorySnapshot = await transaction.get(sourceInventoryRef);
       if (!sourceInventorySnapshot.exists) {
-        throw const InventoryException('No existe inventario origen para este traslado.');
+        throw const InventoryException(
+          'No existe inventario origen para este traslado.',
+        );
       }
 
-      final sourceInventory =
-          InventoryItem.fromFirestore(sourceInventorySnapshot.id, sourceInventorySnapshot.data()!);
+      final sourceInventory = InventoryItem.fromFirestore(
+        sourceInventorySnapshot.id,
+        sourceInventorySnapshot.data()!,
+      );
       if (sourceInventory.availableStock < transfer.quantity) {
         throw InventoryException(
           'Stock insuficiente para aprobar el traslado. Disponible: ${sourceInventory.availableStock}.',
         );
       }
 
-      final destinationInventorySnapshot = await transaction.get(destinationInventoryRef);
+      final destinationInventorySnapshot = await transaction.get(
+        destinationInventoryRef,
+      );
       final destinationInventory = destinationInventorySnapshot.exists
-          ? InventoryItem.fromFirestore(destinationInventorySnapshot.id, destinationInventorySnapshot.data()!)
+          ? InventoryItem.fromFirestore(
+              destinationInventorySnapshot.id,
+              destinationInventorySnapshot.data()!,
+            )
           : InventoryItem.create(
               branchId: transfer.toBranchId,
               branchName: transfer.toBranchName,
@@ -335,7 +454,7 @@ class InventoryWorkflowService {
               reservedStock: 0,
               incomingStock: 0,
               minimumStock: 0,
-              updatedBy: approverUserId,
+              updatedBy: actorUser.id,
               isActive: true,
               updatedAt: now,
               lastMovementAt: now,
@@ -343,19 +462,19 @@ class InventoryWorkflowService {
 
       final updatedSourceInventory = sourceInventory.recalculate(
         stock: sourceInventory.stock - transfer.quantity,
-        updatedBy: approverUserId,
+        updatedBy: actorUser.id,
         updatedAt: now,
         lastMovementAt: now,
       );
       final updatedDestinationInventory = destinationInventory.recalculate(
         incomingStock: destinationInventory.incomingStock + transfer.quantity,
-        updatedBy: approverUserId,
+        updatedBy: actorUser.id,
         updatedAt: now,
         lastMovementAt: now,
       );
       final updatedTransfer = transfer.copyWith(
         status: TransferStatus.approved,
-        approvedBy: approverUserId,
+        approvedBy: actorUser.id,
         approvedAt: now,
         updatedAt: now,
       );
@@ -364,7 +483,8 @@ class InventoryWorkflowService {
         id: notificationRef.id,
         userId: transfer.requestedBy,
         title: 'Solicitud aprobada',
-        message: 'El traslado ${transfer.id} fue aprobado y quedo listo para despacho.',
+        message:
+            'El traslado ${transfer.id} fue aprobado y quedo listo para despacho.',
         type: 'transfer',
         referenceId: transfer.id,
         isRead: false,
@@ -372,7 +492,11 @@ class InventoryWorkflowService {
       );
 
       transaction.set(sourceInventoryRef, updatedSourceInventory.toFirestore());
-      transaction.set(destinationInventoryRef, updatedDestinationInventory.toFirestore(), SetOptions(merge: true));
+      transaction.set(
+        destinationInventoryRef,
+        updatedDestinationInventory.toFirestore(),
+        SetOptions(merge: true),
+      );
       transaction.set(transferRef, updatedTransfer.toFirestore());
       transaction.set(notificationRef, notification.toFirestore());
 
@@ -381,9 +505,11 @@ class InventoryWorkflowService {
   }
 
   Future<TransferRequest> markTransferInTransit({
+    required AppUser actorUser,
     required String transferId,
-    required String actorUserId,
   }) async {
+    _ensurePermission(actorUser, AppPermission.dispatchTransfer);
+
     final now = _clock();
     final transferRef = _transfersCollection.doc(transferId);
 
@@ -393,16 +519,23 @@ class InventoryWorkflowService {
         throw const InventoryException('El traslado no existe.');
       }
 
-      final transfer = TransferRequest.fromFirestore(transferSnapshot.id, transferSnapshot.data()!);
+      final transfer = TransferRequest.fromFirestore(
+        transferSnapshot.id,
+        transferSnapshot.data()!,
+      );
+      _ensureBranchAccess(actorUser, transfer.fromBranchId);
+
       if (transfer.status != TransferStatus.approved) {
-        throw InventoryException('Solo se puede despachar un traslado aprobado. Estado: ${transfer.status.firestoreValue}.');
+        throw InventoryException(
+          'Solo se puede despachar un traslado aprobado. Estado: ${transfer.status.firestoreValue}.',
+        );
       }
 
       final updatedTransfer = transfer.copyWith(
         status: TransferStatus.inTransit,
         shippedAt: now,
         updatedAt: now,
-        approvedBy: transfer.approvedBy ?? actorUserId,
+        approvedBy: transfer.approvedBy ?? actorUser.id,
       );
 
       transaction.set(transferRef, updatedTransfer.toFirestore());
@@ -411,9 +544,11 @@ class InventoryWorkflowService {
   }
 
   Future<TransferRequest> receiveTransfer({
+    required AppUser actorUser,
     required String transferId,
-    required String actorUserId,
   }) async {
+    _ensurePermission(actorUser, AppPermission.receiveTransfer);
+
     final now = _clock();
     final transferRef = _transfersCollection.doc(transferId);
     final notificationRef = _notificationsCollection.doc();
@@ -424,29 +559,45 @@ class InventoryWorkflowService {
         throw const InventoryException('El traslado no existe.');
       }
 
-      final transfer = TransferRequest.fromFirestore(transferSnapshot.id, transferSnapshot.data()!);
+      final transfer = TransferRequest.fromFirestore(
+        transferSnapshot.id,
+        transferSnapshot.data()!,
+      );
+      _ensureBranchAccess(actorUser, transfer.toBranchId);
+
       if (transfer.status != TransferStatus.inTransit) {
-        throw InventoryException('Solo se puede recibir un traslado en transito. Estado: ${transfer.status.firestoreValue}.');
+        throw InventoryException(
+          'Solo se puede recibir un traslado en transito. Estado: ${transfer.status.firestoreValue}.',
+        );
       }
 
-      final destinationInventoryRef =
-          _inventoriesCollection.doc(inventories.inventoryId(transfer.toBranchId, transfer.productId));
-      final destinationInventorySnapshot = await transaction.get(destinationInventoryRef);
+      final destinationInventoryRef = _inventoriesCollection.doc(
+        inventories.inventoryId(transfer.toBranchId, transfer.productId),
+      );
+      final destinationInventorySnapshot = await transaction.get(
+        destinationInventoryRef,
+      );
       if (!destinationInventorySnapshot.exists) {
-        throw const InventoryException('No existe inventario destino para recibir el traslado.');
+        throw const InventoryException(
+          'No existe inventario destino para recibir el traslado.',
+        );
       }
 
-      final destinationInventory =
-          InventoryItem.fromFirestore(destinationInventorySnapshot.id, destinationInventorySnapshot.data()!);
+      final destinationInventory = InventoryItem.fromFirestore(
+        destinationInventorySnapshot.id,
+        destinationInventorySnapshot.data()!,
+      );
 
       if (destinationInventory.incomingStock < transfer.quantity) {
-        throw const InventoryException('El inventario destino no tiene stock en camino suficiente para recibir.');
+        throw const InventoryException(
+          'El inventario destino no tiene stock en camino suficiente para recibir.',
+        );
       }
 
       final updatedDestinationInventory = destinationInventory.recalculate(
         stock: destinationInventory.stock + transfer.quantity,
         incomingStock: destinationInventory.incomingStock - transfer.quantity,
-        updatedBy: actorUserId,
+        updatedBy: actorUser.id,
         updatedAt: now,
         lastMovementAt: now,
       );
@@ -460,14 +611,18 @@ class InventoryWorkflowService {
         id: notificationRef.id,
         userId: transfer.requestedBy,
         title: 'Traslado recibido',
-        message: 'El traslado ${transfer.id} fue recibido en ${transfer.toBranchName}.',
+        message:
+            'El traslado ${transfer.id} fue recibido en ${transfer.toBranchName}.',
         type: 'transfer',
         referenceId: transfer.id,
         isRead: false,
         createdAt: now,
       );
 
-      transaction.set(destinationInventoryRef, updatedDestinationInventory.toFirestore());
+      transaction.set(
+        destinationInventoryRef,
+        updatedDestinationInventory.toFirestore(),
+      );
       transaction.set(transferRef, updatedTransfer.toFirestore());
       transaction.set(notificationRef, notification.toFirestore());
 

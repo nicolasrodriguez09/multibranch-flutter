@@ -14,7 +14,9 @@ void main() {
   setUp(() {
     firestore = FakeFirebaseFirestore();
     auth = MockFirebaseAuth();
-    employeeAccountCreator = _FakeEmployeeAccountCreator(uid: 'employee_uid_001');
+    employeeAccountCreator = _FakeEmployeeAccountCreator(
+      uid: 'employee_uid_001',
+    );
     authService = AuthService(
       auth: auth,
       firestore: firestore,
@@ -71,6 +73,40 @@ void main() {
     expect(createdUser.branchId, 'branch_001');
     expect(employeeAccountCreator.completeCalls, 1);
     expect(employeeAccountCreator.rollbackCalls, 0);
+  });
+
+  test('non admin cannot create employee accounts', () async {
+    final seller = AppUser(
+      id: 'seller_uid',
+      fullName: 'Juan Seller',
+      email: 'seller@empresa.com',
+      phone: '',
+      role: UserRole.seller,
+      branchId: 'branch_001',
+      isActive: true,
+      photoUrl: '',
+      lastLoginAt: null,
+      createdAt: DateTime.fromMillisecondsSinceEpoch(0),
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+    );
+
+    expect(
+      () => authService.createEmployee(
+        currentUser: seller,
+        fullName: 'Laura Supervisor',
+        email: 'laura@empresa.com',
+        password: '123456',
+        branchId: 'branch_001',
+        role: UserRole.supervisor,
+      ),
+      throwsA(
+        isA<AuthException>().having(
+          (error) => error.message,
+          'message',
+          'Solo un administrador puede crear empleados.',
+        ),
+      ),
+    );
   });
 }
 

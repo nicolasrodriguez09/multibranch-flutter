@@ -18,6 +18,14 @@ service cloud.firestore {
       return get(userDocumentPath()).data;
     }
 
+    function isSeller() {
+      return hasUserProfile() && currentUser().role == 'seller';
+    }
+
+    function isSupervisor() {
+      return hasUserProfile() && currentUser().role == 'supervisor';
+    }
+
     function isAdmin() {
       return hasUserProfile() && currentUser().role == 'admin';
     }
@@ -30,10 +38,47 @@ service cloud.firestore {
       return isAdmin() || hasSameBranch(branchId);
     }
 
+    function canManageInventory(branchId) {
+      return isAdmin() || (isSupervisor() && hasSameBranch(branchId));
+    }
+
+    function canHandleReservation(branchId) {
+      return isAdmin() || ((isSeller() || isSupervisor()) && hasSameBranch(branchId));
+    }
+
+    function canRequestTransfer(branchId) {
+      return isAdmin() || ((isSeller() || isSupervisor()) && hasSameBranch(branchId));
+    }
+
+    function canApproveTransfer(branchId) {
+      return isAdmin() || (isSupervisor() && hasSameBranch(branchId));
+    }
+
+    function canDispatchTransfer(branchId) {
+      return isAdmin() || (isSupervisor() && hasSameBranch(branchId));
+    }
+
+    function canReceiveTransfer(branchId) {
+      return isAdmin() || ((isSeller() || isSupervisor()) && hasSameBranch(branchId));
+    }
+
     function validInventoryDerivedFields(data) {
       return data.availableStock == data.stock - data.reservedStock
         && data.isLowStock == (data.availableStock <= data.minimumStock)
         && data.updatedBy == request.auth.uid;
+    }
+
+    function sameTransferScope(data, existing) {
+      return data.productId == existing.productId
+        && data.productName == existing.productName
+        && data.sku == existing.sku
+        && data.fromBranchId == existing.fromBranchId
+        && data.fromBranchName == existing.fromBranchName
+        && data.toBranchId == existing.toBranchId
+        && data.toBranchName == existing.toBranchName
+        && data.requestedBy == existing.requestedBy
+        && data.quantity == existing.quantity
+        && data.reason == existing.reason;
     }
 
     match /users/{userId} {
@@ -67,10 +112,10 @@ service cloud.firestore {
     match /inventories/{inventoryId} {
       allow read: if canReadBranch(resource.data.branchId);
       allow create: if signedIn()
-        && canReadBranch(request.resource.data.branchId)
+        && canManageInventory(request.resource.data.branchId)
         && validInventoryDerivedFields(request.resource.data);
       allow update: if signedIn()
-        && canReadBranch(request.resource.data.branchId)
+        && canManageInventory(request.resource.data.branchId)
         && validInventoryDerivedFields(request.resource.data)
         && request.resource.data.branchId == resource.data.branchId
         && request.resource.data.productId == resource.data.productId;
@@ -83,10 +128,30 @@ service cloud.firestore {
         || canReadBranch(resource.data.toBranchId);
       allow create: if hasUserProfile()
         && request.resource.data.requestedBy == request.auth.uid
-        && (isAdmin() || hasSameBranch(request.resource.data.toBranchId));
-      allow update: if isAdmin()
-        || canReadBranch(resource.data.fromBranchId)
-        || canReadBranch(resource.data.toBranchId);
+        && request.resource.data.status == 'pending'
+        && canRequestTransfer(request.resource.data.fromBranchId)
+        && request.resource.data.fromBranchId != request.resource.data.toBranchId;
+      allow update: if hasUserProfile()
+        && sameTransferScope(request.resource.data, resource.data)
+        && (
+          isAdmin()
+          || (
+            resource.data.status == 'pending'
+            && request.resource.data.status == 'approved'
+            && request.resource.data.approvedBy == request.auth.uid
+            && canApproveTransfer(resource.data.fromBranchId)
+          )
+          || (
+            resource.data.status == 'approved'
+            && request.resource.data.status == 'in_transit'
+            && canDispatchTransfer(resource.data.fromBranchId)
+          )
+          || (
+            resource.data.status == 'in_transit'
+            && request.resource.data.status == 'received'
+            && canReceiveTransfer(resource.data.toBranchId)
+          )
+        );
       allow delete: if isAdmin();
     }
 
@@ -94,13 +159,14 @@ service cloud.firestore {
       allow read: if isAdmin() || canReadBranch(resource.data.branchId);
       allow create: if hasUserProfile()
         && request.resource.data.reservedBy == request.auth.uid
-        && (isAdmin() || hasSameBranch(request.resource.data.branchId));
-      allow update: if isAdmin() || canReadBranch(resource.data.branchId);
+        && canHandleReservation(request.resource.data.branchId);
+      allow update: if hasUserProfile() && canHandleReservation(resource.data.branchId);
       allow delete: if isAdmin();
     }
 
     match /sync_logs/{syncId} {
-      allow read, write: if isAdmin();
+      allow read: if isAdmin() || canReadBranch(resource.data.branchId);
+      allow write: if isAdmin();
     }
 
     match /notifications/{notificationId} {
