@@ -12,6 +12,7 @@ enum AppPermission {
   dispatchTransfer('Despachar traslados'),
   receiveTransfer('Recibir traslados'),
   manageInventory('Ajustar inventario'),
+  manageBranches('Gestionar sucursales'),
   viewMasterData('Ver catalogo maestro'),
   manageEmployees('Gestionar empleados'),
   seedMasterData('Inicializar la base maestra'),

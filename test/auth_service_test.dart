@@ -66,13 +66,82 @@ void main() {
     );
 
     final createdUser = await authService.users.fetchUser('employee_uid_001');
+    final auditLogs = await firestore
+        .collection('audit_logs')
+        .where('action', isEqualTo: 'employee_created')
+        .get();
 
     expect(createdUser, isNotNull);
     expect(createdUser!.email, 'laura@empresa.com');
     expect(createdUser.role, UserRole.supervisor);
     expect(createdUser.branchId, 'branch_001');
+    expect(auditLogs.docs, hasLength(1));
+    expect(auditLogs.docs.first.data()['actorUserId'], 'admin_uid');
+    expect(
+      auditLogs.docs.first.data()['metadata']['assignedRole'],
+      'supervisor',
+    );
     expect(employeeAccountCreator.completeCalls, 1);
     expect(employeeAccountCreator.rollbackCalls, 0);
+  });
+
+  test('admin can update employee role and audit the change', () async {
+    await firestore.collection('branches').doc('branch_001').set({
+      'name': 'Sucursal Centro',
+      'code': 'CENTRO',
+      'address': 'Av. Principal 123',
+      'city': 'Quito',
+      'phone': '022222222',
+      'email': 'centro@empresa.com',
+      'location': {'lat': 0.0, 'lng': 0.0},
+      'isActive': true,
+      'managerName': 'Maria Lopez',
+      'openingHours': '08:00-18:00',
+      'lastSyncAt': null,
+      'createdAt': null,
+      'updatedAt': null,
+    });
+    await firestore.collection('users').doc('employee_uid_001').set({
+      'fullName': 'Laura Supervisor',
+      'email': 'laura@empresa.com',
+      'phone': '',
+      'role': 'seller',
+      'branchId': 'branch_001',
+      'isActive': true,
+      'photoUrl': '',
+      'lastLoginAt': null,
+      'createdAt': null,
+      'updatedAt': null,
+    });
+
+    final admin = AppUser(
+      id: 'admin_uid',
+      fullName: 'Ana Admin',
+      email: 'admin@empresa.com',
+      phone: '',
+      role: UserRole.admin,
+      branchId: 'branch_001',
+      isActive: true,
+      photoUrl: '',
+      lastLoginAt: null,
+      createdAt: DateTime.fromMillisecondsSinceEpoch(0),
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+    );
+
+    final updatedUser = await authService.updateEmployeeRole(
+      currentUser: admin,
+      userId: 'employee_uid_001',
+      role: UserRole.supervisor,
+    );
+    final auditLogs = await firestore
+        .collection('audit_logs')
+        .where('action', isEqualTo: 'employee_role_updated')
+        .get();
+
+    expect(updatedUser.role, UserRole.supervisor);
+    expect(auditLogs.docs, hasLength(1));
+    expect(auditLogs.docs.first.data()['metadata']['previousRole'], 'seller');
+    expect(auditLogs.docs.first.data()['metadata']['newRole'], 'supervisor');
   });
 
   test('non admin cannot create employee accounts', () async {

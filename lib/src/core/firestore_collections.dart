@@ -8,4 +8,5 @@ abstract final class FirestoreCollections {
   static const reservations = 'reservations';
   static const syncLogs = 'sync_logs';
   static const notifications = 'notifications';
+  static const auditLogs = 'audit_logs';
 }

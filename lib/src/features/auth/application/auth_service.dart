@@ -14,6 +14,7 @@ class AuthService {
   }) : _auth = auth,
        users = UserRepository(firestore),
        catalog = CatalogRepository(firestore),
+       system = SystemRepository(firestore),
        _employeeAccountCreator =
            employeeAccountCreator ?? FirebaseEmployeeAccountCreator();
 
@@ -22,6 +23,7 @@ class AuthService {
 
   final UserRepository users;
   final CatalogRepository catalog;
+  final SystemRepository system;
 
   Stream<User?> authStateChanges() => _auth.authStateChanges();
 
@@ -83,13 +85,102 @@ class AuthService {
 
     try {
       await users.upsertUser(profile);
+      await system.addAuditLog(
+        AuditLog(
+          id: DateTime.now().microsecondsSinceEpoch.toString(),
+          action: 'employee_created',
+          entityType: 'user',
+          entityId: profile.id,
+          entityLabel: profile.fullName,
+          actorUserId: currentUser.id,
+          actorName: currentUser.fullName,
+          actorRole: currentUser.role,
+          message:
+              'Creo un empleado y asigno el rol ${role.displayName.toLowerCase()}.',
+          metadata: {
+            'email': profile.email,
+            'assignedRole': role.name,
+            'branchId': branchId,
+          },
+          createdAt: now,
+          branchId: branchId,
+          branchName: branch.name,
+        ),
+      );
       await createdAccount.complete();
     } catch (_) {
+      await users.deleteUser(profile.id);
       await createdAccount.rollback();
       throw const AuthException(
-        'La cuenta se creo en Authentication, pero fallo el perfil en Firestore.',
+        'La cuenta se creo en Authentication, pero fallo el perfil o la auditoria en Firestore.',
       );
     }
+  }
+
+  Future<AppUser> updateEmployeeRole({
+    required AppUser currentUser,
+    required String userId,
+    required UserRole role,
+    String? branchId,
+  }) async {
+    if (!currentUser.can(AppPermission.manageEmployees)) {
+      throw const AuthException(
+        'Solo un administrador puede actualizar roles de empleados.',
+      );
+    }
+
+    final targetUser = await users.fetchUser(userId);
+    if (targetUser == null) {
+      throw const AuthException('El empleado seleccionado no existe.');
+    }
+
+    final targetBranchId = branchId ?? targetUser.branchId;
+    final branch = await catalog.fetchBranch(targetBranchId);
+    if (branch == null) {
+      throw const AuthException('La sucursal seleccionada no existe.');
+    }
+
+    final now = DateTime.now().toUtc();
+    final updatedUser = AppUser(
+      id: targetUser.id,
+      fullName: targetUser.fullName,
+      email: targetUser.email,
+      phone: targetUser.phone,
+      role: role,
+      branchId: targetBranchId,
+      isActive: targetUser.isActive,
+      photoUrl: targetUser.photoUrl,
+      lastLoginAt: targetUser.lastLoginAt,
+      createdAt: targetUser.createdAt,
+      updatedAt: now,
+    );
+
+    await users.upsertUser(updatedUser);
+    await system.addAuditLog(
+      AuditLog(
+        id: DateTime.now().microsecondsSinceEpoch.toString(),
+        action: 'employee_role_updated',
+        entityType: 'user',
+        entityId: updatedUser.id,
+        entityLabel: updatedUser.fullName,
+        actorUserId: currentUser.id,
+        actorName: currentUser.fullName,
+        actorRole: currentUser.role,
+        message:
+            'Actualizo el rol del empleado a ${role.displayName.toLowerCase()}.',
+        metadata: {
+          'previousRole': targetUser.role.name,
+          'newRole': role.name,
+          'previousBranchId': targetUser.branchId,
+          'newBranchId': targetBranchId,
+        },
+        createdAt: now,
+        branchId: targetBranchId,
+        branchName: branch.name,
+      ),
+    );
+
+    return updatedUser;
   }
 
   String _mapAuthError(FirebaseAuthException error) {

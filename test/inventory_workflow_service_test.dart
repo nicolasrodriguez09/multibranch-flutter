@@ -22,6 +22,10 @@ void main() {
     'seedMasterData creates master documents and computed inventory fields',
     () async {
       await service.seedMasterData(actorUser: sampleData.users.first);
+      final auditLogs = await firestore
+          .collection('audit_logs')
+          .where('action', isEqualTo: 'master_data_seeded')
+          .get();
 
       final inventory = await service.inventories.fetchInventory(
         DemoIds.branchCenter,
@@ -37,8 +41,38 @@ void main() {
       expect(inventory.isLowStock, isTrue);
       expect(lowStockInventory, isNotNull);
       expect(lowStockInventory!.isLowStock, isTrue);
+      expect(auditLogs.docs, hasLength(1));
     },
   );
+
+  test('admin can create a branch and the event is audited', () async {
+    final admin = sampleData.users.first;
+
+    final branch = await service.createBranch(
+      actorUser: admin,
+      name: 'Sucursal Sur',
+      code: 'SUR-003',
+      address: 'Calle 45 #10',
+      city: 'Bogota',
+      phone: '3000000000',
+      email: 'sur@empresa.com',
+      managerName: 'Julian Perez',
+      openingHours: '09:00-18:00',
+      latitude: 4.61,
+      longitude: -74.08,
+    );
+    final storedBranch = await service.catalog.fetchBranch(branch.id);
+    final auditLogs = await firestore
+        .collection('audit_logs')
+        .where('action', isEqualTo: 'branch_created')
+        .get();
+
+    expect(storedBranch, isNotNull);
+    expect(storedBranch!.code, 'SUR_003');
+    expect(auditLogs.docs, hasLength(1));
+    expect(auditLogs.docs.first.data()['entityId'], branch.id);
+    expect(auditLogs.docs.first.data()['actorUserId'], admin.id);
+  });
 
   test(
     'createReservation and completeReservation keep inventory consistent',

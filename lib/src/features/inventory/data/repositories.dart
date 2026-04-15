@@ -17,6 +17,10 @@ class UserRepository {
         .set(user.toFirestore(), SetOptions(merge: true));
   }
 
+  Future<void> deleteUser(String uid) async {
+    await _collection.doc(uid).delete();
+  }
+
   Future<AppUser?> fetchUser(String uid) async {
     final snapshot = await _collection.doc(uid).get();
     final data = snapshot.data();
@@ -330,6 +334,8 @@ class SystemRepository {
       _firestore.collection(FirestoreCollections.syncLogs);
   CollectionReference<Map<String, dynamic>> get _notifications =>
       _firestore.collection(FirestoreCollections.notifications);
+  CollectionReference<Map<String, dynamic>> get _auditLogs =>
+      _firestore.collection(FirestoreCollections.auditLogs);
 
   Future<void> addSyncLog(SyncLog syncLog) async {
     await _syncLogs.doc(syncLog.id).set(syncLog.toFirestore());
@@ -337,6 +343,10 @@ class SystemRepository {
 
   Future<void> addNotification(AppNotification notification) async {
     await _notifications.doc(notification.id).set(notification.toFirestore());
+  }
+
+  Future<void> addAuditLog(AuditLog auditLog) async {
+    await _auditLogs.doc(auditLog.id).set(auditLog.toFirestore());
   }
 
   Stream<List<SyncLog>> watchRecentSyncLogs({int limit = 6}) {
@@ -372,6 +382,18 @@ class SystemRepository {
         .map(
           (snapshot) => snapshot.docs
               .map((doc) => AppNotification.fromFirestore(doc.id, doc.data()))
+              .toList(),
+        );
+  }
+
+  Stream<List<AuditLog>> watchRecentAuditLogs({int limit = 8}) {
+    return _auditLogs
+        .orderBy('createdAt', descending: true)
+        .limit(limit)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => AuditLog.fromFirestore(doc.id, doc.data()))
               .toList(),
         );
   }

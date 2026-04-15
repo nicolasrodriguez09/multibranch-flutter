@@ -37,6 +37,8 @@ class InventoryWorkflowService {
       _firestore.collection(FirestoreCollections.transfers);
   CollectionReference<Map<String, dynamic>> get _notificationsCollection =>
       _firestore.collection(FirestoreCollections.notifications);
+  CollectionReference<Map<String, dynamic>> get _auditLogsCollection =>
+      _firestore.collection(FirestoreCollections.auditLogs);
 
   void _ensurePermission(AppUser actorUser, AppPermission permission) {
     if (actorUser.can(permission)) {
@@ -58,12 +60,54 @@ class InventoryWorkflowService {
     );
   }
 
+  AuditLog _buildAuditLog({
+    required AppUser actorUser,
+    required String action,
+    required String entityType,
+    required String entityId,
+    required String entityLabel,
+    required String message,
+    Map<String, String> metadata = const {},
+    String? branchId,
+    String? branchName,
+  }) {
+    final now = _clock();
+    return AuditLog(
+      id: _auditLogsCollection.doc().id,
+      action: action,
+      entityType: entityType,
+      entityId: entityId,
+      entityLabel: entityLabel,
+      actorUserId: actorUser.id,
+      actorName: actorUser.fullName,
+      actorRole: actorUser.role,
+      message: message,
+      metadata: metadata,
+      createdAt: now,
+      branchId: branchId,
+      branchName: branchName,
+    );
+  }
+
   Future<void> seedMasterData({required AppUser actorUser}) async {
     _ensurePermission(actorUser, AppPermission.seedMasterData);
 
     final now = _clock();
     final seed = SampleSeedData.build(now);
     final batch = _firestore.batch();
+    final auditLog = _buildAuditLog(
+      actorUser: actorUser,
+      action: 'master_data_seeded',
+      entityType: 'system',
+      entityId: 'master_data',
+      entityLabel: 'Base inicial',
+      message: 'Creo o actualizo la base de datos inicial.',
+      metadata: {
+        'branches': '${seed.branches.length}',
+        'products': '${seed.products.length}',
+        'users': '${seed.users.length}',
+      },
+    );
 
     for (final user in seed.users) {
       batch.set(
@@ -129,7 +173,77 @@ class InventoryWorkflowService {
       );
     }
 
+    batch.set(_auditLogsCollection.doc(auditLog.id), auditLog.toFirestore());
+
     await batch.commit();
+  }
+
+  Future<Branch> createBranch({
+    required AppUser actorUser,
+    required String name,
+    required String code,
+    required String address,
+    required String city,
+    String phone = '',
+    String email = '',
+    String managerName = '',
+    String openingHours = '08:00-18:00',
+    double latitude = 0,
+    double longitude = 0,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.manageBranches);
+
+    final normalizedCode = _normalizeBranchCode(code);
+    final branchId = 'branch_$normalizedCode';
+    final existingBranch = await catalog.fetchBranch(branchId);
+    if (existingBranch != null) {
+      throw InventoryException(
+        'Ya existe una sucursal registrada con el codigo $normalizedCode.',
+      );
+    }
+
+    final now = _clock();
+    final branch = Branch(
+      id: branchId,
+      name: name.trim(),
+      code: normalizedCode.toUpperCase(),
+      address: address.trim(),
+      city: city.trim(),
+      phone: phone.trim(),
+      email: email.trim(),
+      location: BranchLocation(lat: latitude, lng: longitude),
+      isActive: true,
+      managerName: managerName.trim(),
+      openingHours: openingHours.trim(),
+      lastSyncAt: null,
+      createdAt: now,
+      updatedAt: now,
+    );
+    final auditLog = _buildAuditLog(
+      actorUser: actorUser,
+      action: 'branch_created',
+      entityType: 'branch',
+      entityId: branch.id,
+      entityLabel: branch.name,
+      message: 'Registro una nueva sucursal.',
+      metadata: {
+        'code': branch.code,
+        'city': branch.city,
+        'managerName': branch.managerName,
+      },
+      branchId: branch.id,
+      branchName: branch.name,
+    );
+
+    final batch = _firestore.batch();
+    batch.set(
+      _firestore.collection(FirestoreCollections.branches).doc(branch.id),
+      branch.toFirestore(),
+    );
+    batch.set(_auditLogsCollection.doc(auditLog.id), auditLog.toFirestore());
+    await batch.commit();
+
+    return branch;
   }
 
   Future<InventoryItem> setInventoryStock({
@@ -628,5 +742,19 @@ class InventoryWorkflowService {
 
       return updatedTransfer;
     });
+  }
+
+  String _normalizeBranchCode(String value) {
+    final normalized = value.trim().toLowerCase().replaceAll(
+      RegExp(r'[^a-z0-9]+'),
+      '_',
+    );
+    final compact = normalized.replaceAll(RegExp(r'^_+|_+$'), '');
+    if (compact.isEmpty) {
+      throw const InventoryException(
+        'El codigo de la sucursal debe incluir letras o numeros.',
+      );
+    }
+    return compact;
   }
 }

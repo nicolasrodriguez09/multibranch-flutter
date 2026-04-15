@@ -1,5 +1,6 @@
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:firebase_auth_mocks/firebase_auth_mocks.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:flutter_multibranch_proyect/src/app.dart';
@@ -52,16 +53,32 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Control administrativo'), findsOneWidget);
-    expect(find.text('Acciones administrativas'), findsOneWidget);
-    expect(find.text('Resumen ejecutivo'), findsOneWidget);
-    expect(find.text('Solicitudes pendientes globales'), findsOneWidget);
-    expect(find.text('Ultimas sincronizaciones globales'), findsOneWidget);
-    expect(find.text('Crear base inicial'), findsOneWidget);
-    expect(find.text('Ingresar nuevo empleado'), findsOneWidget);
-    expect(find.text('Matriz de permisos'), findsOneWidget);
-    expect(find.text('Usuarios'), findsWidgets);
-    expect(find.text('Modulos habilitados'), findsOneWidget);
+    expect(find.text('Dashboard Administrativo'), findsOneWidget);
+    expect(find.text('Sincronizacion operativa'), findsOneWidget);
+    expect(find.text('Metricas'), findsOneWidget);
+    expect(find.text('Control administrativo'), findsNothing);
+    expect(find.text('Acciones administrativas'), findsNothing);
+    expect(find.text('Matriz de permisos'), findsNothing);
+
+    await tester.scrollUntilVisible(
+      find.text('Actualizar datos'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Solicitudes pendientes'), findsOneWidget);
+    expect(find.text('Actividad administrativa'), findsOneWidget);
+    expect(find.text('Actualizar datos'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.menu));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Menu administrativo'), findsOneWidget);
+    expect(find.text('Ingresar empleado'), findsOneWidget);
+    expect(find.text('Agregar sucursal'), findsOneWidget);
+    expect(find.text('Crear base de datos inicial'), findsOneWidget);
+    expect(find.text('Cerrar sesion'), findsOneWidget);
   });
 
   testWidgets('seller dashboard hides admin and supervisor sections', (
@@ -90,6 +107,12 @@ void main() {
 
     expect(find.text('Panel de ventas'), findsOneWidget);
     expect(find.text('Resumen comercial'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Ultimas sincronizaciones'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
     expect(find.text('Productos mas consultados'), findsOneWidget);
     expect(find.text('Productos sin stock'), findsWidgets);
     expect(find.text('Alertas de inventario bajo'), findsOneWidget);
@@ -130,6 +153,12 @@ void main() {
 
       expect(find.text('Control de sucursal'), findsOneWidget);
       expect(find.text('Resumen operativo'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Ultimas sincronizaciones'),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
       expect(find.text('Productos mas consultados'), findsOneWidget);
       expect(find.text('Productos sin stock'), findsWidgets);
       expect(find.text('Alertas de inventario bajo'), findsOneWidget);
