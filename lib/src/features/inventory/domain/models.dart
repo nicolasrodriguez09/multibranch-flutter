@@ -56,18 +56,12 @@ enum ReservationStatus {
 }
 
 class BranchLocation {
-  const BranchLocation({
-    required this.lat,
-    required this.lng,
-  });
+  const BranchLocation({required this.lat, required this.lng});
 
   final double lat;
   final double lng;
 
-  Map<String, dynamic> toFirestore() => {
-        'lat': lat,
-        'lng': lng,
-      };
+  Map<String, dynamic> toFirestore() => {'lat': lat, 'lng': lng};
 
   factory BranchLocation.fromFirestore(Map<String, dynamic> data) {
     return BranchLocation(
@@ -105,17 +99,17 @@ class AppUser {
   final DateTime updatedAt;
 
   Map<String, dynamic> toFirestore() => {
-        'fullName': fullName,
-        'email': email,
-        'phone': phone,
-        'role': role.name,
-        'branchId': branchId,
-        'isActive': isActive,
-        'photoUrl': photoUrl,
-        'lastLoginAt': writeDateTime(lastLoginAt),
-        'createdAt': writeDateTime(createdAt),
-        'updatedAt': writeDateTime(updatedAt),
-      };
+    'fullName': fullName,
+    'email': email,
+    'phone': phone,
+    'role': role.name,
+    'branchId': branchId,
+    'isActive': isActive,
+    'photoUrl': photoUrl,
+    'lastLoginAt': writeDateTime(lastLoginAt),
+    'createdAt': writeDateTime(createdAt),
+    'updatedAt': writeDateTime(updatedAt),
+  };
 
   factory AppUser.fromFirestore(String id, Map<String, dynamic> data) {
     return AppUser(
@@ -128,8 +122,12 @@ class AppUser {
       isActive: readBool(data, 'isActive'),
       photoUrl: readString(data, 'photoUrl'),
       lastLoginAt: readDateTime(data, 'lastLoginAt'),
-      createdAt: readDateTime(data, 'createdAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
-      updatedAt: readDateTime(data, 'updatedAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      createdAt:
+          readDateTime(data, 'createdAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      updatedAt:
+          readDateTime(data, 'updatedAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
     );
   }
 }
@@ -168,20 +166,20 @@ class Branch {
   final DateTime updatedAt;
 
   Map<String, dynamic> toFirestore() => {
-        'name': name,
-        'code': code,
-        'address': address,
-        'city': city,
-        'phone': phone,
-        'email': email,
-        'location': location.toFirestore(),
-        'isActive': isActive,
-        'managerName': managerName,
-        'openingHours': openingHours,
-        'lastSyncAt': writeDateTime(lastSyncAt),
-        'createdAt': writeDateTime(createdAt),
-        'updatedAt': writeDateTime(updatedAt),
-      };
+    'name': name,
+    'code': code,
+    'address': address,
+    'city': city,
+    'phone': phone,
+    'email': email,
+    'location': location.toFirestore(),
+    'isActive': isActive,
+    'managerName': managerName,
+    'openingHours': openingHours,
+    'lastSyncAt': writeDateTime(lastSyncAt),
+    'createdAt': writeDateTime(createdAt),
+    'updatedAt': writeDateTime(updatedAt),
+  };
 
   factory Branch.fromFirestore(String id, Map<String, dynamic> data) {
     return Branch(
@@ -199,8 +197,12 @@ class Branch {
       managerName: readString(data, 'managerName'),
       openingHours: readString(data, 'openingHours'),
       lastSyncAt: readDateTime(data, 'lastSyncAt'),
-      createdAt: readDateTime(data, 'createdAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
-      updatedAt: readDateTime(data, 'updatedAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      createdAt:
+          readDateTime(data, 'createdAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      updatedAt:
+          readDateTime(data, 'updatedAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
     );
   }
 }
@@ -223,12 +225,12 @@ class Category {
   final DateTime updatedAt;
 
   Map<String, dynamic> toFirestore() => {
-        'name': name,
-        'description': description,
-        'isActive': isActive,
-        'createdAt': writeDateTime(createdAt),
-        'updatedAt': writeDateTime(updatedAt),
-      };
+    'name': name,
+    'description': description,
+    'isActive': isActive,
+    'createdAt': writeDateTime(createdAt),
+    'updatedAt': writeDateTime(updatedAt),
+  };
 
   factory Category.fromFirestore(String id, Map<String, dynamic> data) {
     return Category(
@@ -236,8 +238,12 @@ class Category {
       name: readString(data, 'name'),
       description: readString(data, 'description'),
       isActive: readBool(data, 'isActive'),
-      createdAt: readDateTime(data, 'createdAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
-      updatedAt: readDateTime(data, 'updatedAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      createdAt:
+          readDateTime(data, 'createdAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      updatedAt:
+          readDateTime(data, 'updatedAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
     );
   }
 }
@@ -278,21 +284,21 @@ class Product {
   final DateTime updatedAt;
 
   Map<String, dynamic> toFirestore() => {
-        'sku': sku,
-        'barcode': barcode,
-        'name': name,
-        'description': description,
-        'categoryId': categoryId,
-        'brand': brand,
-        'imageUrl': imageUrl,
-        'price': price,
-        'cost': cost,
-        'currency': currency,
-        'tags': tags,
-        'isActive': isActive,
-        'createdAt': writeDateTime(createdAt),
-        'updatedAt': writeDateTime(updatedAt),
-      };
+    'sku': sku,
+    'barcode': barcode,
+    'name': name,
+    'description': description,
+    'categoryId': categoryId,
+    'brand': brand,
+    'imageUrl': imageUrl,
+    'price': price,
+    'cost': cost,
+    'currency': currency,
+    'tags': tags,
+    'isActive': isActive,
+    'createdAt': writeDateTime(createdAt),
+    'updatedAt': writeDateTime(updatedAt),
+  };
 
   factory Product.fromFirestore(String id, Map<String, dynamic> data) {
     return Product(
@@ -309,8 +315,12 @@ class Product {
       currency: readString(data, 'currency'),
       tags: readStringList(data, 'tags'),
       isActive: readBool(data, 'isActive'),
-      createdAt: readDateTime(data, 'createdAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
-      updatedAt: readDateTime(data, 'updatedAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      createdAt:
+          readDateTime(data, 'createdAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      updatedAt:
+          readDateTime(data, 'updatedAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
     );
   }
 }
@@ -393,7 +403,8 @@ class InventoryItem {
     );
   }
 
-  static String inventoryId(String branchId, String productId) => '${branchId}_$productId';
+  static String inventoryId(String branchId, String productId) =>
+      '${branchId}_$productId';
 
   InventoryItem recalculate({
     int? stock,
@@ -433,23 +444,23 @@ class InventoryItem {
   }
 
   Map<String, dynamic> toFirestore() => {
-        'branchId': branchId,
-        'branchName': branchName,
-        'productId': productId,
-        'productName': productName,
-        'sku': sku,
-        'stock': stock,
-        'reservedStock': reservedStock,
-        'availableStock': availableStock,
-        'incomingStock': incomingStock,
-        'minimumStock': minimumStock,
-        'lastMovementAt': writeDateTime(lastMovementAt),
-        'lastSyncAt': writeDateTime(lastSyncAt),
-        'updatedBy': updatedBy,
-        'isActive': isActive,
-        'updatedAt': writeDateTime(updatedAt),
-        'isLowStock': isLowStock,
-      };
+    'branchId': branchId,
+    'branchName': branchName,
+    'productId': productId,
+    'productName': productName,
+    'sku': sku,
+    'stock': stock,
+    'reservedStock': reservedStock,
+    'availableStock': availableStock,
+    'incomingStock': incomingStock,
+    'minimumStock': minimumStock,
+    'lastMovementAt': writeDateTime(lastMovementAt),
+    'lastSyncAt': writeDateTime(lastSyncAt),
+    'updatedBy': updatedBy,
+    'isActive': isActive,
+    'updatedAt': writeDateTime(updatedAt),
+    'isLowStock': isLowStock,
+  };
 
   factory InventoryItem.fromFirestore(String id, Map<String, dynamic> data) {
     return InventoryItem(
@@ -468,7 +479,9 @@ class InventoryItem {
       lastSyncAt: readDateTime(data, 'lastSyncAt'),
       updatedBy: readString(data, 'updatedBy'),
       isActive: readBool(data, 'isActive'),
-      updatedAt: readDateTime(data, 'updatedAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      updatedAt:
+          readDateTime(data, 'updatedAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
       isLowStock: readBool(data, 'isLowStock'),
     );
   }
@@ -550,25 +563,25 @@ class TransferRequest {
   }
 
   Map<String, dynamic> toFirestore() => {
-        'productId': productId,
-        'productName': productName,
-        'sku': sku,
-        'fromBranchId': fromBranchId,
-        'fromBranchName': fromBranchName,
-        'toBranchId': toBranchId,
-        'toBranchName': toBranchName,
-        'requestedBy': requestedBy,
-        'approvedBy': approvedBy,
-        'quantity': quantity,
-        'status': status.firestoreValue,
-        'reason': reason,
-        'notes': notes,
-        'requestedAt': writeDateTime(requestedAt),
-        'approvedAt': writeDateTime(approvedAt),
-        'shippedAt': writeDateTime(shippedAt),
-        'receivedAt': writeDateTime(receivedAt),
-        'updatedAt': writeDateTime(updatedAt),
-      };
+    'productId': productId,
+    'productName': productName,
+    'sku': sku,
+    'fromBranchId': fromBranchId,
+    'fromBranchName': fromBranchName,
+    'toBranchId': toBranchId,
+    'toBranchName': toBranchName,
+    'requestedBy': requestedBy,
+    'approvedBy': approvedBy,
+    'quantity': quantity,
+    'status': status.firestoreValue,
+    'reason': reason,
+    'notes': notes,
+    'requestedAt': writeDateTime(requestedAt),
+    'approvedAt': writeDateTime(approvedAt),
+    'shippedAt': writeDateTime(shippedAt),
+    'receivedAt': writeDateTime(receivedAt),
+    'updatedAt': writeDateTime(updatedAt),
+  };
 
   factory TransferRequest.fromFirestore(String id, Map<String, dynamic> data) {
     return TransferRequest(
@@ -586,11 +599,15 @@ class TransferRequest {
       status: TransferStatus.fromValue(readString(data, 'status')),
       reason: readString(data, 'reason'),
       notes: readString(data, 'notes'),
-      requestedAt: readDateTime(data, 'requestedAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      requestedAt:
+          readDateTime(data, 'requestedAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
       approvedAt: readDateTime(data, 'approvedAt'),
       shippedAt: readDateTime(data, 'shippedAt'),
       receivedAt: readDateTime(data, 'receivedAt'),
-      updatedAt: readDateTime(data, 'updatedAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      updatedAt:
+          readDateTime(data, 'updatedAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
     );
   }
 }
@@ -628,10 +645,7 @@ class Reservation {
   final DateTime createdAt;
   final DateTime updatedAt;
 
-  Reservation copyWith({
-    ReservationStatus? status,
-    DateTime? updatedAt,
-  }) {
+  Reservation copyWith({ReservationStatus? status, DateTime? updatedAt}) {
     return Reservation(
       id: id,
       productId: productId,
@@ -651,20 +665,20 @@ class Reservation {
   }
 
   Map<String, dynamic> toFirestore() => {
-        'productId': productId,
-        'productName': productName,
-        'sku': sku,
-        'branchId': branchId,
-        'branchName': branchName,
-        'customerName': customerName,
-        'customerPhone': customerPhone,
-        'quantity': quantity,
-        'status': status.name,
-        'reservedBy': reservedBy,
-        'expiresAt': writeDateTime(expiresAt),
-        'createdAt': writeDateTime(createdAt),
-        'updatedAt': writeDateTime(updatedAt),
-      };
+    'productId': productId,
+    'productName': productName,
+    'sku': sku,
+    'branchId': branchId,
+    'branchName': branchName,
+    'customerName': customerName,
+    'customerPhone': customerPhone,
+    'quantity': quantity,
+    'status': status.name,
+    'reservedBy': reservedBy,
+    'expiresAt': writeDateTime(expiresAt),
+    'createdAt': writeDateTime(createdAt),
+    'updatedAt': writeDateTime(updatedAt),
+  };
 
   factory Reservation.fromFirestore(String id, Map<String, dynamic> data) {
     return Reservation(
@@ -679,9 +693,15 @@ class Reservation {
       quantity: readInt(data, 'quantity'),
       status: ReservationStatus.fromValue(readString(data, 'status')),
       reservedBy: readString(data, 'reservedBy'),
-      expiresAt: readDateTime(data, 'expiresAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
-      createdAt: readDateTime(data, 'createdAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
-      updatedAt: readDateTime(data, 'updatedAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      expiresAt:
+          readDateTime(data, 'expiresAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      createdAt:
+          readDateTime(data, 'createdAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      updatedAt:
+          readDateTime(data, 'updatedAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
     );
   }
 }
@@ -712,16 +732,16 @@ class SyncLog {
   final DateTime createdAt;
 
   Map<String, dynamic> toFirestore() => {
-        'branchId': branchId,
-        'branchName': branchName,
-        'type': type,
-        'status': status,
-        'recordsProcessed': recordsProcessed,
-        'startedAt': writeDateTime(startedAt),
-        'finishedAt': writeDateTime(finishedAt),
-        'message': message,
-        'createdAt': writeDateTime(createdAt),
-      };
+    'branchId': branchId,
+    'branchName': branchName,
+    'type': type,
+    'status': status,
+    'recordsProcessed': recordsProcessed,
+    'startedAt': writeDateTime(startedAt),
+    'finishedAt': writeDateTime(finishedAt),
+    'message': message,
+    'createdAt': writeDateTime(createdAt),
+  };
 
   factory SyncLog.fromFirestore(String id, Map<String, dynamic> data) {
     return SyncLog(
@@ -731,10 +751,16 @@ class SyncLog {
       type: readString(data, 'type'),
       status: readString(data, 'status'),
       recordsProcessed: readInt(data, 'recordsProcessed'),
-      startedAt: readDateTime(data, 'startedAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
-      finishedAt: readDateTime(data, 'finishedAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      startedAt:
+          readDateTime(data, 'startedAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      finishedAt:
+          readDateTime(data, 'finishedAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
       message: readString(data, 'message'),
-      createdAt: readDateTime(data, 'createdAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      createdAt:
+          readDateTime(data, 'createdAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
     );
   }
 }
@@ -761,14 +787,14 @@ class AppNotification {
   final DateTime createdAt;
 
   Map<String, dynamic> toFirestore() => {
-        'userId': userId,
-        'title': title,
-        'message': message,
-        'type': type,
-        'referenceId': referenceId,
-        'isRead': isRead,
-        'createdAt': writeDateTime(createdAt),
-      };
+    'userId': userId,
+    'title': title,
+    'message': message,
+    'type': type,
+    'referenceId': referenceId,
+    'isRead': isRead,
+    'createdAt': writeDateTime(createdAt),
+  };
 
   factory AppNotification.fromFirestore(String id, Map<String, dynamic> data) {
     return AppNotification(
@@ -779,7 +805,81 @@ class AppNotification {
       type: readString(data, 'type'),
       referenceId: readString(data, 'referenceId'),
       isRead: readBool(data, 'isRead'),
-      createdAt: readDateTime(data, 'createdAt') ?? DateTime.fromMillisecondsSinceEpoch(0),
+      createdAt:
+          readDateTime(data, 'createdAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+    );
+  }
+}
+
+class AuditLog {
+  const AuditLog({
+    required this.id,
+    required this.action,
+    required this.entityType,
+    required this.entityId,
+    required this.entityLabel,
+    required this.actorUserId,
+    required this.actorName,
+    required this.actorRole,
+    required this.message,
+    required this.metadata,
+    required this.createdAt,
+    this.branchId,
+    this.branchName,
+  });
+
+  final String id;
+  final String action;
+  final String entityType;
+  final String entityId;
+  final String entityLabel;
+  final String actorUserId;
+  final String actorName;
+  final UserRole actorRole;
+  final String message;
+  final Map<String, String> metadata;
+  final DateTime createdAt;
+  final String? branchId;
+  final String? branchName;
+
+  Map<String, dynamic> toFirestore() => {
+    'action': action,
+    'entityType': entityType,
+    'entityId': entityId,
+    'entityLabel': entityLabel,
+    'actorUserId': actorUserId,
+    'actorName': actorName,
+    'actorRole': actorRole.name,
+    'message': message,
+    'metadata': metadata,
+    'createdAt': writeDateTime(createdAt),
+    'branchId': branchId,
+    'branchName': branchName,
+  };
+
+  factory AuditLog.fromFirestore(String id, Map<String, dynamic> data) {
+    final rawMetadata =
+        (data['metadata'] as Map?)?.cast<Object?, Object?>() ?? const {};
+    return AuditLog(
+      id: id,
+      action: readString(data, 'action'),
+      entityType: readString(data, 'entityType'),
+      entityId: readString(data, 'entityId'),
+      entityLabel: readString(data, 'entityLabel'),
+      actorUserId: readString(data, 'actorUserId'),
+      actorName: readString(data, 'actorName'),
+      actorRole: UserRole.fromValue(readString(data, 'actorRole')),
+      message: readString(data, 'message'),
+      metadata: rawMetadata.map(
+        (key, value) =>
+            MapEntry(key?.toString() ?? '', value?.toString() ?? ''),
+      ),
+      createdAt:
+          readDateTime(data, 'createdAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      branchId: data['branchId'] as String?,
+      branchName: data['branchName'] as String?,
     );
   }
 }

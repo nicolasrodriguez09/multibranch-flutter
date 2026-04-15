@@ -12,7 +12,13 @@ class UserRepository {
       _firestore.collection(FirestoreCollections.users);
 
   Future<void> upsertUser(AppUser user) async {
-    await _collection.doc(user.id).set(user.toFirestore(), SetOptions(merge: true));
+    await _collection
+        .doc(user.id)
+        .set(user.toFirestore(), SetOptions(merge: true));
+  }
+
+  Future<void> deleteUser(String uid) async {
+    await _collection.doc(uid).delete();
   }
 
   Future<AppUser?> fetchUser(String uid) async {
@@ -38,7 +44,11 @@ class UserRepository {
     return _collection
         .orderBy('fullName')
         .snapshots()
-        .map((snapshot) => snapshot.docs.map((doc) => AppUser.fromFirestore(doc.id, doc.data())).toList());
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => AppUser.fromFirestore(doc.id, doc.data()))
+              .toList(),
+        );
   }
 }
 
@@ -55,15 +65,21 @@ class CatalogRepository {
       _firestore.collection(FirestoreCollections.products);
 
   Future<void> upsertBranch(Branch branch) async {
-    await _branches.doc(branch.id).set(branch.toFirestore(), SetOptions(merge: true));
+    await _branches
+        .doc(branch.id)
+        .set(branch.toFirestore(), SetOptions(merge: true));
   }
 
   Future<void> upsertCategory(Category category) async {
-    await _categories.doc(category.id).set(category.toFirestore(), SetOptions(merge: true));
+    await _categories
+        .doc(category.id)
+        .set(category.toFirestore(), SetOptions(merge: true));
   }
 
   Future<void> upsertProduct(Product product) async {
-    await _products.doc(product.id).set(product.toFirestore(), SetOptions(merge: true));
+    await _products
+        .doc(product.id)
+        .set(product.toFirestore(), SetOptions(merge: true));
   }
 
   Future<Branch?> fetchBranch(String branchId) async {
@@ -88,21 +104,33 @@ class CatalogRepository {
     return _branches
         .orderBy('name')
         .snapshots()
-        .map((snapshot) => snapshot.docs.map((doc) => Branch.fromFirestore(doc.id, doc.data())).toList());
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => Branch.fromFirestore(doc.id, doc.data()))
+              .toList(),
+        );
   }
 
   Stream<List<Product>> watchProducts() {
     return _products
         .orderBy('name')
         .snapshots()
-        .map((snapshot) => snapshot.docs.map((doc) => Product.fromFirestore(doc.id, doc.data())).toList());
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => Product.fromFirestore(doc.id, doc.data()))
+              .toList(),
+        );
   }
 
   Stream<List<Category>> watchCategories() {
     return _categories
         .orderBy('name')
         .snapshots()
-        .map((snapshot) => snapshot.docs.map((doc) => Category.fromFirestore(doc.id, doc.data())).toList());
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => Category.fromFirestore(doc.id, doc.data()))
+              .toList(),
+        );
   }
 }
 
@@ -114,14 +142,22 @@ class InventoryRepository {
   CollectionReference<Map<String, dynamic>> get _collection =>
       _firestore.collection(FirestoreCollections.inventories);
 
-  String inventoryId(String branchId, String productId) => InventoryItem.inventoryId(branchId, productId);
+  String inventoryId(String branchId, String productId) =>
+      InventoryItem.inventoryId(branchId, productId);
 
   Future<void> upsertInventory(InventoryItem inventory) async {
-    await _collection.doc(inventory.id).set(inventory.toFirestore(), SetOptions(merge: true));
+    await _collection
+        .doc(inventory.id)
+        .set(inventory.toFirestore(), SetOptions(merge: true));
   }
 
-  Future<InventoryItem?> fetchInventory(String branchId, String productId) async {
-    final snapshot = await _collection.doc(inventoryId(branchId, productId)).get();
+  Future<InventoryItem?> fetchInventory(
+    String branchId,
+    String productId,
+  ) async {
+    final snapshot = await _collection
+        .doc(inventoryId(branchId, productId))
+        .get();
     final data = snapshot.data();
     if (data == null) {
       return null;
@@ -134,7 +170,11 @@ class InventoryRepository {
         .where('branchId', isEqualTo: branchId)
         .orderBy('productName')
         .snapshots()
-        .map((snapshot) => snapshot.docs.map((doc) => InventoryItem.fromFirestore(doc.id, doc.data())).toList());
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => InventoryItem.fromFirestore(doc.id, doc.data()))
+              .toList(),
+        );
   }
 
   Stream<List<InventoryItem>> watchLowStock(String branchId) {
@@ -142,7 +182,11 @@ class InventoryRepository {
         .where('branchId', isEqualTo: branchId)
         .where('isLowStock', isEqualTo: true)
         .snapshots()
-        .map((snapshot) => snapshot.docs.map((doc) => InventoryItem.fromFirestore(doc.id, doc.data())).toList());
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => InventoryItem.fromFirestore(doc.id, doc.data()))
+              .toList(),
+        );
   }
 
   Stream<List<InventoryItem>> watchProductInventory(String productId) {
@@ -150,7 +194,11 @@ class InventoryRepository {
         .where('productId', isEqualTo: productId)
         .orderBy('availableStock')
         .snapshots()
-        .map((snapshot) => snapshot.docs.map((doc) => InventoryItem.fromFirestore(doc.id, doc.data())).toList());
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => InventoryItem.fromFirestore(doc.id, doc.data()))
+              .toList(),
+        );
   }
 }
 
@@ -171,12 +219,27 @@ class ReservationRepository {
     return Reservation.fromFirestore(snapshot.id, data);
   }
 
+  Stream<List<Reservation>> watchReservations() {
+    return _collection
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => Reservation.fromFirestore(doc.id, doc.data()))
+              .toList(),
+        );
+  }
+
   Stream<List<Reservation>> watchBranchReservations(String branchId) {
     return _collection
         .where('branchId', isEqualTo: branchId)
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .map((snapshot) => snapshot.docs.map((doc) => Reservation.fromFirestore(doc.id, doc.data())).toList());
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => Reservation.fromFirestore(doc.id, doc.data()))
+              .toList(),
+        );
   }
 
   Stream<List<Reservation>> watchActiveReservations(String branchId) {
@@ -184,7 +247,11 @@ class ReservationRepository {
         .where('branchId', isEqualTo: branchId)
         .where('status', isEqualTo: ReservationStatus.active.name)
         .snapshots()
-        .map((snapshot) => snapshot.docs.map((doc) => Reservation.fromFirestore(doc.id, doc.data())).toList());
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => Reservation.fromFirestore(doc.id, doc.data()))
+              .toList(),
+        );
   }
 
   Future<Reservation?> fetchFirstActiveReservation(String branchId) async {
@@ -224,7 +291,11 @@ class TransferRepository {
     return _collection
         .orderBy('requestedAt', descending: true)
         .snapshots()
-        .map((snapshot) => snapshot.docs.map((doc) => TransferRequest.fromFirestore(doc.id, doc.data())).toList());
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => TransferRequest.fromFirestore(doc.id, doc.data()))
+              .toList(),
+        );
   }
 
   Stream<List<TransferRequest>> watchPendingTransfers() {
@@ -232,7 +303,11 @@ class TransferRepository {
         .where('status', isEqualTo: TransferStatus.pending.firestoreValue)
         .orderBy('requestedAt', descending: true)
         .snapshots()
-        .map((snapshot) => snapshot.docs.map((doc) => TransferRequest.fromFirestore(doc.id, doc.data())).toList());
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => TransferRequest.fromFirestore(doc.id, doc.data()))
+              .toList(),
+        );
   }
 
   Future<TransferRequest?> fetchFirstByStatus(TransferStatus status) async {
@@ -259,6 +334,8 @@ class SystemRepository {
       _firestore.collection(FirestoreCollections.syncLogs);
   CollectionReference<Map<String, dynamic>> get _notifications =>
       _firestore.collection(FirestoreCollections.notifications);
+  CollectionReference<Map<String, dynamic>> get _auditLogs =>
+      _firestore.collection(FirestoreCollections.auditLogs);
 
   Future<void> addSyncLog(SyncLog syncLog) async {
     await _syncLogs.doc(syncLog.id).set(syncLog.toFirestore());
@@ -268,14 +345,56 @@ class SystemRepository {
     await _notifications.doc(notification.id).set(notification.toFirestore());
   }
 
+  Future<void> addAuditLog(AuditLog auditLog) async {
+    await _auditLogs.doc(auditLog.id).set(auditLog.toFirestore());
+  }
+
+  Stream<List<SyncLog>> watchRecentSyncLogs({int limit = 6}) {
+    return _syncLogs
+        .orderBy('createdAt', descending: true)
+        .limit(limit)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => SyncLog.fromFirestore(doc.id, doc.data()))
+              .toList(),
+        );
+  }
+
+  Stream<List<SyncLog>> watchBranchSyncLogs(String branchId, {int limit = 6}) {
+    return _syncLogs
+        .where('branchId', isEqualTo: branchId)
+        .orderBy('createdAt', descending: true)
+        .limit(limit)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => SyncLog.fromFirestore(doc.id, doc.data()))
+              .toList(),
+        );
+  }
+
   Stream<List<AppNotification>> watchNotifications(String userId) {
     return _notifications
         .where('userId', isEqualTo: userId)
         .orderBy('createdAt', descending: true)
         .snapshots()
         .map(
-          (snapshot) =>
-              snapshot.docs.map((doc) => AppNotification.fromFirestore(doc.id, doc.data())).toList(),
+          (snapshot) => snapshot.docs
+              .map((doc) => AppNotification.fromFirestore(doc.id, doc.data()))
+              .toList(),
+        );
+  }
+
+  Stream<List<AuditLog>> watchRecentAuditLogs({int limit = 8}) {
+    return _auditLogs
+        .orderBy('createdAt', descending: true)
+        .limit(limit)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => AuditLog.fromFirestore(doc.id, doc.data()))
+              .toList(),
         );
   }
 }
