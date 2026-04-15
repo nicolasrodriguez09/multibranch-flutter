@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../core/firestore_collections.dart';
@@ -5,6 +7,59 @@ import '../data/repositories.dart';
 import '../data/sample_seed_data.dart';
 import '../domain/models.dart';
 import '../domain/role_permissions.dart';
+
+class DailyTransferRequestMetric {
+  const DailyTransferRequestMetric({required this.day, required this.count});
+
+  final DateTime day;
+  final int count;
+}
+
+class OutOfStockConsultationMetric {
+  const OutOfStockConsultationMetric({
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.interestScore,
+    required this.reservationHits,
+    required this.transferHits,
+    required this.availableStock,
+    required this.lastMovementAt,
+  });
+
+  final String productId;
+  final String productName;
+  final String sku;
+  final int interestScore;
+  final int reservationHits;
+  final int transferHits;
+  final int availableStock;
+  final DateTime? lastMovementAt;
+}
+
+class BranchOperationalStats {
+  const BranchOperationalStats({
+    required this.lowStockCount,
+    required this.outOfStockCount,
+    required this.pendingTransfersCount,
+    required this.activeReservationsCount,
+    required this.transferRequestsToday,
+    required this.averageApiResponseTime,
+    required this.transferRequestsByDay,
+    required this.outOfStockConsultations,
+  });
+
+  final int lowStockCount;
+  final int outOfStockCount;
+  final int pendingTransfersCount;
+  final int activeReservationsCount;
+  final int transferRequestsToday;
+  final Duration averageApiResponseTime;
+  final List<DailyTransferRequestMetric> transferRequestsByDay;
+  final List<OutOfStockConsultationMetric> outOfStockConsultations;
+
+  int get consultedOutOfStockCount => outOfStockConsultations.length;
+}
 
 class InventoryWorkflowService {
   InventoryWorkflowService({
@@ -244,6 +299,76 @@ class InventoryWorkflowService {
     await batch.commit();
 
     return branch;
+  }
+
+  Stream<BranchOperationalStats> watchOperationalStats({
+    required AppUser actorUser,
+    required String branchId,
+  }) {
+    _ensurePermission(actorUser, AppPermission.viewOperationalMetrics);
+    _ensureBranchAccess(actorUser, branchId);
+
+    final controller = StreamController<BranchOperationalStats>();
+    var inventoriesState = const <InventoryItem>[];
+    var reservationsState = const <Reservation>[];
+    var transfersState = const <TransferRequest>[];
+    var syncLogsState = const <SyncLog>[];
+    var inventoriesReady = false;
+    var reservationsReady = false;
+    var transfersReady = false;
+    var syncLogsReady = false;
+
+    void emit() {
+      if (controller.isClosed) {
+        return;
+      }
+      if (!inventoriesReady ||
+          !reservationsReady ||
+          !transfersReady ||
+          !syncLogsReady) {
+        return;
+      }
+      controller.add(
+        _buildOperationalStats(
+          inventories: inventoriesState,
+          reservations: reservationsState,
+          transfers: transfersState,
+          syncLogs: syncLogsState,
+          branchId: branchId,
+        ),
+      );
+    }
+
+    final subscriptions = <StreamSubscription<Object?>>[
+      inventories.watchBranchInventory(branchId).listen((items) {
+        inventoriesState = items;
+        inventoriesReady = true;
+        emit();
+      }, onError: controller.addError),
+      reservations.watchBranchReservations(branchId).listen((items) {
+        reservationsState = items;
+        reservationsReady = true;
+        emit();
+      }, onError: controller.addError),
+      transfers.watchTransfers().listen((items) {
+        transfersState = items;
+        transfersReady = true;
+        emit();
+      }, onError: controller.addError),
+      system.watchBranchSyncLogs(branchId, limit: 30).listen((items) {
+        syncLogsState = items;
+        syncLogsReady = true;
+        emit();
+      }, onError: controller.addError),
+    ];
+
+    controller.onCancel = () async {
+      for (final subscription in subscriptions) {
+        await subscription.cancel();
+      }
+    };
+
+    return controller.stream;
   }
 
   Future<InventoryItem> setInventoryStock({
@@ -756,5 +881,203 @@ class InventoryWorkflowService {
       );
     }
     return compact;
+  }
+
+  BranchOperationalStats _buildOperationalStats({
+    required List<InventoryItem> inventories,
+    required List<Reservation> reservations,
+    required List<TransferRequest> transfers,
+    required List<SyncLog> syncLogs,
+    required String branchId,
+  }) {
+    final lowStockCount = inventories
+        .where((item) => item.isLowStock && item.availableStock > 0)
+        .length;
+    final outOfStockCount = inventories
+        .where((item) => item.availableStock <= 0)
+        .length;
+    final activeReservationsCount = reservations
+        .where((item) => item.status == ReservationStatus.active)
+        .length;
+    final branchTransfers = transfers
+        .where((item) => _isTransferForBranch(item, branchId))
+        .toList(growable: false);
+    final pendingTransfersCount = branchTransfers
+        .where((item) => item.status == TransferStatus.pending)
+        .length;
+
+    final transferRequestsByDay = _buildTransferRequestsByDay(branchTransfers);
+    final transferRequestsToday = transferRequestsByDay.isEmpty
+        ? 0
+        : transferRequestsByDay.last.count;
+
+    return BranchOperationalStats(
+      lowStockCount: lowStockCount,
+      outOfStockCount: outOfStockCount,
+      pendingTransfersCount: pendingTransfersCount,
+      activeReservationsCount: activeReservationsCount,
+      transferRequestsToday: transferRequestsToday,
+      averageApiResponseTime: _averageApiResponseTime(syncLogs),
+      transferRequestsByDay: transferRequestsByDay,
+      outOfStockConsultations: _buildOutOfStockConsultations(
+        inventories: inventories,
+        reservations: reservations,
+        transfers: branchTransfers,
+      ),
+    );
+  }
+
+  List<DailyTransferRequestMetric> _buildTransferRequestsByDay(
+    List<TransferRequest> transfers,
+  ) {
+    final now = _clock();
+    final startDay = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    ).subtract(const Duration(days: 4));
+    final counts = <DateTime, int>{};
+
+    for (var index = 0; index < 5; index++) {
+      final day = startDay.add(Duration(days: index));
+      counts[DateTime(day.year, day.month, day.day)] = 0;
+    }
+
+    for (final transfer in transfers) {
+      final requestedDay = DateTime(
+        transfer.requestedAt.year,
+        transfer.requestedAt.month,
+        transfer.requestedAt.day,
+      );
+      if (requestedDay.isBefore(startDay)) {
+        continue;
+      }
+      counts.update(requestedDay, (value) => value + 1, ifAbsent: () => 1);
+    }
+
+    final days = counts.keys.toList(growable: false)..sort();
+    return days
+        .map(
+          (day) =>
+              DailyTransferRequestMetric(day: day, count: counts[day] ?? 0),
+        )
+        .toList(growable: false);
+  }
+
+  Duration _averageApiResponseTime(List<SyncLog> syncLogs) {
+    if (syncLogs.isEmpty) {
+      return Duration.zero;
+    }
+
+    var totalMilliseconds = 0;
+    for (final log in syncLogs) {
+      totalMilliseconds += log.finishedAt
+          .difference(log.startedAt)
+          .inMilliseconds;
+    }
+
+    return Duration(
+      milliseconds: (totalMilliseconds / syncLogs.length).round(),
+    );
+  }
+
+  List<OutOfStockConsultationMetric> _buildOutOfStockConsultations({
+    required List<InventoryItem> inventories,
+    required List<Reservation> reservations,
+    required List<TransferRequest> transfers,
+  }) {
+    final reservationHits = <String, int>{};
+    for (final reservation in reservations) {
+      if (reservation.status != ReservationStatus.active) {
+        continue;
+      }
+      reservationHits.update(
+        reservation.productId,
+        (value) => value + 1,
+        ifAbsent: () => 1,
+      );
+    }
+
+    final transferHits = <String, int>{};
+    for (final transfer in transfers) {
+      if (transfer.status == TransferStatus.rejected ||
+          transfer.status == TransferStatus.cancelled) {
+        continue;
+      }
+      transferHits.update(
+        transfer.productId,
+        (value) => value + 1,
+        ifAbsent: () => 1,
+      );
+    }
+
+    final ranked =
+        inventories
+            .where((item) => item.availableStock <= 0)
+            .map((inventory) {
+              final reservationsForProduct =
+                  reservationHits[inventory.productId] ?? 0;
+              final transfersForProduct =
+                  transferHits[inventory.productId] ?? 0;
+              final recencyScore = _recencyWeight(
+                inventory.lastMovementAt,
+                _clock(),
+              );
+              final score =
+                  reservationsForProduct * 4 +
+                  transfersForProduct * 3 +
+                  recencyScore +
+                  (inventory.isLowStock ? 1 : 0);
+
+              return OutOfStockConsultationMetric(
+                productId: inventory.productId,
+                productName: inventory.productName,
+                sku: inventory.sku,
+                interestScore: score,
+                reservationHits: reservationsForProduct,
+                transferHits: transfersForProduct,
+                availableStock: inventory.availableStock,
+                lastMovementAt: inventory.lastMovementAt,
+              );
+            })
+            .toList(growable: false)
+          ..sort((left, right) {
+            final scoreComparison = right.interestScore.compareTo(
+              left.interestScore,
+            );
+            if (scoreComparison != 0) {
+              return scoreComparison;
+            }
+
+            final leftDate =
+                left.lastMovementAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+            final rightDate =
+                right.lastMovementAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+            return rightDate.compareTo(leftDate);
+          });
+
+    return ranked.take(5).toList(growable: false);
+  }
+
+  bool _isTransferForBranch(TransferRequest transfer, String branchId) {
+    return transfer.fromBranchId == branchId || transfer.toBranchId == branchId;
+  }
+
+  int _recencyWeight(DateTime? value, DateTime now) {
+    if (value == null) {
+      return 0;
+    }
+
+    final difference = now.difference(value);
+    if (difference.inHours < 6) {
+      return 6;
+    }
+    if (difference.inHours < 24) {
+      return 4;
+    }
+    if (difference.inDays < 7) {
+      return 2;
+    }
+    return 0;
   }
 }

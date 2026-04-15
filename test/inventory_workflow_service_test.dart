@@ -75,6 +75,49 @@ void main() {
   });
 
   test(
+    'supervisor operational stats expose KPIs and seller cannot access them',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final supervisor = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.secondBranchSeller,
+      );
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      final stats = await service
+          .watchOperationalStats(
+            actorUser: supervisor,
+            branchId: DemoIds.branchNorth,
+          )
+          .first;
+
+      expect(stats.lowStockCount, 1);
+      expect(stats.outOfStockCount, 1);
+      expect(stats.pendingTransfersCount, 1);
+      expect(stats.activeReservationsCount, 1);
+      expect(stats.transferRequestsToday, 1);
+      expect(stats.consultedOutOfStockCount, 1);
+      expect(stats.averageApiResponseTime, const Duration(minutes: 3));
+      expect(stats.transferRequestsByDay.last.count, 1);
+
+      expect(
+        () => service.watchOperationalStats(
+          actorUser: seller,
+          branchId: DemoIds.branchCenter,
+        ),
+        throwsA(
+          isA<InventoryException>().having(
+            (error) => error.message,
+            'message',
+            contains('no tiene permiso'),
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
     'createReservation and completeReservation keep inventory consistent',
     () async {
       await service.seedMasterData(actorUser: sampleData.users.first);

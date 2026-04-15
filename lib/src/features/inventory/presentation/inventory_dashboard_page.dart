@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/app_theme.dart';
 import '../../auth/application/auth_service.dart';
-import '../../auth/presentation/create_employee_dialog.dart';
+import '../../auth/presentation/employee_management_page.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
 import '../domain/role_permissions.dart';
@@ -31,7 +31,6 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
 
   bool _isCreating = false;
   bool _isCreatingBranch = false;
-  bool _isCreatingEmployee = false;
   bool _isRefreshing = false;
   Timer? _autoRefreshTimer;
 
@@ -83,64 +82,6 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
     }
   }
 
-  Future<void> _openCreateEmployeeDialog() async {
-    final branches = await widget.service.catalog.watchBranches().first;
-    if (!mounted) {
-      return;
-    }
-
-    if (branches.isEmpty) {
-      _showStatusMessage(
-        'Primero debes crear la base inicial para tener sucursales disponibles.',
-      );
-      return;
-    }
-
-    final request = await showDialog<CreateEmployeeRequest>(
-      context: context,
-      builder: (context) => CreateEmployeeDialog(branches: branches),
-    );
-
-    if (request == null) {
-      return;
-    }
-
-    setState(() {
-      _isCreatingEmployee = true;
-    });
-
-    try {
-      await widget.authService.createEmployee(
-        currentUser: widget.currentUser,
-        fullName: request.fullName,
-        email: request.email,
-        password: request.password,
-        phone: request.phone,
-        branchId: request.branchId,
-        role: request.role,
-      );
-
-      if (!mounted) {
-        return;
-      }
-      _showStatusMessage(
-        'Empleado creado correctamente: ${request.email} (${request.role.displayName}).',
-      );
-      await _refreshDashboard(isManual: true);
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      _showStatusMessage('No se pudo crear el empleado: $error');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isCreatingEmployee = false;
-        });
-      }
-    }
-  }
-
   Future<void> _openCreateBranchDialog() async {
     final request = await showDialog<CreateBranchRequest>(
       context: context,
@@ -187,6 +128,17 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
         });
       }
     }
+  }
+
+  Future<void> _openEmployeeManagementPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => EmployeeManagementPage(
+          authService: widget.authService,
+          currentUser: widget.currentUser,
+        ),
+      ),
+    );
   }
 
   Future<void> _refreshDashboard({required bool isManual}) async {
@@ -252,6 +204,47 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
     );
   }
 
+  Widget _buildOperationalMetricsSection(
+    AppUser user, {
+    required String title,
+  }) {
+    if (!user.can(AppPermission.viewOperationalMetrics)) {
+      return const SizedBox.shrink();
+    }
+
+    return StreamBuilder<BranchOperationalStats>(
+      stream: widget.service.watchOperationalStats(
+        actorUser: user,
+        branchId: user.branchId,
+      ),
+      builder: (context, snapshot) {
+        final stats = snapshot.data;
+        if (stats == null) {
+          return const SizedBox(
+            height: 180,
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _AdminSectionHeader(title: title),
+            const SizedBox(height: 12),
+            _OperationalKpiStrip(stats: stats),
+            const SizedBox(height: 16),
+            _DashboardGrid(
+              children: [
+                _ConsultedOutOfStockPanel(stats: stats),
+                _TransfersByDayPanel(stats: stats),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   List<Widget> _buildAdminSections(AppUser user) {
     return [
       const SizedBox(height: 12),
@@ -281,6 +274,8 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
       const _AdminSectionHeader(title: 'Metricas', actionLabel: 'Ver todas'),
       const SizedBox(height: 12),
       _AdminMetricsStrip(service: widget.service),
+      const SizedBox(height: 18),
+      _buildOperationalMetricsSection(user, title: 'KPIs de supervision'),
       const SizedBox(height: 18),
       _AdminPendingSection(service: widget.service, branchId: user.branchId),
       const SizedBox(height: 18),
@@ -323,6 +318,8 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
         branchId: user.branchId,
         role: user.role,
       ),
+      const SizedBox(height: 18),
+      _buildOperationalMetricsSection(user, title: 'KPIs operativos'),
       const SizedBox(height: 18),
       _DashboardGrid(
         children: [
@@ -493,16 +490,13 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
         user: user,
         isCreating: _isCreating,
         isCreatingBranch: _isCreatingBranch,
-        isCreatingEmployee: _isCreatingEmployee,
         onCreateBaseData: _isCreating
             ? null
             : () => _runDrawerAction(_createBaseData),
         onCreateBranch: _isCreatingBranch
             ? null
             : () => _runDrawerAction(_openCreateBranchDialog),
-        onCreateEmployee: _isCreatingEmployee
-            ? null
-            : () => _runDrawerAction(_openCreateEmployeeDialog),
+        onManageEmployees: () => _runDrawerAction(_openEmployeeManagementPage),
         onSignOut: widget.authService.signOut,
       ),
       body: Container(
@@ -1179,6 +1173,147 @@ class _BranchMetricsStrip extends StatelessWidget {
   }
 }
 
+class _OperationalKpiStrip extends StatelessWidget {
+  const _OperationalKpiStrip({required this.stats});
+
+  final BranchOperationalStats stats;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: _AdminMetricTile(
+            icon: Icons.search_off_rounded,
+            title: 'Consultas\nsin stock',
+            value: '${stats.consultedOutOfStockCount}',
+            helper: 'Referencias sin respuesta',
+            colors: const [Color(0xFF214C9A), Color(0xFF183A79)],
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _AdminMetricTile(
+            icon: Icons.sync_alt_rounded,
+            title: 'Traslados\nhoy',
+            value: '${stats.transferRequestsToday}',
+            helper: 'Solicitudes del dia',
+            colors: const [Color(0xFF2E8B57), Color(0xFF256E49)],
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _AdminMetricTile(
+            icon: Icons.speed_rounded,
+            title: 'Tiempo\npromedio API',
+            value: _formatDurationCompact(stats.averageApiResponseTime),
+            helper: 'Basado en sync logs',
+            colors: const [Color(0xFFFF8A24), Color(0xFFE66A11)],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ConsultedOutOfStockPanel extends StatelessWidget {
+  const _ConsultedOutOfStockPanel({required this.stats});
+
+  final BranchOperationalStats stats;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = stats.outOfStockConsultations
+        .map(
+          (item) => _InsightItem(
+            icon: Icons.search_off_rounded,
+            iconColor: AppPalette.danger,
+            title: item.productName,
+            detail:
+                'SKU ${item.sku} | score ${item.interestScore} | stock ${item.availableStock}',
+            meta:
+                'Reservas ${item.reservationHits} | traslados ${item.transferHits} | ${_formatRelativeTime(item.lastMovementAt)}',
+          ),
+        )
+        .toList(growable: false);
+
+    return _DashboardPanel(
+      title: 'Consultas sin stock',
+      subtitle:
+          'Productos con mayor interes operativo o comercial que hoy no tienen disponibilidad.',
+      accent: AppPalette.danger,
+      child: _InsightList(
+        items: items,
+        emptyMessage:
+            'No hay consultas prioritarias en productos agotados para esta sucursal.',
+      ),
+    );
+  }
+}
+
+class _TransfersByDayPanel extends StatelessWidget {
+  const _TransfersByDayPanel({required this.stats});
+
+  final BranchOperationalStats stats;
+
+  @override
+  Widget build(BuildContext context) {
+    final maxCount = stats.transferRequestsByDay.fold<int>(
+      1,
+      (current, item) => item.count > current ? item.count : current,
+    );
+
+    final rows = stats.transferRequestsByDay
+        .map(
+          (item) => Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 58,
+                  child: Text(
+                    _formatShortDay(item.day),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: Colors.white70),
+                  ),
+                ),
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(999),
+                    child: LinearProgressIndicator(
+                      value: item.count / maxCount,
+                      minHeight: 10,
+                      backgroundColor: Colors.white.withValues(alpha: 0.08),
+                      valueColor: const AlwaysStoppedAnimation<Color>(
+                        AppPalette.amber,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  '${item.count}',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        )
+        .toList(growable: false);
+
+    return _DashboardPanel(
+      title: 'Solicitudes de traslado por dia',
+      subtitle:
+          'Carga reciente de solicitudes registradas para la sucursal en los ultimos cinco dias.',
+      accent: AppPalette.amber,
+      child: Column(children: rows),
+    );
+  }
+}
+
 class _AdminMetricsStrip extends StatelessWidget {
   const _AdminMetricsStrip({required this.service});
 
@@ -1732,20 +1867,18 @@ class _AdminDrawer extends StatelessWidget {
     required this.user,
     required this.isCreating,
     required this.isCreatingBranch,
-    required this.isCreatingEmployee,
     required this.onCreateBaseData,
     required this.onCreateBranch,
-    required this.onCreateEmployee,
+    required this.onManageEmployees,
     required this.onSignOut,
   });
 
   final AppUser user;
   final bool isCreating;
   final bool isCreatingBranch;
-  final bool isCreatingEmployee;
   final VoidCallback? onCreateBaseData;
   final VoidCallback? onCreateBranch;
-  final VoidCallback? onCreateEmployee;
+  final VoidCallback? onManageEmployees;
   final VoidCallback onSignOut;
 
   @override
@@ -1774,9 +1907,8 @@ class _AdminDrawer extends StatelessWidget {
               const SizedBox(height: 22),
               _AdminDrawerTile(
                 icon: Icons.person_add_alt_1_rounded,
-                title: 'Ingresar empleado',
-                loading: isCreatingEmployee,
-                onTap: onCreateEmployee,
+                title: 'Gestion de empleados',
+                onTap: onManageEmployees,
               ),
               const SizedBox(height: 10),
               _AdminDrawerTile(
@@ -2543,6 +2675,20 @@ String _formatClock(DateTime value) {
   return '${_twoDigits(value.hour)}:${_twoDigits(value.minute)}';
 }
 
+String _formatDurationCompact(Duration value) {
+  if (value == Duration.zero) {
+    return '0 s';
+  }
+  if (value.inMinutes >= 1) {
+    final seconds = value.inSeconds.remainder(60);
+    if (seconds == 0) {
+      return '${value.inMinutes} min';
+    }
+    return '${value.inMinutes}m ${seconds}s';
+  }
+  return '${value.inSeconds}s';
+}
+
 String _formatSyncStatus(String value) {
   return switch (value.trim().toLowerCase()) {
     'success' || 'completed' || 'ok' => 'Exitosa',
@@ -2564,10 +2710,24 @@ String _formatSyncType(String value) {
   };
 }
 
+String _formatShortDay(DateTime value) {
+  return switch (value.weekday) {
+    DateTime.monday => 'Lun',
+    DateTime.tuesday => 'Mar',
+    DateTime.wednesday => 'Mie',
+    DateTime.thursday => 'Jue',
+    DateTime.friday => 'Vie',
+    DateTime.saturday => 'Sab',
+    DateTime.sunday => 'Dom',
+    _ => '${value.day}/${value.month}',
+  };
+}
+
 String _formatAuditAction(String value) {
   return switch (value.trim().toLowerCase()) {
     'employee_created' => 'Empleado creado',
     'employee_role_updated' => 'Rol actualizado',
+    'employee_updated' => 'Empleado actualizado',
     'branch_created' => 'Sucursal creada',
     'master_data_seeded' => 'Base inicial creada',
     _ => 'Actividad administrativa',
@@ -2578,6 +2738,7 @@ IconData _auditActionIcon(String value) {
   return switch (value.trim().toLowerCase()) {
     'employee_created' => Icons.person_add_alt_1_rounded,
     'employee_role_updated' => Icons.admin_panel_settings_rounded,
+    'employee_updated' => Icons.manage_accounts_rounded,
     'branch_created' => Icons.add_business_rounded,
     'master_data_seeded' => Icons.storage_rounded,
     _ => Icons.history_rounded,
@@ -2588,6 +2749,7 @@ Color _auditActionColor(String value) {
   return switch (value.trim().toLowerCase()) {
     'employee_created' => const Color(0xFF2E8B57),
     'employee_role_updated' => const Color(0xFF214C9A),
+    'employee_updated' => const Color(0xFF2A5F89),
     'branch_created' => const Color(0xFFE67A16),
     'master_data_seeded' => const Color(0xFF6A5AE0),
     _ => const Color(0xFF31547D),

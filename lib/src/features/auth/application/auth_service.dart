@@ -57,23 +57,26 @@ class AuthService {
       throw const AuthException('Solo un administrador puede crear empleados.');
     }
 
+    final normalizedFullName = fullName.trim();
+    final normalizedEmail = email.trim();
+    final normalizedPhone = phone.trim();
     final branch = await catalog.fetchBranch(branchId);
     if (branch == null) {
       throw const AuthException('La sucursal seleccionada no existe.');
     }
 
     final createdAccount = await _employeeAccountCreator.createAccount(
-      email: email.trim(),
+      email: normalizedEmail,
       password: password,
-      displayName: fullName.trim(),
+      displayName: normalizedFullName,
     );
 
     final now = DateTime.now().toUtc();
     final profile = AppUser(
       id: createdAccount.uid,
-      fullName: fullName.trim(),
-      email: email.trim(),
-      phone: phone.trim(),
+      fullName: normalizedFullName,
+      email: normalizedEmail,
+      phone: normalizedPhone,
       role: role,
       branchId: branchId,
       isActive: true,
@@ -117,15 +120,18 @@ class AuthService {
     }
   }
 
-  Future<AppUser> updateEmployeeRole({
+  Future<AppUser> updateEmployee({
     required AppUser currentUser,
     required String userId,
+    required String fullName,
+    required String phone,
     required UserRole role,
-    String? branchId,
+    required String branchId,
+    required bool isActive,
   }) async {
     if (!currentUser.can(AppPermission.manageEmployees)) {
       throw const AuthException(
-        'Solo un administrador puede actualizar roles de empleados.',
+        'Solo un administrador puede actualizar empleados.',
       );
     }
 
@@ -134,21 +140,68 @@ class AuthService {
       throw const AuthException('El empleado seleccionado no existe.');
     }
 
-    final targetBranchId = branchId ?? targetUser.branchId;
-    final branch = await catalog.fetchBranch(targetBranchId);
+    final normalizedFullName = fullName.trim();
+    final normalizedPhone = phone.trim();
+    if (normalizedFullName.isEmpty) {
+      throw const AuthException('El nombre del empleado es obligatorio.');
+    }
+
+    if (currentUser.id == targetUser.id) {
+      if (!isActive) {
+        throw const AuthException(
+          'No puedes desactivar tu propio usuario administrador.',
+        );
+      }
+      if (role != UserRole.admin) {
+        throw const AuthException(
+          'No puedes cambiar tu propio rol administrador.',
+        );
+      }
+    }
+
+    final branch = await catalog.fetchBranch(branchId);
     if (branch == null) {
       throw const AuthException('La sucursal seleccionada no existe.');
     }
 
+    final changedFields = <String>[];
+    if (targetUser.fullName != normalizedFullName) {
+      changedFields.add('fullName');
+    }
+    if (targetUser.phone != normalizedPhone) {
+      changedFields.add('phone');
+    }
+    if (targetUser.role != role) {
+      changedFields.add('role');
+    }
+    if (targetUser.branchId != branchId) {
+      changedFields.add('branchId');
+    }
+    if (targetUser.isActive != isActive) {
+      changedFields.add('isActive');
+    }
+
+    if (changedFields.isEmpty) {
+      throw const AuthException('No se detectaron cambios para guardar.');
+    }
+
+    final roleChanged = targetUser.role != role;
+    final roleRelatedOnly = changedFields.every(
+      (field) => field == 'role' || field == 'branchId',
+    );
+    final auditAction = roleChanged && roleRelatedOnly
+        ? 'employee_role_updated'
+        : 'employee_updated';
+
     final now = DateTime.now().toUtc();
     final updatedUser = AppUser(
       id: targetUser.id,
-      fullName: targetUser.fullName,
+      fullName: normalizedFullName,
       email: targetUser.email,
-      phone: targetUser.phone,
+      phone: normalizedPhone,
       role: role,
-      branchId: targetBranchId,
-      isActive: targetUser.isActive,
+      branchId: branchId,
+      isActive: isActive,
       photoUrl: targetUser.photoUrl,
       lastLoginAt: targetUser.lastLoginAt,
       createdAt: targetUser.createdAt,
@@ -159,28 +212,58 @@ class AuthService {
     await system.addAuditLog(
       AuditLog(
         id: DateTime.now().microsecondsSinceEpoch.toString(),
-        action: 'employee_role_updated',
+        action: auditAction,
         entityType: 'user',
         entityId: updatedUser.id,
         entityLabel: updatedUser.fullName,
         actorUserId: currentUser.id,
         actorName: currentUser.fullName,
         actorRole: currentUser.role,
-        message:
-            'Actualizo el rol del empleado a ${role.displayName.toLowerCase()}.',
+        message: auditAction == 'employee_role_updated'
+            ? 'Actualizo el rol del empleado a ${role.displayName.toLowerCase()}.'
+            : 'Actualizo la informacion administrativa del empleado.',
         metadata: {
+          'updatedFields': changedFields.join(','),
           'previousRole': targetUser.role.name,
-          'newRole': role.name,
+          'newRole': updatedUser.role.name,
           'previousBranchId': targetUser.branchId,
-          'newBranchId': targetBranchId,
+          'newBranchId': updatedUser.branchId,
+          'previousStatus': targetUser.isActive ? 'active' : 'inactive',
+          'newStatus': updatedUser.isActive ? 'active' : 'inactive',
+          'previousFullName': targetUser.fullName,
+          'newFullName': updatedUser.fullName,
+          'previousPhone': targetUser.phone,
+          'newPhone': updatedUser.phone,
         },
         createdAt: now,
-        branchId: targetBranchId,
+        branchId: updatedUser.branchId,
         branchName: branch.name,
       ),
     );
 
     return updatedUser;
+  }
+
+  Future<AppUser> updateEmployeeRole({
+    required AppUser currentUser,
+    required String userId,
+    required UserRole role,
+    String? branchId,
+  }) async {
+    final targetUser = await users.fetchUser(userId);
+    if (targetUser == null) {
+      throw const AuthException('El empleado seleccionado no existe.');
+    }
+
+    return updateEmployee(
+      currentUser: currentUser,
+      userId: userId,
+      fullName: targetUser.fullName,
+      phone: targetUser.phone,
+      role: role,
+      branchId: branchId ?? targetUser.branchId,
+      isActive: targetUser.isActive,
+    );
   }
 
   String _mapAuthError(FirebaseAuthException error) {

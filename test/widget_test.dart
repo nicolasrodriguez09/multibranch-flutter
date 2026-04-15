@@ -68,6 +68,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Solicitudes pendientes'), findsOneWidget);
+    expect(find.text('KPIs de supervision'), findsOneWidget);
+    expect(find.text('Consultas sin stock'), findsOneWidget);
+    expect(find.text('Solicitudes de traslado por dia'), findsOneWidget);
     expect(find.text('Actividad administrativa'), findsOneWidget);
     expect(find.text('Actualizar datos'), findsOneWidget);
 
@@ -75,10 +78,17 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Menu administrativo'), findsOneWidget);
-    expect(find.text('Ingresar empleado'), findsOneWidget);
+    expect(find.text('Gestion de empleados'), findsOneWidget);
     expect(find.text('Agregar sucursal'), findsOneWidget);
     expect(find.text('Crear base de datos inicial'), findsOneWidget);
     expect(find.text('Cerrar sesion'), findsOneWidget);
+
+    await tester.tap(find.text('Gestion de empleados'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Empleados registrados'), findsOneWidget);
+    expect(find.text('Nuevo empleado'), findsOneWidget);
+    expect(find.text('Ana Admin'), findsOneWidget);
   });
 
   testWidgets('seller dashboard hides admin and supervisor sections', (
@@ -107,6 +117,8 @@ void main() {
 
     expect(find.text('Panel de ventas'), findsOneWidget);
     expect(find.text('Resumen comercial'), findsOneWidget);
+    expect(find.text('KPIs operativos'), findsNothing);
+    expect(find.text('Consultas sin stock'), findsNothing);
     await tester.scrollUntilVisible(
       find.text('Ultimas sincronizaciones'),
       300,
@@ -153,6 +165,15 @@ void main() {
 
       expect(find.text('Control de sucursal'), findsOneWidget);
       expect(find.text('Resumen operativo'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('KPIs operativos'),
+        220,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('KPIs operativos'), findsOneWidget);
+      expect(find.text('Consultas sin stock'), findsOneWidget);
+      expect(find.text('Solicitudes de traslado por dia'), findsOneWidget);
       await tester.scrollUntilVisible(
         find.text('Ultimas sincronizaciones'),
         300,

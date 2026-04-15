@@ -5,6 +5,7 @@ enum AppPermission {
   viewLowStock('Ver alertas de stock bajo'),
   viewBranchReservations('Ver reservas activas de la sucursal'),
   viewBranchTransfers('Ver traslados de la sucursal'),
+  viewOperationalMetrics('Ver metricas operativas'),
   createReservation('Crear reservas'),
   updateReservation('Cerrar o cancelar reservas'),
   requestTransfer('Solicitar traslados'),
@@ -29,6 +30,7 @@ enum AppModule {
   lowStock('Stock bajo', AppPermission.viewLowStock),
   reservations('Reservas', AppPermission.viewBranchReservations),
   transfers('Traslados', AppPermission.viewBranchTransfers),
+  metrics('Metricas', AppPermission.viewOperationalMetrics),
   masterData('Base maestra', AppPermission.viewMasterData),
   employees('Empleados', AppPermission.manageEmployees),
   users('Usuarios', AppPermission.viewUsers),
@@ -64,6 +66,7 @@ extension UserRolePermissions on UserRole {
       AppPermission.viewLowStock ||
       AppPermission.viewBranchReservations ||
       AppPermission.viewBranchTransfers ||
+      AppPermission.viewOperationalMetrics ||
       AppPermission.createReservation ||
       AppPermission.updateReservation ||
       AppPermission.requestTransfer ||
