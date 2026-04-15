@@ -9,6 +9,9 @@ import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
 import '../domain/role_permissions.dart';
 import 'create_branch_dialog.dart';
+import 'product_search_page.dart';
+
+enum _BranchDashboardSection { overview, inventory, workflow, metrics, modules }
 
 class InventoryDashboardPage extends StatefulWidget {
   const InventoryDashboardPage({
@@ -32,6 +35,8 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
   bool _isCreating = false;
   bool _isCreatingBranch = false;
   bool _isRefreshing = false;
+  _BranchDashboardSection _selectedBranchSection =
+      _BranchDashboardSection.overview;
   Timer? _autoRefreshTimer;
 
   @override
@@ -141,6 +146,17 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
     );
   }
 
+  Future<void> _openProductSearchPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => ProductSearchPage(
+          service: widget.service,
+          currentUser: widget.currentUser,
+        ),
+      ),
+    );
+  }
+
   Future<void> _refreshDashboard({required bool isManual}) async {
     if (_isRefreshing) {
       return;
@@ -204,45 +220,80 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
     );
   }
 
-  Widget _buildOperationalMetricsSection(
-    AppUser user, {
-    required String title,
-  }) {
-    if (!user.can(AppPermission.viewOperationalMetrics)) {
-      return const SizedBox.shrink();
+  List<_BranchDashboardSection> _branchSectionsFor(UserRole role) {
+    return switch (role) {
+      UserRole.seller => const <_BranchDashboardSection>[
+        _BranchDashboardSection.overview,
+        _BranchDashboardSection.inventory,
+        _BranchDashboardSection.workflow,
+        _BranchDashboardSection.modules,
+      ],
+      UserRole.supervisor => const <_BranchDashboardSection>[
+        _BranchDashboardSection.overview,
+        _BranchDashboardSection.metrics,
+        _BranchDashboardSection.inventory,
+        _BranchDashboardSection.workflow,
+        _BranchDashboardSection.modules,
+      ],
+      UserRole.admin => const <_BranchDashboardSection>[],
+    };
+  }
+
+  String _branchSectionLabel(UserRole role, _BranchDashboardSection section) {
+    return switch (section) {
+      _BranchDashboardSection.overview => 'Resumen',
+      _BranchDashboardSection.inventory => 'Inventario y alertas',
+      _BranchDashboardSection.workflow =>
+        role == UserRole.seller
+            ? 'Compromisos y sincronizacion'
+            : 'Solicitudes y sincronizacion',
+      _BranchDashboardSection.metrics => 'KPIs operativos',
+      _BranchDashboardSection.modules => 'Modulos habilitados',
+    };
+  }
+
+  IconData _branchSectionIcon(_BranchDashboardSection section) {
+    return switch (section) {
+      _BranchDashboardSection.overview => Icons.space_dashboard_rounded,
+      _BranchDashboardSection.inventory => Icons.inventory_2_rounded,
+      _BranchDashboardSection.workflow => Icons.sync_alt_rounded,
+      _BranchDashboardSection.metrics => Icons.insights_rounded,
+      _BranchDashboardSection.modules => Icons.widgets_rounded,
+    };
+  }
+
+  void _ensureValidBranchSection(UserRole role) {
+    final availableSections = _branchSectionsFor(role);
+    if (!availableSections.contains(_selectedBranchSection) &&
+        availableSections.isNotEmpty) {
+      _selectedBranchSection = availableSections.first;
+    }
+  }
+
+  Future<void> _selectBranchSection(_BranchDashboardSection section) async {
+    Navigator.of(context).pop();
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    if (!mounted) {
+      return;
     }
 
-    return StreamBuilder<BranchOperationalStats>(
-      stream: widget.service.watchOperationalStats(
-        actorUser: user,
-        branchId: user.branchId,
-      ),
-      builder: (context, snapshot) {
-        final stats = snapshot.data;
-        if (stats == null) {
-          return const SizedBox(
-            height: 180,
-            child: Center(child: CircularProgressIndicator()),
-          );
-        }
+    setState(() {
+      _selectedBranchSection = section;
+    });
+  }
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _AdminSectionHeader(title: title),
-            const SizedBox(height: 12),
-            _OperationalKpiStrip(stats: stats),
-            const SizedBox(height: 16),
-            _DashboardGrid(
-              children: [
-                _ConsultedOutOfStockPanel(stats: stats),
-                _TransfersByDayPanel(stats: stats),
-              ],
-            ),
-          ],
-        );
-      },
-    );
+  List<Widget> _buildBranchSectionShell(AppUser user, String title) {
+    return [
+      const SizedBox(height: 12),
+      _AdminRoleBar(user: user),
+      const SizedBox(height: 20),
+      Text(
+        title,
+        style: Theme.of(
+          context,
+        ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800),
+      ),
+    ];
   }
 
   List<Widget> _buildAdminSections(AppUser user) {
@@ -275,7 +326,11 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
       const SizedBox(height: 12),
       _AdminMetricsStrip(service: widget.service),
       const SizedBox(height: 18),
-      _buildOperationalMetricsSection(user, title: 'KPIs de supervision'),
+      _OperationalMetricsSection(
+        service: widget.service,
+        user: user,
+        title: 'KPIs de supervision',
+      ),
       const SizedBox(height: 18),
       _AdminPendingSection(service: widget.service, branchId: user.branchId),
       const SizedBox(height: 18),
@@ -290,17 +345,20 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
     ];
   }
 
-  List<Widget> _buildSupervisorSections(AppUser user) {
+  List<Widget> _buildBranchOverviewSections(AppUser user) {
+    final title = switch (user.role) {
+      UserRole.seller => 'Panel de ventas',
+      UserRole.supervisor => 'Control de sucursal',
+      UserRole.admin => 'Dashboard',
+    };
+    final summaryTitle = switch (user.role) {
+      UserRole.seller => 'Resumen comercial',
+      UserRole.supervisor => 'Resumen operativo',
+      UserRole.admin => 'Resumen',
+    };
+
     return [
-      const SizedBox(height: 12),
-      _AdminRoleBar(user: user),
-      const SizedBox(height: 20),
-      Text(
-        'Control de sucursal',
-        style: Theme.of(
-          context,
-        ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800),
-      ),
+      ..._buildBranchSectionShell(user, title),
       const SizedBox(height: 18),
       _BranchOperationalHero(
         service: widget.service,
@@ -311,7 +369,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
             : () => _refreshDashboard(isManual: true),
       ),
       const SizedBox(height: 18),
-      const _AdminSectionHeader(title: 'Resumen operativo'),
+      _AdminSectionHeader(title: summaryTitle),
       const SizedBox(height: 12),
       _BranchMetricsStrip(
         service: widget.service,
@@ -319,16 +377,40 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
         role: user.role,
       ),
       const SizedBox(height: 18),
-      _buildOperationalMetricsSection(user, title: 'KPIs operativos'),
+      _AdminRefreshCard(
+        service: widget.service,
+        branchId: user.branchId,
+        onPressed: _isRefreshing
+            ? null
+            : () => _refreshDashboard(isManual: true),
+      ),
+    ];
+  }
+
+  List<Widget> _buildBranchInventorySections(AppUser user) {
+    final topConsultedSubtitle = user.role == UserRole.seller
+        ? 'Referencias con mayor actividad comercial reciente en tu sucursal.'
+        : 'Priorizacion operativa basada en actividad y movimiento reciente.';
+    final outOfStockSubtitle = user.role == UserRole.seller
+        ? 'Quiebres que pueden afectar la atencion de clientes en mostrador.'
+        : 'Quiebres detectados que afectan la atencion o los traslados internos.';
+
+    return [
+      ..._buildBranchSectionShell(user, 'Inventario y alertas'),
       const SizedBox(height: 18),
       _DashboardGrid(
         children: [
-          _PendingRequestsPanel(
+          _TopConsultedPanel(
             service: widget.service,
             branchId: user.branchId,
-            title: 'Solicitudes pendientes',
-            subtitle:
-                'Reservas activas y traslados que requieren seguimiento de la sucursal.',
+            title: 'Productos mas consultados',
+            subtitle: topConsultedSubtitle,
+          ),
+          _OutOfStockPanel(
+            service: widget.service,
+            branchId: user.branchId,
+            title: 'Productos sin stock',
+            subtitle: outOfStockSubtitle,
           ),
           _LowStockPanel(
             service: widget.service,
@@ -337,26 +419,41 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
             subtitle:
                 'Productos con disponibilidad reducida que requieren reposicion o ajuste.',
           ),
-          _OutOfStockPanel(
+        ],
+      ),
+    ];
+  }
+
+  List<Widget> _buildBranchWorkflowSections(AppUser user) {
+    final title = user.role == UserRole.seller
+        ? 'Compromisos y sincronizacion'
+        : 'Solicitudes y sincronizacion';
+    final pendingTitle = user.role == UserRole.seller
+        ? 'Compromisos activos'
+        : 'Solicitudes pendientes';
+    final pendingSubtitle = user.role == UserRole.seller
+        ? 'Reservas activas y traslados pendientes vinculados a tus ventas.'
+        : 'Reservas activas y traslados que requieren seguimiento de la sucursal.';
+    final syncSubtitle = user.role == UserRole.seller
+        ? 'Eventos recientes para validar que la informacion local este al dia.'
+        : 'Trazabilidad reciente de sincronizacion para validar continuidad operativa.';
+
+    return [
+      ..._buildBranchSectionShell(user, title),
+      const SizedBox(height: 18),
+      _DashboardGrid(
+        children: [
+          _PendingRequestsPanel(
             service: widget.service,
             branchId: user.branchId,
-            title: 'Productos sin stock',
-            subtitle:
-                'Quiebres detectados que afectan la atencion o los traslados internos.',
+            title: pendingTitle,
+            subtitle: pendingSubtitle,
           ),
           _LatestSyncsPanel(
             service: widget.service,
             branchId: user.branchId,
             title: 'Ultimas sincronizaciones',
-            subtitle:
-                'Trazabilidad reciente de sincronizacion para validar continuidad operativa.',
-          ),
-          _TopConsultedPanel(
-            service: widget.service,
-            branchId: user.branchId,
-            title: 'Productos mas consultados',
-            subtitle:
-                'Priorizacion operativa basada en actividad y movimiento reciente.',
+            subtitle: syncSubtitle,
           ),
         ],
       ),
@@ -368,94 +465,45 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
             ? null
             : () => _refreshDashboard(isManual: true),
       ),
+    ];
+  }
+
+  List<Widget> _buildBranchMetricsSections(AppUser user) {
+    return [
+      ..._buildBranchSectionShell(user, 'KPIs operativos'),
       const SizedBox(height: 18),
-      const _AdminSectionHeader(title: 'Modulos habilitados'),
-      const SizedBox(height: 12),
+      _OperationalMetricsSection(
+        service: widget.service,
+        user: user,
+        title: 'Indicadores de sucursal',
+      ),
+      const SizedBox(height: 18),
+      _AdminRefreshCard(
+        service: widget.service,
+        branchId: user.branchId,
+        onPressed: _isRefreshing
+            ? null
+            : () => _refreshDashboard(isManual: true),
+      ),
+    ];
+  }
+
+  List<Widget> _buildBranchModulesSections(AppUser user) {
+    return [
+      ..._buildBranchSectionShell(user, 'Modulos habilitados'),
+      const SizedBox(height: 18),
       _ModulePanel(modules: user.visibleModules),
     ];
   }
 
-  List<Widget> _buildSellerSections(AppUser user) {
-    return [
-      const SizedBox(height: 12),
-      _AdminRoleBar(user: user),
-      const SizedBox(height: 20),
-      Text(
-        'Panel de ventas',
-        style: Theme.of(
-          context,
-        ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800),
-      ),
-      const SizedBox(height: 18),
-      _BranchOperationalHero(
-        service: widget.service,
-        branchId: user.branchId,
-        role: user.role,
-        onPressed: _isRefreshing
-            ? null
-            : () => _refreshDashboard(isManual: true),
-      ),
-      const SizedBox(height: 18),
-      const _AdminSectionHeader(title: 'Resumen comercial'),
-      const SizedBox(height: 12),
-      _BranchMetricsStrip(
-        service: widget.service,
-        branchId: user.branchId,
-        role: user.role,
-      ),
-      const SizedBox(height: 18),
-      _DashboardGrid(
-        children: [
-          _TopConsultedPanel(
-            service: widget.service,
-            branchId: user.branchId,
-            title: 'Productos mas consultados',
-            subtitle:
-                'Referencias con mayor actividad comercial reciente en tu sucursal.',
-          ),
-          _OutOfStockPanel(
-            service: widget.service,
-            branchId: user.branchId,
-            title: 'Productos sin stock',
-            subtitle:
-                'Quiebres que pueden afectar la atencion de clientes en mostrador.',
-          ),
-          _LowStockPanel(
-            service: widget.service,
-            branchId: user.branchId,
-            title: 'Alertas de inventario bajo',
-            subtitle:
-                'Productos con pocas unidades antes de llegar a quiebre total.',
-          ),
-          _PendingRequestsPanel(
-            service: widget.service,
-            branchId: user.branchId,
-            title: 'Compromisos activos',
-            subtitle:
-                'Reservas activas y traslados pendientes vinculados a tus ventas.',
-          ),
-          _LatestSyncsPanel(
-            service: widget.service,
-            branchId: user.branchId,
-            title: 'Ultimas sincronizaciones',
-            subtitle:
-                'Eventos recientes para validar que la informacion local este al dia.',
-          ),
-        ],
-      ),
-      const SizedBox(height: 18),
-      _AdminRefreshCard(
-        service: widget.service,
-        branchId: user.branchId,
-        onPressed: _isRefreshing
-            ? null
-            : () => _refreshDashboard(isManual: true),
-      ),
-      const SizedBox(height: 18),
-      const _AdminSectionHeader(title: 'Modulos habilitados'),
-      const SizedBox(height: 12),
-      _ModulePanel(modules: user.visibleModules),
-    ];
+  List<Widget> _buildBranchSectionContent(AppUser user) {
+    return switch (_selectedBranchSection) {
+      _BranchDashboardSection.overview => _buildBranchOverviewSections(user),
+      _BranchDashboardSection.inventory => _buildBranchInventorySections(user),
+      _BranchDashboardSection.workflow => _buildBranchWorkflowSections(user),
+      _BranchDashboardSection.metrics => _buildBranchMetricsSections(user),
+      _BranchDashboardSection.modules => _buildBranchModulesSections(user),
+    };
   }
 
   Widget _buildAdminScaffold(AppUser user) {
@@ -465,6 +513,13 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
         titleSpacing: 0,
         title: const Text('Dashboard'),
         actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: _ToolbarButton(
+              icon: Icons.search_rounded,
+              onPressed: _openProductSearchPage,
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: _ToolbarButton(
@@ -524,13 +579,27 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
     );
   }
 
-  Widget _buildBranchScaffold(AppUser user, List<Widget> content) {
+  Widget _buildBranchScaffold(AppUser user) {
+    final availableSections = _branchSectionsFor(user.role);
+    final selectedLabel = _branchSectionLabel(
+      user.role,
+      _selectedBranchSection,
+    );
+    final content = _buildBranchSectionContent(user);
+
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         titleSpacing: 0,
-        title: const Text('Dashboard'),
+        title: Text(selectedLabel),
         actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: _ToolbarButton(
+              icon: Icons.search_rounded,
+              onPressed: _openProductSearchPage,
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: _ToolbarButton(
@@ -542,14 +611,17 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
                   : () => _refreshDashboard(isManual: true),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: _ToolbarButton(
-              icon: Icons.logout_rounded,
-              onPressed: widget.authService.signOut,
-            ),
-          ),
         ],
+      ),
+      drawer: _BranchDrawer(
+        user: user,
+        sections: availableSections,
+        selectedSection: _selectedBranchSection,
+        sectionLabelBuilder: (section) =>
+            _branchSectionLabel(user.role, section),
+        sectionIconBuilder: _branchSectionIcon,
+        onSelectSection: _selectBranchSection,
+        onSignOut: widget.authService.signOut,
       ),
       body: Container(
         decoration: const BoxDecoration(
@@ -583,13 +655,8 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
       return _buildAdminScaffold(user);
     }
 
-    final content = switch (user.role) {
-      UserRole.supervisor => _buildSupervisorSections(user),
-      UserRole.seller => _buildSellerSections(user),
-      UserRole.admin => const <Widget>[],
-    };
-
-    return _buildBranchScaffold(user, content);
+    _ensureValidBranchSection(user.role);
+    return _buildBranchScaffold(user);
   }
 }
 
@@ -1038,6 +1105,107 @@ class _AdminSectionHeader extends StatelessWidget {
             ).textTheme.labelLarge?.copyWith(color: Colors.white70),
           ),
       ],
+    );
+  }
+}
+
+class _OperationalMetricsSection extends StatefulWidget {
+  const _OperationalMetricsSection({
+    required this.service,
+    required this.user,
+    required this.title,
+  });
+
+  final InventoryWorkflowService service;
+  final AppUser user;
+  final String title;
+
+  @override
+  State<_OperationalMetricsSection> createState() =>
+      _OperationalMetricsSectionState();
+}
+
+class _OperationalMetricsSectionState
+    extends State<_OperationalMetricsSection> {
+  Stream<BranchOperationalStats>? _statsStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncStream();
+  }
+
+  @override
+  void didUpdateWidget(covariant _OperationalMetricsSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.service != widget.service ||
+        oldWidget.user.id != widget.user.id ||
+        oldWidget.user.branchId != widget.user.branchId ||
+        oldWidget.user.role != widget.user.role) {
+      _syncStream();
+    }
+  }
+
+  void _syncStream() {
+    if (!widget.user.can(AppPermission.viewOperationalMetrics)) {
+      _statsStream = null;
+      return;
+    }
+
+    _statsStream = widget.service.watchOperationalStats(
+      actorUser: widget.user,
+      branchId: widget.user.branchId,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final stream = _statsStream;
+    if (stream == null) {
+      return const SizedBox.shrink();
+    }
+
+    return StreamBuilder<BranchOperationalStats>(
+      stream: stream,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _DashboardPanel(
+            title: widget.title,
+            subtitle: 'No fue posible cargar estas metricas por ahora.',
+            accent: AppPalette.danger,
+            child: Text(
+              'Intenta actualizar nuevamente el dashboard.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+            ),
+          );
+        }
+
+        final stats = snapshot.data;
+        if (stats == null) {
+          return const SizedBox(
+            height: 180,
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _AdminSectionHeader(title: widget.title),
+            const SizedBox(height: 12),
+            _OperationalKpiStrip(stats: stats),
+            const SizedBox(height: 16),
+            _DashboardGrid(
+              children: [
+                _ConsultedOutOfStockPanel(stats: stats),
+                _TransfersByDayPanel(stats: stats),
+              ],
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -1977,6 +2145,125 @@ class _AdminDrawerTile extends StatelessWidget {
           Icons.chevron_right_rounded,
           color: Colors.white70,
         ),
+      ),
+    );
+  }
+}
+
+class _BranchDrawer extends StatelessWidget {
+  const _BranchDrawer({
+    required this.user,
+    required this.sections,
+    required this.selectedSection,
+    required this.sectionLabelBuilder,
+    required this.sectionIconBuilder,
+    required this.onSelectSection,
+    required this.onSignOut,
+  });
+
+  final AppUser user;
+  final List<_BranchDashboardSection> sections;
+  final _BranchDashboardSection selectedSection;
+  final String Function(_BranchDashboardSection section) sectionLabelBuilder;
+  final IconData Function(_BranchDashboardSection section) sectionIconBuilder;
+  final Future<void> Function(_BranchDashboardSection section) onSelectSection;
+  final VoidCallback onSignOut;
+
+  @override
+  Widget build(BuildContext context) {
+    return Drawer(
+      backgroundColor: const Color(0xFF09192E),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                user.role == UserRole.seller
+                    ? 'Menu de ventas'
+                    : 'Menu de sucursal',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '${user.fullName} | ${user.branchId}',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+              ),
+              const SizedBox(height: 22),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: sections
+                        .map(
+                          (section) => Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: _BranchDrawerTile(
+                              icon: sectionIconBuilder(section),
+                              title: sectionLabelBuilder(section),
+                              isSelected: section == selectedSection,
+                              onTap: () => unawaited(onSelectSection(section)),
+                            ),
+                          ),
+                        )
+                        .toList(growable: false),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              _AdminDrawerTile(
+                icon: Icons.logout_rounded,
+                title: 'Cerrar sesion',
+                onTap: onSignOut,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BranchDrawerTile extends StatelessWidget {
+  const _BranchDrawerTile({
+    required this.icon,
+    required this.title,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: isSelected ? const Color(0xFF173660) : const Color(0xFF0E2442),
+      borderRadius: BorderRadius.circular(16),
+      child: ListTile(
+        onTap: onTap,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        leading: Icon(
+          icon,
+          color: isSelected ? AppPalette.amber : Colors.white,
+        ),
+        title: Text(
+          title,
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        trailing: isSelected
+            ? const Icon(Icons.check_rounded, color: AppPalette.amber)
+            : const Icon(Icons.chevron_right_rounded, color: Colors.white70),
       ),
     );
   }

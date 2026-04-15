@@ -100,6 +100,27 @@ class CatalogRepository {
     return Product.fromFirestore(snapshot.id, data);
   }
 
+  Future<List<Branch>> fetchBranches() async {
+    final snapshot = await _branches.orderBy('name').get();
+    return snapshot.docs
+        .map((doc) => Branch.fromFirestore(doc.id, doc.data()))
+        .toList(growable: false);
+  }
+
+  Future<List<Category>> fetchCategories() async {
+    final snapshot = await _categories.orderBy('name').get();
+    return snapshot.docs
+        .map((doc) => Category.fromFirestore(doc.id, doc.data()))
+        .toList(growable: false);
+  }
+
+  Future<List<Product>> fetchProducts() async {
+    final snapshot = await _products.orderBy('name').get();
+    return snapshot.docs
+        .map((doc) => Product.fromFirestore(doc.id, doc.data()))
+        .toList(growable: false);
+  }
+
   Stream<List<Branch>> watchBranches() {
     return _branches
         .orderBy('name')
@@ -163,6 +184,16 @@ class InventoryRepository {
       return null;
     }
     return InventoryItem.fromFirestore(snapshot.id, data);
+  }
+
+  Future<List<InventoryItem>> fetchBranchInventory(String branchId) async {
+    final snapshot = await _collection
+        .where('branchId', isEqualTo: branchId)
+        .orderBy('productName')
+        .get();
+    return snapshot.docs
+        .map((doc) => InventoryItem.fromFirestore(doc.id, doc.data()))
+        .toList(growable: false);
   }
 
   Stream<List<InventoryItem>> watchBranchInventory(String branchId) {
@@ -336,6 +367,10 @@ class SystemRepository {
       _firestore.collection(FirestoreCollections.notifications);
   CollectionReference<Map<String, dynamic>> get _auditLogs =>
       _firestore.collection(FirestoreCollections.auditLogs);
+  CollectionReference<Map<String, dynamic>> get _searchHistory =>
+      _firestore.collection(FirestoreCollections.searchHistory);
+  CollectionReference<Map<String, dynamic>> get _searchFilters =>
+      _firestore.collection(FirestoreCollections.searchFilters);
 
   Future<void> addSyncLog(SyncLog syncLog) async {
     await _syncLogs.doc(syncLog.id).set(syncLog.toFirestore());
@@ -347,6 +382,56 @@ class SystemRepository {
 
   Future<void> addAuditLog(AuditLog auditLog) async {
     await _auditLogs.doc(auditLog.id).set(auditLog.toFirestore());
+  }
+
+  Future<SearchHistoryEntry?> fetchSearchHistory(
+    String userId,
+    String normalizedQuery,
+  ) async {
+    final snapshot = await _searchHistory
+        .doc(searchHistoryId(userId, normalizedQuery))
+        .get();
+    final data = snapshot.data();
+    if (data == null) {
+      return null;
+    }
+    return SearchHistoryEntry.fromFirestore(snapshot.id, data);
+  }
+
+  Future<void> upsertSearchHistory(SearchHistoryEntry entry) async {
+    await _searchHistory
+        .doc(entry.id)
+        .set(entry.toFirestore(), SetOptions(merge: true));
+  }
+
+  Future<SavedSearchFilter?> fetchSearchFilter(
+    String userId,
+    String filterKey,
+  ) async {
+    final snapshot = await _searchFilters
+        .doc(searchFilterId(userId, filterKey))
+        .get();
+    final data = snapshot.data();
+    if (data == null) {
+      return null;
+    }
+    return SavedSearchFilter.fromFirestore(snapshot.id, data);
+  }
+
+  Future<void> upsertSearchFilter(SavedSearchFilter entry) async {
+    await _searchFilters
+        .doc(entry.id)
+        .set(entry.toFirestore(), SetOptions(merge: true));
+  }
+
+  String searchHistoryId(String userId, String normalizedQuery) {
+    final compactQuery = normalizedQuery.replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+    return '${userId}_$compactQuery';
+  }
+
+  String searchFilterId(String userId, String filterKey) {
+    final compactKey = filterKey.replaceAll(RegExp(r'[^a-z0-9_]+'), '_');
+    return '${userId}_$compactKey';
   }
 
   Stream<List<SyncLog>> watchRecentSyncLogs({int limit = 6}) {
@@ -394,6 +479,40 @@ class SystemRepository {
         .map(
           (snapshot) => snapshot.docs
               .map((doc) => AuditLog.fromFirestore(doc.id, doc.data()))
+              .toList(),
+        );
+  }
+
+  Stream<List<SearchHistoryEntry>> watchRecentSearchHistory(
+    String userId, {
+    int limit = 8,
+  }) {
+    return _searchHistory
+        .where('userId', isEqualTo: userId)
+        .orderBy('updatedAt', descending: true)
+        .limit(limit)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map(
+                (doc) => SearchHistoryEntry.fromFirestore(doc.id, doc.data()),
+              )
+              .toList(),
+        );
+  }
+
+  Stream<List<SavedSearchFilter>> watchRecentSearchFilters(
+    String userId, {
+    int limit = 12,
+  }) {
+    return _searchFilters
+        .where('userId', isEqualTo: userId)
+        .orderBy('updatedAt', descending: true)
+        .limit(limit)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => SavedSearchFilter.fromFirestore(doc.id, doc.data()))
               .toList(),
         );
   }

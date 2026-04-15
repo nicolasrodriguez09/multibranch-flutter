@@ -61,6 +61,32 @@ class BranchOperationalStats {
   int get consultedOutOfStockCount => outOfStockConsultations.length;
 }
 
+class ProductSearchResult {
+  const ProductSearchResult({
+    required this.product,
+    required this.inventory,
+    required this.relevanceScore,
+  });
+
+  final Product product;
+  final InventoryItem? inventory;
+  final int relevanceScore;
+
+  bool get isOutOfStock => inventory == null || inventory!.availableStock <= 0;
+}
+
+class ProductSearchFilterOptions {
+  const ProductSearchFilterOptions({
+    required this.categories,
+    required this.brands,
+    required this.branches,
+  });
+
+  final List<Category> categories;
+  final List<String> brands;
+  final List<Branch> branches;
+}
+
 class InventoryWorkflowService {
   InventoryWorkflowService({
     required FirebaseFirestore firestore,
@@ -301,6 +327,198 @@ class InventoryWorkflowService {
     return branch;
   }
 
+  Future<List<ProductSearchResult>> searchProducts({
+    required AppUser actorUser,
+    required String branchId,
+    required String query,
+    ProductSearchFilters filters = const ProductSearchFilters(),
+  }) async {
+    _ensurePermission(actorUser, AppPermission.viewOwnInventory);
+    final normalizedFilters = _normalizeSearchFilters(filters);
+    final effectiveBranchId = normalizedFilters.branchId ?? branchId;
+    _ensureBranchAccess(actorUser, effectiveBranchId);
+
+    final normalizedQuery = _normalizeSearchQuery(query);
+    if (normalizedQuery.isEmpty && normalizedFilters.isEmpty) {
+      return const <ProductSearchResult>[];
+    }
+
+    final products = await catalog.fetchProducts();
+    final branchInventory = await inventories.fetchBranchInventory(
+      effectiveBranchId,
+    );
+    final inventoryByProductId = {
+      for (final item in branchInventory) item.productId: item,
+    };
+
+    final results =
+        products
+            .where((product) => product.isActive)
+            .map((product) {
+              final inventory = inventoryByProductId[product.id];
+              if (!_matchesProductFilters(
+                product,
+                inventory,
+                normalizedFilters,
+              )) {
+                return null;
+              }
+
+              final score = normalizedQuery.isEmpty
+                  ? 1
+                  : _productMatchScore(product, normalizedQuery);
+              if (score == 0) {
+                return null;
+              }
+
+              return ProductSearchResult(
+                product: product,
+                inventory: inventory,
+                relevanceScore: score,
+              );
+            })
+            .whereType<ProductSearchResult>()
+            .toList(growable: false)
+          ..sort((left, right) {
+            final relevanceComparison = right.relevanceScore.compareTo(
+              left.relevanceScore,
+            );
+            if (relevanceComparison != 0) {
+              return relevanceComparison;
+            }
+
+            final leftStock = left.inventory?.availableStock ?? 0;
+            final rightStock = right.inventory?.availableStock ?? 0;
+            final stockComparison = rightStock.compareTo(leftStock);
+            if (stockComparison != 0) {
+              return stockComparison;
+            }
+
+            return left.product.name.compareTo(right.product.name);
+          });
+
+    return results;
+  }
+
+  Future<ProductSearchFilterOptions> fetchSearchFilterOptions({
+    required AppUser actorUser,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.viewOwnInventory);
+
+    final branches = await catalog.fetchBranches();
+    final categories = await catalog.fetchCategories();
+    final products = await catalog.fetchProducts();
+
+    final visibleBranches = branches
+        .where(
+          (branch) => branch.isActive && actorUser.canAccessBranch(branch.id),
+        )
+        .toList(growable: false);
+    final visibleCategories = categories
+        .where((category) => category.isActive)
+        .toList(growable: false);
+    final brandLabels = <String, String>{};
+    for (final product in products) {
+      if (!product.isActive) {
+        continue;
+      }
+      final brand = product.brand.trim();
+      if (brand.isEmpty) {
+        continue;
+      }
+      brandLabels.putIfAbsent(brand.toLowerCase(), () => brand);
+    }
+    final brands = brandLabels.values.toList(growable: false)..sort();
+
+    return ProductSearchFilterOptions(
+      categories: visibleCategories,
+      brands: brands,
+      branches: visibleBranches,
+    );
+  }
+
+  Stream<List<SearchHistoryEntry>> watchRecentSearches({
+    required AppUser actorUser,
+    int limit = 8,
+  }) {
+    _ensurePermission(actorUser, AppPermission.viewOwnInventory);
+    return system.watchRecentSearchHistory(actorUser.id, limit: limit);
+  }
+
+  Future<void> saveRecentSearch({
+    required AppUser actorUser,
+    required String query,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.viewOwnInventory);
+
+    final normalizedQuery = _normalizeSearchQuery(query);
+    if (normalizedQuery.isEmpty) {
+      return;
+    }
+
+    final existing = await system.fetchSearchHistory(
+      actorUser.id,
+      normalizedQuery,
+    );
+    final now = _clock();
+    final entry = SearchHistoryEntry(
+      id: system.searchHistoryId(actorUser.id, normalizedQuery),
+      userId: actorUser.id,
+      query: query.trim(),
+      normalizedQuery: normalizedQuery,
+      hitCount: (existing?.hitCount ?? 0) + 1,
+      updatedAt: now,
+    );
+
+    await system.upsertSearchHistory(entry);
+  }
+
+  Stream<List<SavedSearchFilter>> watchRecentSearchFilters({
+    required AppUser actorUser,
+    int limit = 12,
+  }) {
+    _ensurePermission(actorUser, AppPermission.viewOwnInventory);
+    return system.watchRecentSearchFilters(actorUser.id, limit: limit);
+  }
+
+  Future<void> saveSearchFilter({
+    required AppUser actorUser,
+    required ProductSearchFilters filters,
+    required String label,
+    bool favorite = false,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.viewOwnInventory);
+
+    final normalizedFilters = _normalizeSearchFilters(filters);
+    if (normalizedFilters.isEmpty) {
+      return;
+    }
+    if (normalizedFilters.branchId != null) {
+      _ensureBranchAccess(actorUser, normalizedFilters.branchId!);
+    }
+
+    final normalizedLabel = label.trim();
+    final filterKey = _filterKey(normalizedFilters);
+    final existing = await system.fetchSearchFilter(actorUser.id, filterKey);
+    final now = _clock();
+    final effectiveLabel = existing?.isFavorite == true && !favorite
+        ? existing!.label
+        : normalizedLabel.isEmpty
+        ? (existing?.label ?? 'Filtro guardado')
+        : normalizedLabel;
+    final entry = SavedSearchFilter(
+      id: system.searchFilterId(actorUser.id, filterKey),
+      userId: actorUser.id,
+      label: effectiveLabel,
+      filters: normalizedFilters,
+      isFavorite: favorite || (existing?.isFavorite ?? false),
+      usageCount: (existing?.usageCount ?? 0) + 1,
+      updatedAt: now,
+    );
+
+    await system.upsertSearchFilter(entry);
+  }
+
   Stream<BranchOperationalStats> watchOperationalStats({
     required AppUser actorUser,
     required String branchId,
@@ -317,6 +535,7 @@ class InventoryWorkflowService {
     var reservationsReady = false;
     var transfersReady = false;
     var syncLogsReady = false;
+    var subscriptions = <StreamSubscription<Object?>>[];
 
     void emit() {
       if (controller.isClosed) {
@@ -339,31 +558,39 @@ class InventoryWorkflowService {
       );
     }
 
-    final subscriptions = <StreamSubscription<Object?>>[
-      inventories.watchBranchInventory(branchId).listen((items) {
-        inventoriesState = items;
-        inventoriesReady = true;
-        emit();
-      }, onError: controller.addError),
-      reservations.watchBranchReservations(branchId).listen((items) {
-        reservationsState = items;
-        reservationsReady = true;
-        emit();
-      }, onError: controller.addError),
-      transfers.watchTransfers().listen((items) {
-        transfersState = items;
-        transfersReady = true;
-        emit();
-      }, onError: controller.addError),
-      system.watchBranchSyncLogs(branchId, limit: 30).listen((items) {
-        syncLogsState = items;
-        syncLogsReady = true;
-        emit();
-      }, onError: controller.addError),
-    ];
+    controller.onListen = () {
+      if (subscriptions.isNotEmpty) {
+        return;
+      }
+
+      subscriptions = <StreamSubscription<Object?>>[
+        inventories.watchBranchInventory(branchId).listen((items) {
+          inventoriesState = items;
+          inventoriesReady = true;
+          emit();
+        }, onError: controller.addError),
+        reservations.watchBranchReservations(branchId).listen((items) {
+          reservationsState = items;
+          reservationsReady = true;
+          emit();
+        }, onError: controller.addError),
+        transfers.watchTransfers().listen((items) {
+          transfersState = items;
+          transfersReady = true;
+          emit();
+        }, onError: controller.addError),
+        system.watchBranchSyncLogs(branchId, limit: 30).listen((items) {
+          syncLogsState = items;
+          syncLogsReady = true;
+          emit();
+        }, onError: controller.addError),
+      ];
+    };
 
     controller.onCancel = () async {
-      for (final subscription in subscriptions) {
+      final currentSubscriptions = subscriptions;
+      subscriptions = <StreamSubscription<Object?>>[];
+      for (final subscription in currentSubscriptions) {
         await subscription.cancel();
       }
     };
@@ -1079,5 +1306,165 @@ class InventoryWorkflowService {
       return 2;
     }
     return 0;
+  }
+
+  String _normalizeSearchQuery(String value) {
+    return value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  ProductSearchFilters _normalizeSearchFilters(ProductSearchFilters filters) {
+    final categoryId = filters.categoryId?.trim();
+    final brand = filters.brand?.trim();
+    final branchId = filters.branchId?.trim();
+    var minStock = filters.minStock;
+    var maxStock = filters.maxStock;
+
+    if (minStock != null && minStock < 0) {
+      minStock = 0;
+    }
+    if (maxStock != null && maxStock < 0) {
+      maxStock = 0;
+    }
+    if (minStock != null && maxStock != null && minStock > maxStock) {
+      final lower = maxStock;
+      maxStock = minStock;
+      minStock = lower;
+    }
+
+    return ProductSearchFilters(
+      categoryId: categoryId == null || categoryId.isEmpty ? null : categoryId,
+      brand: brand == null || brand.isEmpty ? null : brand,
+      branchId: branchId == null || branchId.isEmpty ? null : branchId,
+      availability: filters.availability,
+      minStock: minStock,
+      maxStock: maxStock,
+    );
+  }
+
+  bool _matchesProductFilters(
+    Product product,
+    InventoryItem? inventory,
+    ProductSearchFilters filters,
+  ) {
+    if (filters.categoryId != null &&
+        product.categoryId != filters.categoryId) {
+      return false;
+    }
+
+    if (filters.brand != null &&
+        product.brand.trim().toLowerCase() !=
+            filters.brand!.trim().toLowerCase()) {
+      return false;
+    }
+
+    final availableStock = inventory?.availableStock ?? 0;
+    switch (filters.availability) {
+      case ProductAvailabilityFilter.any:
+        break;
+      case ProductAvailabilityFilter.available:
+        if (availableStock <= 0) {
+          return false;
+        }
+        break;
+      case ProductAvailabilityFilter.outOfStock:
+        if (availableStock > 0) {
+          return false;
+        }
+        break;
+      case ProductAvailabilityFilter.lowStock:
+        if (inventory == null || !inventory.isLowStock || availableStock <= 0) {
+          return false;
+        }
+        break;
+    }
+
+    if (filters.minStock != null && availableStock < filters.minStock!) {
+      return false;
+    }
+    if (filters.maxStock != null && availableStock > filters.maxStock!) {
+      return false;
+    }
+
+    return true;
+  }
+
+  String _filterKey(ProductSearchFilters filters) {
+    final values = <String>[
+      filters.categoryId ?? '',
+      filters.brand?.trim().toLowerCase() ?? '',
+      filters.branchId ?? '',
+      filters.availability.name,
+      filters.minStock?.toString() ?? '',
+      filters.maxStock?.toString() ?? '',
+    ];
+    return values.join('__');
+  }
+
+  int _productMatchScore(Product product, String normalizedQuery) {
+    final queryWords = normalizedQuery
+        .split(' ')
+        .where((word) => word.isNotEmpty)
+        .toList(growable: false);
+    final searchableFields =
+        <String>[
+              product.name,
+              product.sku,
+              product.barcode,
+              product.brand,
+              product.description,
+              ...product.tags,
+            ]
+            .map((value) => value.trim().toLowerCase())
+            .where((value) => value.isNotEmpty)
+            .toList(growable: false);
+
+    final matchesAllWords = queryWords.every(
+      (word) => searchableFields.any((field) => field.contains(word)),
+    );
+    if (!matchesAllWords) {
+      return 0;
+    }
+
+    var score = 10;
+    final name = product.name.toLowerCase();
+    final sku = product.sku.toLowerCase();
+    final brand = product.brand.toLowerCase();
+    final description = product.description.toLowerCase();
+
+    if (name == normalizedQuery || sku == normalizedQuery) {
+      score += 120;
+    }
+    if (name.startsWith(normalizedQuery)) {
+      score += 70;
+    }
+    if (sku.startsWith(normalizedQuery)) {
+      score += 60;
+    }
+    if (brand.startsWith(normalizedQuery)) {
+      score += 35;
+    }
+    if (name.contains(normalizedQuery)) {
+      score += 25;
+    }
+    if (description.contains(normalizedQuery)) {
+      score += 12;
+    }
+
+    for (final word in queryWords) {
+      if (name.contains(word)) {
+        score += 8;
+      }
+      if (sku.contains(word)) {
+        score += 7;
+      }
+      if (brand.contains(word)) {
+        score += 5;
+      }
+      if (product.tags.any((tag) => tag.toLowerCase().contains(word))) {
+        score += 4;
+      }
+    }
+
+    return score;
   }
 }
