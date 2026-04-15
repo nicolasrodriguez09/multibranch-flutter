@@ -884,6 +884,190 @@ class AuditLog {
   }
 }
 
+class SearchHistoryEntry {
+  const SearchHistoryEntry({
+    required this.id,
+    required this.userId,
+    required this.query,
+    required this.normalizedQuery,
+    required this.hitCount,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final String userId;
+  final String query;
+  final String normalizedQuery;
+  final int hitCount;
+  final DateTime updatedAt;
+
+  Map<String, dynamic> toFirestore() => {
+    'userId': userId,
+    'query': query,
+    'normalizedQuery': normalizedQuery,
+    'hitCount': hitCount,
+    'updatedAt': writeDateTime(updatedAt),
+  };
+
+  factory SearchHistoryEntry.fromFirestore(
+    String id,
+    Map<String, dynamic> data,
+  ) {
+    return SearchHistoryEntry(
+      id: id,
+      userId: readString(data, 'userId'),
+      query: readString(data, 'query'),
+      normalizedQuery: readString(data, 'normalizedQuery'),
+      hitCount: readInt(data, 'hitCount'),
+      updatedAt:
+          readDateTime(data, 'updatedAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+    );
+  }
+}
+
+enum ProductAvailabilityFilter {
+  any,
+  available,
+  outOfStock,
+  lowStock;
+
+  static ProductAvailabilityFilter fromValue(String value) {
+    final normalizedValue = value.trim().toLowerCase();
+    return ProductAvailabilityFilter.values.firstWhere(
+      (item) => item.name.toLowerCase() == normalizedValue,
+      orElse: () => ProductAvailabilityFilter.any,
+    );
+  }
+}
+
+class ProductSearchFilters {
+  const ProductSearchFilters({
+    this.categoryId,
+    this.brand,
+    this.branchId,
+    this.availability = ProductAvailabilityFilter.any,
+    this.minStock,
+    this.maxStock,
+  });
+
+  final String? categoryId;
+  final String? brand;
+  final String? branchId;
+  final ProductAvailabilityFilter availability;
+  final int? minStock;
+  final int? maxStock;
+
+  int get activeFilterCount =>
+      ((categoryId?.isNotEmpty ?? false) ? 1 : 0) +
+      ((brand?.isNotEmpty ?? false) ? 1 : 0) +
+      ((branchId?.isNotEmpty ?? false) ? 1 : 0) +
+      (availability == ProductAvailabilityFilter.any ? 0 : 1) +
+      (minStock == null ? 0 : 1) +
+      (maxStock == null ? 0 : 1);
+
+  bool get isEmpty =>
+      (categoryId == null || categoryId!.isEmpty) &&
+      (brand == null || brand!.isEmpty) &&
+      (branchId == null || branchId!.isEmpty) &&
+      availability == ProductAvailabilityFilter.any &&
+      minStock == null &&
+      maxStock == null;
+
+  ProductSearchFilters copyWith({
+    String? categoryId,
+    String? brand,
+    String? branchId,
+    ProductAvailabilityFilter? availability,
+    int? minStock,
+    int? maxStock,
+    bool clearCategoryId = false,
+    bool clearBrand = false,
+    bool clearBranchId = false,
+    bool clearMinStock = false,
+    bool clearMaxStock = false,
+  }) {
+    return ProductSearchFilters(
+      categoryId: clearCategoryId ? null : (categoryId ?? this.categoryId),
+      brand: clearBrand ? null : (brand ?? this.brand),
+      branchId: clearBranchId ? null : (branchId ?? this.branchId),
+      availability: availability ?? this.availability,
+      minStock: clearMinStock ? null : (minStock ?? this.minStock),
+      maxStock: clearMaxStock ? null : (maxStock ?? this.maxStock),
+    );
+  }
+
+  Map<String, dynamic> toFirestore() => {
+    'categoryId': categoryId,
+    'brand': brand,
+    'branchId': branchId,
+    'availability': availability.name,
+    'minStock': minStock,
+    'maxStock': maxStock,
+  };
+
+  factory ProductSearchFilters.fromFirestore(Map<String, dynamic> data) {
+    return ProductSearchFilters(
+      categoryId: data['categoryId'] as String?,
+      brand: data['brand'] as String?,
+      branchId: data['branchId'] as String?,
+      availability: ProductAvailabilityFilter.fromValue(
+        readString(data, 'availability'),
+      ),
+      minStock: data['minStock'] is int ? data['minStock'] as int : null,
+      maxStock: data['maxStock'] is int ? data['maxStock'] as int : null,
+    );
+  }
+}
+
+class SavedSearchFilter {
+  const SavedSearchFilter({
+    required this.id,
+    required this.userId,
+    required this.label,
+    required this.filters,
+    required this.isFavorite,
+    required this.usageCount,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final String userId;
+  final String label;
+  final ProductSearchFilters filters;
+  final bool isFavorite;
+  final int usageCount;
+  final DateTime updatedAt;
+
+  Map<String, dynamic> toFirestore() => {
+    'userId': userId,
+    'label': label,
+    'filters': filters.toFirestore(),
+    'isFavorite': isFavorite,
+    'usageCount': usageCount,
+    'updatedAt': writeDateTime(updatedAt),
+  };
+
+  factory SavedSearchFilter.fromFirestore(
+    String id,
+    Map<String, dynamic> data,
+  ) {
+    return SavedSearchFilter(
+      id: id,
+      userId: readString(data, 'userId'),
+      label: readString(data, 'label'),
+      filters: ProductSearchFilters.fromFirestore(
+        (data['filters'] as Map?)?.cast<String, dynamic>() ?? const {},
+      ),
+      isFavorite: readBool(data, 'isFavorite'),
+      usageCount: readInt(data, 'usageCount'),
+      updatedAt:
+          readDateTime(data, 'updatedAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+    );
+  }
+}
+
 class InventoryException implements Exception {
   const InventoryException(this.message);
 

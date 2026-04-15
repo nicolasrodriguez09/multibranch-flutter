@@ -177,5 +177,19 @@ service cloud.firestore {
     match /audit_logs/{auditId} {
       allow read, write: if isAdmin();
     }
+
+    match /search_history/{historyId} {
+      allow read: if signedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create, update: if signedIn()
+        && (request.resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if signedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    match /search_filters/{filterId} {
+      allow read: if signedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create, update: if signedIn()
+        && (request.resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if signedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
   }
 }

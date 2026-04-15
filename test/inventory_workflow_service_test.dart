@@ -118,6 +118,110 @@ void main() {
   );
 
   test(
+    'product search returns ranked results and persists recent searches',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      final logitechResults = await service.searchProducts(
+        actorUser: seller,
+        branchId: DemoIds.branchCenter,
+        query: 'logitech',
+      );
+      final samsungResults = await service.searchProducts(
+        actorUser: seller,
+        branchId: DemoIds.branchCenter,
+        query: 'samsung a55',
+      );
+
+      expect(logitechResults, isNotEmpty);
+      expect(logitechResults.first.product.id, DemoIds.mouseProduct);
+      expect(
+        logitechResults.any(
+          (item) => item.product.id == DemoIds.headsetProduct,
+        ),
+        isTrue,
+      );
+      expect(samsungResults, isNotEmpty);
+      expect(samsungResults.first.product.id, DemoIds.phoneProduct);
+      expect(samsungResults.first.isOutOfStock, isTrue);
+
+      await service.saveRecentSearch(actorUser: seller, query: 'Logitech');
+      await service.saveRecentSearch(actorUser: seller, query: 'logitech');
+      final history = await service
+          .watchRecentSearches(actorUser: seller)
+          .first;
+
+      expect(history, hasLength(1));
+      expect(history.first.query, 'logitech');
+      expect(history.first.normalizedQuery, 'logitech');
+      expect(history.first.hitCount, 2);
+    },
+  );
+
+  test(
+    'advanced product filters narrow results and persist favorite filters',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      final options = await service.fetchSearchFilterOptions(actorUser: seller);
+      final filters = ProductSearchFilters(
+        categoryId: DemoIds.accessoriesCategory,
+        brand: 'Samsung',
+        availability: ProductAvailabilityFilter.available,
+        minStock: 1,
+        maxStock: 4,
+      );
+
+      final results = await service.searchProducts(
+        actorUser: seller,
+        branchId: DemoIds.branchCenter,
+        query: '',
+        filters: filters,
+      );
+
+      expect(
+        options.categories.any(
+          (item) => item.id == DemoIds.accessoriesCategory,
+        ),
+        isTrue,
+      );
+      expect(options.brands, containsAll(<String>['Logitech', 'Samsung']));
+      expect(options.branches, hasLength(1));
+      expect(options.branches.first.id, DemoIds.branchCenter);
+      expect(results, hasLength(1));
+      expect(results.first.product.id, DemoIds.monitorProduct);
+      expect(results.first.inventory!.availableStock, 3);
+
+      await service.saveSearchFilter(
+        actorUser: seller,
+        filters: filters,
+        label: 'Samsung con stock bajo',
+        favorite: true,
+      );
+      await service.saveSearchFilter(
+        actorUser: seller,
+        filters: filters,
+        label: 'Etiqueta temporal',
+      );
+
+      final savedFilters = await service
+          .watchRecentSearchFilters(actorUser: seller)
+          .first;
+
+      expect(savedFilters, hasLength(1));
+      expect(savedFilters.first.label, 'Samsung con stock bajo');
+      expect(savedFilters.first.isFavorite, isTrue);
+      expect(savedFilters.first.usageCount, 2);
+    },
+  );
+
+  test(
     'createReservation and completeReservation keep inventory consistent',
     () async {
       await service.seedMasterData(actorUser: sampleData.users.first);

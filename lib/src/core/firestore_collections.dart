@@ -9,4 +9,6 @@ abstract final class FirestoreCollections {
   static const syncLogs = 'sync_logs';
   static const notifications = 'notifications';
   static const auditLogs = 'audit_logs';
+  static const searchHistory = 'search_history';
+  static const searchFilters = 'search_filters';
 }
