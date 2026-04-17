@@ -400,6 +400,44 @@ class InventoryWorkflowService {
     return results;
   }
 
+  Future<ProductSearchResult?> findProductByBarcode({
+    required AppUser actorUser,
+    required String branchId,
+    required String barcode,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.viewOwnInventory);
+    _ensureBranchAccess(actorUser, branchId);
+
+    final normalizedBarcode = _normalizeBarcode(barcode);
+    if (normalizedBarcode.isEmpty) {
+      return null;
+    }
+
+    final products = await catalog.fetchProducts();
+    final matchedProduct = products.cast<Product?>().firstWhere(
+      (product) =>
+          product != null &&
+          product.isActive &&
+          _normalizeBarcode(product.barcode) == normalizedBarcode,
+      orElse: () => null,
+    );
+
+    if (matchedProduct == null) {
+      return null;
+    }
+
+    final inventory = await inventories.fetchInventory(
+      branchId,
+      matchedProduct.id,
+    );
+
+    return ProductSearchResult(
+      product: matchedProduct,
+      inventory: inventory,
+      relevanceScore: 999,
+    );
+  }
+
   Future<ProductSearchFilterOptions> fetchSearchFilterOptions({
     required AppUser actorUser,
   }) async {
@@ -1310,6 +1348,10 @@ class InventoryWorkflowService {
 
   String _normalizeSearchQuery(String value) {
     return value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  String _normalizeBarcode(String value) {
+    return value.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
   }
 
   ProductSearchFilters _normalizeSearchFilters(ProductSearchFilters filters) {

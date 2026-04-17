@@ -222,6 +222,33 @@ void main() {
   );
 
   test(
+    'barcode lookup returns exact product for current branch inventory',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      final found = await service.findProductByBarcode(
+        actorUser: seller,
+        branchId: DemoIds.branchCenter,
+        barcode: '7501234567803',
+      );
+      final missing = await service.findProductByBarcode(
+        actorUser: seller,
+        branchId: DemoIds.branchCenter,
+        barcode: '0000000000000',
+      );
+
+      expect(found, isNotNull);
+      expect(found!.product.id, DemoIds.monitorProduct);
+      expect(found.inventory, isNotNull);
+      expect(found.inventory!.branchId, DemoIds.branchCenter);
+      expect(missing, isNull);
+    },
+  );
+
+  test(
     'createReservation and completeReservation keep inventory consistent',
     () async {
       await service.seedMasterData(actorUser: sampleData.users.first);

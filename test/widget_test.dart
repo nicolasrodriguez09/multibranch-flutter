@@ -185,6 +185,7 @@ void main() {
     expect(find.text('Buscar productos'), findsOneWidget);
     expect(find.text('Buscador de productos'), findsOneWidget);
     expect(find.text('Filtros guardados'), findsOneWidget);
+    expect(find.byIcon(Icons.qr_code_scanner_rounded), findsOneWidget);
 
     await tester.enterText(find.byType(TextField), 'router');
     await tester.pump(const Duration(milliseconds: 200));
