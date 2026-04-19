@@ -4,6 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:flutter_multibranch_proyect/src/app.dart';
+import 'package:flutter_multibranch_proyect/src/features/auth/application/auth_service.dart';
+import 'package:flutter_multibranch_proyect/src/features/inventory/application/inventory_workflow_service.dart';
+import 'package:flutter_multibranch_proyect/src/features/inventory/data/sample_seed_data.dart';
+import 'package:flutter_multibranch_proyect/src/features/inventory/domain/models.dart';
+import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/branch_directory_page.dart';
+import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/branch_location_resolver.dart';
+import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/inventory_dashboard_page.dart';
+import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/product_detail_page.dart';
+import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/reservation_request_page.dart';
+import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/transfer_request_page.dart';
 
 void main() {
   testWidgets('renders auth page when there is no signed in user', (
@@ -79,6 +89,7 @@ void main() {
 
     expect(find.text('Menu administrativo'), findsOneWidget);
     expect(find.text('Gestion de empleados'), findsOneWidget);
+    expect(find.text('Trazabilidad operativa'), findsOneWidget);
     expect(find.text('Agregar sucursal'), findsOneWidget);
     expect(find.text('Crear base de datos inicial'), findsOneWidget);
     expect(find.text('Cerrar sesion'), findsOneWidget);
@@ -90,6 +101,120 @@ void main() {
     expect(find.text('Nuevo empleado'), findsOneWidget);
     expect(find.text('Ana Admin'), findsOneWidget);
   });
+
+  testWidgets('admin can open traceability module from drawer', (
+    WidgetTester tester,
+  ) async {
+    final firestore = FakeFirebaseFirestore();
+    await _seedUserProfile(
+      firestore,
+      uid: 'uid_admin_trace',
+      fullName: 'Ana Admin',
+      email: 'admintrace@empresa.com',
+      role: 'admin',
+      branchId: 'branch_001',
+    );
+
+    await tester.pumpWidget(
+      MyApp(
+        firestore: firestore,
+        auth: MockFirebaseAuth(
+          signedIn: true,
+          mockUser: MockUser(
+            uid: 'uid_admin_trace',
+            email: 'admintrace@empresa.com',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.menu));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Trazabilidad operativa'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Trazabilidad operativa'), findsOneWidget);
+    expect(
+      find.text('Trazabilidad de traslados y solicitudes'),
+      findsOneWidget,
+    );
+    expect(find.text('Traslados auditados'), findsOneWidget);
+    expect(find.text('Solicitudes auditadas'), findsOneWidget);
+  });
+
+  testWidgets(
+    'admin can open transfer traceability detail from audit activity',
+    (WidgetTester tester) async {
+      final firestore = FakeFirebaseFirestore();
+      final now = DateTime.utc(2026, 3, 26, 12, 0);
+      final service = InventoryWorkflowService(
+        firestore: firestore,
+        clock: () => now,
+      );
+      final sampleData = SampleSeedData.build(now);
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final admin = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.adminUser,
+      );
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+      final supervisor = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.secondBranchSeller,
+      );
+
+      final transfer = await service.requestTransfer(
+        actorUser: seller,
+        productId: DemoIds.laptopProduct,
+        fromBranchId: DemoIds.branchNorth,
+        toBranchId: DemoIds.branchCenter,
+        quantity: 2,
+        reason: 'Venta prioritaria',
+        notes: 'Cliente confirmado en caja',
+      );
+      await service.approveTransfer(
+        actorUser: supervisor,
+        transferId: transfer.id,
+      );
+
+      final authService = AuthService(
+        auth: MockFirebaseAuth(
+          signedIn: true,
+          mockUser: MockUser(uid: admin.id, email: admin.email),
+        ),
+        firestore: firestore,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(useMaterial3: true),
+          home: InventoryDashboardPage(
+            service: service,
+            authService: authService,
+            currentUser: admin,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.scrollUntilVisible(
+        find.text('Actividad administrativa'),
+        220,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Traslado aprobado').first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Trazabilidad del traslado'), findsOneWidget);
+      expect(find.text('Ruta del movimiento'), findsOneWidget);
+      expect(find.text('Actores clave'), findsOneWidget);
+      expect(find.text('Timeline auditado'), findsOneWidget);
+      expect(find.textContaining('Juan Centro'), findsWidgets);
+      expect(find.textContaining('Sucursal Norte'), findsWidgets);
+    },
+  );
 
   testWidgets('seller dashboard hides admin and supervisor sections', (
     WidgetTester tester,
@@ -117,6 +242,14 @@ void main() {
 
     expect(find.text('Panel de ventas'), findsOneWidget);
     expect(find.text('Resumen comercial'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Prioridades inmediatas'),
+      220,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Prioridades inmediatas'), findsOneWidget);
+    expect(find.text('Stock bajo prioritario'), findsOneWidget);
     expect(find.text('KPIs operativos'), findsNothing);
     expect(find.text('Consultas sin stock'), findsNothing);
     await tester.pumpAndSettle();
@@ -134,23 +267,182 @@ void main() {
     expect(find.text('Inventario y alertas'), findsOneWidget);
     expect(find.text('Compromisos y sincronizacion'), findsOneWidget);
     expect(find.text('Modulos habilitados'), findsOneWidget);
-
-    await tester.tap(find.text('Inventario y alertas').first);
+    expect(find.text('Sucursales'), findsOneWidget);
+    expect(find.text('Reservar producto'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.descendant(
+        of: find.byType(Drawer),
+        matching: find.widgetWithText(ListTile, 'Solicitar traslado'),
+      ),
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
     await tester.pumpAndSettle();
-
-    expect(find.text('Productos mas consultados'), findsOneWidget);
-    expect(find.text('Productos sin stock'), findsWidgets);
-    expect(find.text('Alertas de inventario bajo'), findsOneWidget);
-    expect(find.text('Compromisos activos'), findsNothing);
-
-    await tester.tap(find.byIcon(Icons.menu).first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Compromisos y sincronizacion').first);
-    await tester.pumpAndSettle();
-
-    expect(find.text('Compromisos activos'), findsOneWidget);
-    expect(find.text('Ultimas sincronizaciones'), findsOneWidget);
+    expect(find.text('Solicitar traslado'), findsOneWidget);
   });
+
+  testWidgets(
+    'reservation request page creates an active reservation in another branch',
+    (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1080, 2200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final firestore = FakeFirebaseFirestore();
+      final now = DateTime.utc(2026, 3, 26, 12, 0);
+      final service = InventoryWorkflowService(
+        firestore: firestore,
+        clock: () => now,
+      );
+      final sampleData = SampleSeedData.build(now);
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(useMaterial3: true),
+          home: ReservationRequestPage(
+            service: service,
+            currentUser: seller,
+            initialProductId: DemoIds.phoneProduct,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Reservar producto'), findsOneWidget);
+      expect(find.text('Formulario de reserva'), findsOneWidget);
+      expect(
+        find.textContaining('Sin stock local para Samsung A55'),
+        findsOneWidget,
+      );
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Cantidad a reservar'),
+        '2',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Cliente'),
+        'Cliente Reserva Norte',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Telefono del cliente'),
+        '3001234567',
+      );
+
+      await tester.scrollUntilVisible(
+        find.text('Crear reserva'),
+        220,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Crear reserva'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Reserva creada'), findsOneWidget);
+      expect(
+        find.textContaining('quedo activa en Sucursal Norte'),
+        findsOneWidget,
+      );
+
+      final reservations = await service.reservations
+          .watchReservationsByUser(seller.id)
+          .first;
+      final reservation = reservations.cast<Reservation?>().firstWhere(
+        (item) => item?.customerName == 'Cliente Reserva Norte',
+        orElse: () => null,
+      );
+
+      expect(reservation, isNotNull);
+      expect(reservation!.branchId, DemoIds.branchNorth);
+      expect(reservation.status, ReservationStatus.active);
+      expect(reservation.quantity, 2);
+    },
+  );
+
+  testWidgets(
+    'transfer request page creates a pending request for seller branch',
+    (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1080, 2200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final firestore = FakeFirebaseFirestore();
+      final now = DateTime.utc(2026, 3, 26, 12, 0);
+      final service = InventoryWorkflowService(
+        firestore: firestore,
+        clock: () => now,
+      );
+      final sampleData = SampleSeedData.build(now);
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(useMaterial3: true),
+          home: TransferRequestPage(
+            service: service,
+            currentUser: seller,
+            initialProductId: DemoIds.phoneProduct,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Solicitar traslado'), findsOneWidget);
+      expect(find.text('Formulario de solicitud'), findsOneWidget);
+      expect(
+        find.textContaining('Sin stock local para Samsung A55'),
+        findsOneWidget,
+      );
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Cantidad solicitada'),
+        '2',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Motivo'),
+        'Venta comprometida sin stock local',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Notas internas'),
+        'Cliente espera hoy',
+      );
+
+      await tester.scrollUntilVisible(
+        find.text('Enviar solicitud'),
+        220,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Enviar solicitud'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Solicitud enviada'), findsOneWidget);
+      expect(find.textContaining('hacia Sucursal Centro'), findsOneWidget);
+
+      final transfers = await service.transfers.watchTransfers().first;
+      final transfer = transfers.cast<TransferRequest?>().firstWhere(
+        (item) => item?.reason == 'Venta comprometida sin stock local',
+        orElse: () => null,
+      );
+      expect(transfer, isNotNull);
+      expect(transfer!.requestedBy, DemoIds.branchSeller);
+      expect(transfer.fromBranchId, DemoIds.branchNorth);
+      expect(transfer.toBranchId, DemoIds.branchCenter);
+      expect(transfer.quantity, 2);
+    },
+  );
 
   testWidgets('search screen opens from dashboard and handles debounce', (
     WidgetTester tester,
@@ -185,6 +477,7 @@ void main() {
     expect(find.text('Buscar productos'), findsOneWidget);
     expect(find.text('Buscador de productos'), findsOneWidget);
     expect(find.text('Filtros guardados'), findsOneWidget);
+    expect(find.byIcon(Icons.qr_code_scanner_rounded), findsOneWidget);
 
     await tester.enterText(find.byType(TextField), 'router');
     await tester.pump(const Duration(milliseconds: 200));
@@ -202,6 +495,350 @@ void main() {
     expect(find.text('Sucursal'), findsOneWidget);
     expect(find.text('Disponibilidad'), findsOneWidget);
     expect(find.text('Guardar favorito'), findsOneWidget);
+  });
+
+  testWidgets('product detail page loads commercial and inventory data', (
+    WidgetTester tester,
+  ) async {
+    final firestore = FakeFirebaseFirestore();
+    final now = DateTime.utc(2026, 3, 26, 12, 0);
+    final service = InventoryWorkflowService(
+      firestore: firestore,
+      clock: () => now,
+    );
+    final sampleData = SampleSeedData.build(now);
+    await service.seedMasterData(actorUser: sampleData.users.first);
+    final seller = sampleData.users.firstWhere(
+      (user) => user.id == DemoIds.branchSeller,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark(useMaterial3: true),
+        home: ProductDetailPage(
+          service: service,
+          currentUser: seller,
+          productId: DemoIds.monitorProduct,
+        ),
+      ),
+    );
+
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Detalle del producto'), findsOneWidget);
+    expect(find.text('Monitor Samsung 24'), findsOneWidget);
+    expect(find.text('Confiabilidad del dato'), findsOneWidget);
+    expect(find.text('Amarillo'), findsOneWidget);
+    expect(find.text('Antiguedad 18 min'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Codigo de barras'),
+      140,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Codigo de barras'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Stock por sucursal'),
+      180,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Stock por sucursal'), findsOneWidget);
+    expect(find.text('Sucursal Norte'), findsOneWidget);
+    expect(find.text('Rojo vencido'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Atributos del producto'),
+      240,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Atributos del producto'), findsOneWidget);
+    expect(find.text('Estado de inventario'), findsOneWidget);
+  });
+
+  testWidgets('product detail shows cache message when using local cache', (
+    WidgetTester tester,
+  ) async {
+    final firestore = FakeFirebaseFirestore();
+    final now = DateTime.utc(2026, 3, 26, 12, 0);
+    final service = InventoryWorkflowService(
+      firestore: firestore,
+      clock: () => now,
+    );
+    final sampleData = SampleSeedData.build(now);
+    await service.seedMasterData(actorUser: sampleData.users.first);
+    final seller = sampleData.users.firstWhere(
+      (user) => user.id == DemoIds.branchSeller,
+    );
+
+    await service.fetchProductDetail(
+      actorUser: seller,
+      branchId: DemoIds.branchCenter,
+      productId: DemoIds.monitorProduct,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark(useMaterial3: true),
+        home: ProductDetailPage(
+          service: service,
+          currentUser: seller,
+          productId: DemoIds.monitorProduct,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('Mostrando informacion desde cache local'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+    'branch directory shows selected product stock and branch filters',
+    (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1080, 2200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final firestore = FakeFirebaseFirestore();
+      final now = DateTime.utc(2026, 3, 26, 12, 0);
+      final service = InventoryWorkflowService(
+        firestore: firestore,
+        clock: () => now,
+      );
+      final sampleData = SampleSeedData.build(now);
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(useMaterial3: true),
+          home: BranchDirectoryPage(
+            service: service,
+            currentUser: seller,
+            selectedProductId: DemoIds.phoneProduct,
+            locationResolver: _FakeBranchLocationResolver.granted(
+              const BranchLocation(lat: -0.1807, lng: -78.4678),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Directorio de sucursales'), findsOneWidget);
+      expect(find.textContaining('Samsung A55'), findsWidgets);
+      expect(find.text('Mayor stock'), findsOneWidget);
+      expect(find.text('Cercania'), findsOneWidget);
+      expect(find.text('Sucursal Norte'), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.text('Sucursal Norte')).dy,
+        lessThan(tester.getTopLeft(find.text('Sucursal Centro')).dy),
+      );
+
+      await tester.tap(find.text('Cercania'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getTopLeft(find.text('Sucursal Centro')).dy,
+        lessThan(tester.getTopLeft(find.text('Sucursal Norte')).dy),
+      );
+
+      await tester.tap(find.text('Mayor stock'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getTopLeft(find.text('Sucursal Norte')).dy,
+        lessThan(tester.getTopLeft(find.text('Sucursal Centro')).dy),
+      );
+
+      await tester.scrollUntilVisible(
+        find.text('Sucursal Centro'),
+        220,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Sucursal Centro'), findsOneWidget);
+
+      await tester.scrollUntilVisible(
+        find.text('Con stock'),
+        -220,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Con stock'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Sucursal Norte'), findsOneWidget);
+      expect(find.text('Sucursal Centro'), findsNothing);
+
+      await tester.tap(find.text('Todas').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).first, 'norte');
+      await tester.pumpAndSettle();
+
+      expect(find.text('Sucursal Norte'), findsOneWidget);
+      expect(find.text('Sucursal Centro'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'branch directory falls back to assigned branch when location permission is denied',
+    (WidgetTester tester) async {
+      final firestore = FakeFirebaseFirestore();
+      final now = DateTime.utc(2026, 3, 26, 12, 0);
+      final service = InventoryWorkflowService(
+        firestore: firestore,
+        clock: () => now,
+      );
+      final sampleData = SampleSeedData.build(now);
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(useMaterial3: true),
+          home: BranchDirectoryPage(
+            service: service,
+            currentUser: seller,
+            selectedProductId: DemoIds.phoneProduct,
+            locationResolver: _FakeBranchLocationResolver.denied(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('No se concedio el permiso de ubicacion'),
+        findsOneWidget,
+      );
+      expect(find.text('Usar mi ubicacion'), findsOneWidget);
+      expect(
+        find.textContaining('Distancia desde Sucursal Centro'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'product detail shows alternative branch recommendation and allows switching options',
+    (WidgetTester tester) async {
+      final firestore = FakeFirebaseFirestore();
+      final now = DateTime.utc(2026, 3, 26, 12, 0);
+      final service = InventoryWorkflowService(
+        firestore: firestore,
+        clock: () => now,
+      );
+      final sampleData = SampleSeedData.build(now);
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final admin = sampleData.users.first;
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      final branchSouth = await service.createBranch(
+        actorUser: admin,
+        name: 'Sucursal Sur',
+        code: 'SUR-003',
+        address: 'Av. Sur 120',
+        city: 'Quito',
+        phone: '023444444',
+        email: 'sur@empresa.com',
+        managerName: 'Paola Sur',
+        openingHours: '09:00-18:00',
+        latitude: -0.265,
+        longitude: -78.52,
+      );
+
+      await service.inventories.upsertInventory(
+        InventoryItem.create(
+          branchId: branchSouth.id,
+          branchName: branchSouth.name,
+          productId: DemoIds.phoneProduct,
+          productName: 'Samsung A55',
+          sku: 'PHN-002',
+          stock: 11,
+          reservedStock: 0,
+          incomingStock: 0,
+          minimumStock: 3,
+          updatedBy: admin.id,
+          isActive: true,
+          updatedAt: now.subtract(const Duration(minutes: 8)),
+          lastMovementAt: now.subtract(const Duration(minutes: 8)),
+          lastSyncAt: now.subtract(const Duration(minutes: 8)),
+        ),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(useMaterial3: true),
+          home: ProductDetailPage(
+            service: service,
+            currentUser: seller,
+            productId: DemoIds.phoneProduct,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Sucursal alternativa sugerida'), findsOneWidget);
+      expect(
+        find.textContaining('Tu sucursal no tiene stock disponible'),
+        findsOneWidget,
+      );
+      expect(find.text('Sucursal Norte'), findsWidgets);
+      expect(find.text('Sucursal Sur'), findsOneWidget);
+      expect(find.textContaining('15 uds disponibles'), findsOneWidget);
+
+      await tester.scrollUntilVisible(
+        find.text('Sucursal Sur'),
+        180,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Sucursal Sur'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('11 uds disponibles'), findsOneWidget);
+    },
+  );
+
+  testWidgets('product detail page shows error state for invalid product id', (
+    WidgetTester tester,
+  ) async {
+    final firestore = FakeFirebaseFirestore();
+    final now = DateTime.utc(2026, 3, 26, 12, 0);
+    final service = InventoryWorkflowService(
+      firestore: firestore,
+      clock: () => now,
+    );
+    final sampleData = SampleSeedData.build(now);
+    await service.seedMasterData(actorUser: sampleData.users.first);
+    final seller = sampleData.users.firstWhere(
+      (user) => user.id == DemoIds.branchSeller,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark(useMaterial3: true),
+        home: ProductDetailPage(
+          service: service,
+          currentUser: seller,
+          productId: 'missing_product',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('No se pudo cargar el producto'), findsOneWidget);
+    expect(find.text('Reintentar'), findsOneWidget);
   });
 
   testWidgets(
@@ -249,6 +886,7 @@ void main() {
       expect(find.text('Inventario y alertas'), findsOneWidget);
       expect(find.text('Solicitudes y sincronizacion'), findsOneWidget);
       expect(find.text('Modulos habilitados'), findsOneWidget);
+      expect(find.text('Reservar producto'), findsOneWidget);
 
       await tester.tap(find.text('KPIs operativos').first);
       await tester.pumpAndSettle();
@@ -311,6 +949,42 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+}
+
+class _FakeBranchLocationResolver implements BranchLocationResolver {
+  const _FakeBranchLocationResolver(this._result);
+
+  final BranchLocationAccessResult _result;
+
+  factory _FakeBranchLocationResolver.granted(BranchLocation location) {
+    return _FakeBranchLocationResolver(
+      BranchLocationAccessResult(
+        status: BranchLocationAccessStatus.granted,
+        location: location,
+        message:
+            'Ubicacion actual activa. Las distancias se ordenan desde el dispositivo.',
+      ),
+    );
+  }
+
+  factory _FakeBranchLocationResolver.denied() {
+    return const _FakeBranchLocationResolver(
+      BranchLocationAccessResult(
+        status: BranchLocationAccessStatus.denied,
+        message:
+            'No se concedio el permiso de ubicacion. Se usa la sucursal asignada como referencia.',
+      ),
+    );
+  }
+
+  @override
+  Future<bool> openAppSettings() async => true;
+
+  @override
+  Future<bool> openLocationSettings() async => true;
+
+  @override
+  Future<BranchLocationAccessResult> resolveCurrentLocation() async => _result;
 }
 
 Future<void> _seedUserProfile(

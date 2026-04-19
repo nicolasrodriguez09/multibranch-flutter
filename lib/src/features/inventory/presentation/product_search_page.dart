@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import '../../../core/app_theme.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
+import 'barcode_scanner_page.dart';
+import 'product_detail_page.dart';
 
 class ProductSearchPage extends StatefulWidget {
   const ProductSearchPage({
@@ -290,6 +292,36 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
     await _runSearch(forcedQuery: _queryController.text);
   }
 
+  Future<void> _openProductDetail(ProductSearchResult result) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => ProductDetailPage(
+          service: widget.service,
+          currentUser: widget.currentUser,
+          productId: result.product.id,
+          branchId: result.inventory?.branchId ?? _filters.branchId,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openBarcodeScanner() async {
+    final result = await Navigator.of(context).push<ProductSearchResult>(
+      MaterialPageRoute<ProductSearchResult>(
+        builder: (context) => BarcodeScannerPage(
+          service: widget.service,
+          currentUser: widget.currentUser,
+        ),
+      ),
+    );
+
+    if (!mounted || result == null) {
+      return;
+    }
+
+    await _openProductDetail(result);
+  }
+
   String _buildFilterLabel(ProductSearchFilters filters) {
     final parts = <String>[];
 
@@ -372,6 +404,11 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
                     _FilterButton(
                       activeCount: _filters.activeFilterCount,
                       onPressed: _openFilters,
+                    ),
+                    const SizedBox(width: 12),
+                    _IconShortcutButton(
+                      icon: Icons.qr_code_scanner_rounded,
+                      onPressed: _openBarcodeScanner,
                     ),
                   ],
                 ),
@@ -496,6 +533,9 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
         return _SearchResultCard(
           result: visibleResults[index],
           categoryName: _categoryName(visibleResults[index].product.categoryId),
+          onTap: () {
+            unawaited(_openProductDetail(visibleResults[index]));
+          },
         );
       },
     );
@@ -592,6 +632,29 @@ class _FilterButton extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _IconShortcutButton extends StatelessWidget {
+  const _IconShortcutButton({required this.icon, required this.onPressed});
+
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 56,
+      width: 56,
+      child: FilledButton(
+        onPressed: onPressed,
+        style: FilledButton.styleFrom(
+          padding: EdgeInsets.zero,
+          backgroundColor: const Color(0xFF153258),
+        ),
+        child: Icon(icon),
       ),
     );
   }
@@ -979,10 +1042,15 @@ class _SearchFeedbackCard extends StatelessWidget {
 }
 
 class _SearchResultCard extends StatelessWidget {
-  const _SearchResultCard({required this.result, required this.categoryName});
+  const _SearchResultCard({
+    required this.result,
+    required this.categoryName,
+    required this.onTap,
+  });
 
   final ProductSearchResult result;
   final String categoryName;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -997,84 +1065,103 @@ class _SearchResultCard extends StatelessWidget {
         ? 'Stock bajo ${inventory.availableStock}'
         : 'Disponible ${inventory.availableStock}';
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFF102540),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0x26FFFFFF)),
+          ),
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      result.product.name,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          result.product.name,
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${result.product.brand} | ${result.product.sku}',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: Colors.white70),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 7,
+                        ),
+                        decoration: BoxDecoration(
+                          color: statusColor.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: statusColor.withValues(alpha: 0.22),
+                          ),
+                        ),
+                        child: Text(
+                          statusLabel,
+                          style: Theme.of(context).textTheme.labelMedium
+                              ?.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${result.product.brand} | ${result.product.sku}',
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodySmall?.copyWith(color: Colors.white70),
-                    ),
-                  ],
-                ),
+                      const SizedBox(height: 8),
+                      const Icon(
+                        Icons.chevron_right_rounded,
+                        color: Colors.white70,
+                      ),
+                    ],
+                  ),
+                ],
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 7,
-                ),
-                decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(
-                    color: statusColor.withValues(alpha: 0.22),
+              const SizedBox(height: 12),
+              Text(
+                result.product.description,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _SearchInfoPill(label: categoryName),
+                  _SearchInfoPill(
+                    label:
+                        'Precio ${result.product.currency} ${result.product.price.toStringAsFixed(2)}',
                   ),
-                ),
-                child: Text(
-                  statusLabel,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+                  if (inventory != null)
+                    _SearchInfoPill(
+                      label: 'Reservado ${inventory.reservedStock}',
+                    ),
+                  _SearchInfoPill(label: 'Relevancia ${result.relevanceScore}'),
+                ],
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          Text(
-            result.product.description,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _SearchInfoPill(label: categoryName),
-              _SearchInfoPill(
-                label:
-                    'Precio ${result.product.currency} ${result.product.price.toStringAsFixed(2)}',
-              ),
-              if (inventory != null)
-                _SearchInfoPill(label: 'Reservado ${inventory.reservedStock}'),
-              _SearchInfoPill(label: 'Relevancia ${result.relevanceScore}'),
-            ],
-          ),
-        ],
+        ),
       ),
     );
   }

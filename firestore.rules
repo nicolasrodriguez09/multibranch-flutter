@@ -38,12 +38,28 @@ service cloud.firestore {
       return isAdmin() || hasSameBranch(branchId);
     }
 
+    function canReadInventory(branchId) {
+      return hasUserProfile() && (isAdmin() || hasSameBranch(branchId) || isSeller() || isSupervisor());
+    }
+
     function canManageInventory(branchId) {
       return isAdmin() || (isSupervisor() && hasSameBranch(branchId));
     }
 
     function canHandleReservation(branchId) {
       return isAdmin() || ((isSeller() || isSupervisor()) && hasSameBranch(branchId));
+    }
+
+    function canReadReservation(data) {
+      return isAdmin()
+        || canReadBranch(data.branchId)
+        || (signedIn() && data.reservedBy == request.auth.uid);
+    }
+
+    function canUpdateReservation(data) {
+      return isAdmin()
+        || canHandleReservation(data.branchId)
+        || (signedIn() && data.reservedBy == request.auth.uid);
     }
 
     function canRequestTransfer(branchId) {
@@ -110,7 +126,7 @@ service cloud.firestore {
     }
 
     match /inventories/{inventoryId} {
-      allow read: if canReadBranch(resource.data.branchId);
+      allow read: if canReadInventory(resource.data.branchId);
       allow create: if signedIn()
         && canManageInventory(request.resource.data.branchId)
         && validInventoryDerivedFields(request.resource.data);
@@ -129,7 +145,7 @@ service cloud.firestore {
       allow create: if hasUserProfile()
         && request.resource.data.requestedBy == request.auth.uid
         && request.resource.data.status == 'pending'
-        && canRequestTransfer(request.resource.data.fromBranchId)
+        && canRequestTransfer(request.resource.data.toBranchId)
         && request.resource.data.fromBranchId != request.resource.data.toBranchId;
       allow update: if hasUserProfile()
         && sameTransferScope(request.resource.data, resource.data)
@@ -156,11 +172,11 @@ service cloud.firestore {
     }
 
     match /reservations/{reservationId} {
-      allow read: if isAdmin() || canReadBranch(resource.data.branchId);
+      allow read: if canReadReservation(resource.data);
       allow create: if hasUserProfile()
         && request.resource.data.reservedBy == request.auth.uid
-        && canHandleReservation(request.resource.data.branchId);
-      allow update: if hasUserProfile() && canHandleReservation(resource.data.branchId);
+        && (isAdmin() || isSeller() || isSupervisor());
+      allow update: if hasUserProfile() && canUpdateReservation(resource.data);
       allow delete: if isAdmin();
     }
 
@@ -175,7 +191,11 @@ service cloud.firestore {
     }
 
     match /audit_logs/{auditId} {
-      allow read, write: if isAdmin();
+      allow read: if isAdmin();
+      allow create: if hasUserProfile()
+        && request.resource.data.actorUserId == request.auth.uid
+        && request.resource.data.actorRole == currentUser().role;
+      allow update, delete: if isAdmin();
     }
 
     match /search_history/{historyId} {
