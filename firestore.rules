@@ -38,6 +38,10 @@ service cloud.firestore {
       return isAdmin() || hasSameBranch(branchId);
     }
 
+    function canReadInventory(branchId) {
+      return hasUserProfile() && (isAdmin() || hasSameBranch(branchId) || isSeller() || isSupervisor());
+    }
+
     function canManageInventory(branchId) {
       return isAdmin() || (isSupervisor() && hasSameBranch(branchId));
     }
@@ -110,7 +114,7 @@ service cloud.firestore {
     }
 
     match /inventories/{inventoryId} {
-      allow read: if canReadBranch(resource.data.branchId);
+      allow read: if canReadInventory(resource.data.branchId);
       allow create: if signedIn()
         && canManageInventory(request.resource.data.branchId)
         && validInventoryDerivedFields(request.resource.data);
@@ -129,7 +133,7 @@ service cloud.firestore {
       allow create: if hasUserProfile()
         && request.resource.data.requestedBy == request.auth.uid
         && request.resource.data.status == 'pending'
-        && canRequestTransfer(request.resource.data.fromBranchId)
+        && canRequestTransfer(request.resource.data.toBranchId)
         && request.resource.data.fromBranchId != request.resource.data.toBranchId;
       allow update: if hasUserProfile()
         && sameTransferScope(request.resource.data, resource.data)

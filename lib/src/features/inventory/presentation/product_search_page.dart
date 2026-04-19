@@ -296,11 +296,10 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (context) => ProductDetailPage(
-          result: result,
-          categoryLabel: _categoryName(result.product.categoryId),
-          branchLabel:
-              result.inventory?.branchName ??
-              _branchName(_filters.branchId ?? widget.currentUser.branchId),
+          service: widget.service,
+          currentUser: widget.currentUser,
+          productId: result.product.id,
+          branchId: result.inventory?.branchId ?? _filters.branchId,
         ),
       ),
     );

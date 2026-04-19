@@ -2,6 +2,7 @@ import 'models.dart';
 
 enum AppPermission {
   viewOwnInventory('Ver inventario de sucursal'),
+  viewStockByBranch('Ver stock por sucursal'),
   viewLowStock('Ver alertas de stock bajo'),
   viewBranchReservations('Ver reservas activas de la sucursal'),
   viewBranchTransfers('Ver traslados de la sucursal'),
@@ -54,6 +55,7 @@ extension UserRolePermissions on UserRole {
   bool can(AppPermission permission) => switch (this) {
     UserRole.seller => switch (permission) {
       AppPermission.viewOwnInventory ||
+      AppPermission.viewStockByBranch ||
       AppPermission.viewLowStock ||
       AppPermission.createReservation ||
       AppPermission.updateReservation ||
@@ -63,6 +65,7 @@ extension UserRolePermissions on UserRole {
     },
     UserRole.supervisor => switch (permission) {
       AppPermission.viewOwnInventory ||
+      AppPermission.viewStockByBranch ||
       AppPermission.viewLowStock ||
       AppPermission.viewBranchReservations ||
       AppPermission.viewBranchTransfers ||

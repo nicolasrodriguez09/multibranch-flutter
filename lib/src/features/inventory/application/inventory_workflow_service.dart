@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -87,6 +88,184 @@ class ProductSearchFilterOptions {
   final List<Branch> branches;
 }
 
+class TransferRequestCatalogItem {
+  const TransferRequestCatalogItem({
+    required this.product,
+    required this.currentInventory,
+  });
+
+  final Product product;
+  final InventoryItem? currentInventory;
+
+  int get currentAvailableStock => currentInventory?.availableStock ?? 0;
+  int get incomingStock => currentInventory?.incomingStock ?? 0;
+  bool get isOutOfStock => currentAvailableStock <= 0;
+  bool get isLowStock => currentInventory?.isLowStock ?? false;
+}
+
+enum InventoryDataReliabilityLevel { green, yellow, red }
+
+class InventoryDataReliability {
+  const InventoryDataReliability({
+    required this.level,
+    required this.lastUpdatedAt,
+    required this.age,
+    required this.message,
+    required this.isIncomplete,
+  });
+
+  final InventoryDataReliabilityLevel level;
+  final DateTime? lastUpdatedAt;
+  final Duration? age;
+  final String message;
+  final bool isIncomplete;
+
+  bool get isExpired => level == InventoryDataReliabilityLevel.red;
+
+  String get statusLabel => switch (level) {
+    InventoryDataReliabilityLevel.green => 'Verde',
+    InventoryDataReliabilityLevel.yellow => 'Amarillo',
+    InventoryDataReliabilityLevel.red =>
+      isIncomplete ? 'Rojo incompleto' : 'Rojo vencido',
+  };
+}
+
+class ProductBranchStockEntry {
+  const ProductBranchStockEntry({
+    required this.branch,
+    required this.inventory,
+    required this.lastUpdatedAt,
+    required this.reliability,
+  });
+
+  final Branch branch;
+  final InventoryItem? inventory;
+  final DateTime? lastUpdatedAt;
+  final InventoryDataReliability reliability;
+
+  int get physicalStock => inventory?.stock ?? 0;
+  int get reservedStock => inventory?.reservedStock ?? 0;
+  int get availableStock => inventory?.availableStock ?? 0;
+  int get inTransitStock => inventory?.incomingStock ?? 0;
+  bool get hasInventoryRecord => inventory != null;
+  bool get isStale => reliability.isExpired;
+}
+
+class ProductBranchSuggestion {
+  const ProductBranchSuggestion({
+    required this.stockEntry,
+    required this.distanceKm,
+    required this.estimatedTransferTime,
+    required this.priorityScore,
+  });
+
+  final ProductBranchStockEntry stockEntry;
+  final double distanceKm;
+  final Duration estimatedTransferTime;
+  final int priorityScore;
+
+  Branch get branch => stockEntry.branch;
+  int get availableStock => stockEntry.availableStock;
+  String get etaLabel {
+    final hours = estimatedTransferTime.inHours;
+    final minutes = estimatedTransferTime.inMinutes.remainder(60);
+    if (hours == 0) {
+      return '${estimatedTransferTime.inMinutes} min';
+    }
+    return minutes == 0 ? '$hours h' : '$hours h $minutes min';
+  }
+
+  String get rationale =>
+      '$availableStock uds disponibles | ${distanceKm.toStringAsFixed(1)} km | ETA $etaLabel';
+}
+
+class BranchDirectoryEntry {
+  const BranchDirectoryEntry({
+    required this.branch,
+    required this.distanceKm,
+    required this.stockEntry,
+  });
+
+  final Branch branch;
+  final double distanceKm;
+  final ProductBranchStockEntry? stockEntry;
+
+  InventoryDataReliability? get reliability => stockEntry?.reliability;
+  int get availableStock => stockEntry?.availableStock ?? 0;
+  int get reservedStock => stockEntry?.reservedStock ?? 0;
+  int get incomingStock => stockEntry?.inTransitStock ?? 0;
+  DateTime? get lastUpdatedAt => stockEntry?.lastUpdatedAt;
+  bool get hasSelectedProductStock => stockEntry != null;
+}
+
+class BranchDirectoryData {
+  const BranchDirectoryData({
+    required this.entries,
+    required this.selectedProduct,
+    required this.currentBranch,
+    required this.isFromCache,
+  });
+
+  final List<BranchDirectoryEntry> entries;
+  final Product? selectedProduct;
+  final Branch? currentBranch;
+  final bool isFromCache;
+
+  List<String> get cities =>
+      entries.map((entry) => entry.branch.city).toSet().toList()..sort();
+
+  BranchDirectoryData copyWith({bool? isFromCache}) {
+    return BranchDirectoryData(
+      entries: entries,
+      selectedProduct: selectedProduct,
+      currentBranch: currentBranch,
+      isFromCache: isFromCache ?? this.isFromCache,
+    );
+  }
+}
+
+class ProductDetailData {
+  const ProductDetailData({
+    required this.product,
+    required this.inventory,
+    required this.category,
+    required this.branch,
+    required this.stockByBranch,
+    required this.branchSuggestions,
+    required this.recommendedSuggestion,
+    required this.reliability,
+    required this.isFromCache,
+  });
+
+  final Product product;
+  final InventoryItem? inventory;
+  final Category? category;
+  final Branch? branch;
+  final List<ProductBranchStockEntry> stockByBranch;
+  final List<ProductBranchSuggestion> branchSuggestions;
+  final ProductBranchSuggestion? recommendedSuggestion;
+  final InventoryDataReliability reliability;
+  final bool isFromCache;
+
+  bool get isOutOfStock => inventory == null || inventory!.availableStock <= 0;
+  bool get hasStaleStockByBranch => stockByBranch.any((entry) => entry.isStale);
+  bool get shouldShowAlternativeSuggestions => isOutOfStock;
+
+  ProductDetailData copyWith({bool? isFromCache}) {
+    return ProductDetailData(
+      product: product,
+      inventory: inventory,
+      category: category,
+      branch: branch,
+      stockByBranch: stockByBranch,
+      branchSuggestions: branchSuggestions,
+      recommendedSuggestion: recommendedSuggestion,
+      reliability: reliability,
+      isFromCache: isFromCache ?? this.isFromCache,
+    );
+  }
+}
+
 class InventoryWorkflowService {
   InventoryWorkflowService({
     required FirebaseFirestore firestore,
@@ -109,6 +288,16 @@ class InventoryWorkflowService {
   final ReservationRepository reservations;
   final TransferRepository transfers;
   final SystemRepository system;
+  final Map<String, ProductDetailData> _productDetailCache =
+      <String, ProductDetailData>{};
+  final Map<String, List<ProductBranchStockEntry>> _productStockByBranchCache =
+      <String, List<ProductBranchStockEntry>>{};
+  final Map<String, BranchDirectoryData> _branchDirectoryCache =
+      <String, BranchDirectoryData>{};
+  List<Branch>? _branchCatalogCache;
+
+  static const Duration _greenDataThreshold = Duration(minutes: 15);
+  static const Duration _yellowDataThreshold = Duration(minutes: 30);
 
   CollectionReference<Map<String, dynamic>> get _inventoriesCollection =>
       _firestore.collection(FirestoreCollections.inventories);
@@ -120,6 +309,216 @@ class InventoryWorkflowService {
       _firestore.collection(FirestoreCollections.notifications);
   CollectionReference<Map<String, dynamic>> get _auditLogsCollection =>
       _firestore.collection(FirestoreCollections.auditLogs);
+
+  void _invalidateProductCaches([String? productId]) {
+    if (productId == null || productId.isEmpty) {
+      _productDetailCache.clear();
+      _productStockByBranchCache.clear();
+      _branchDirectoryCache.clear();
+      return;
+    }
+
+    _productDetailCache.removeWhere((key, _) => key.endsWith('_$productId'));
+    _productStockByBranchCache.removeWhere(
+      (key, _) => key.endsWith('_$productId'),
+    );
+    _branchDirectoryCache.removeWhere((key, _) => key.endsWith('_$productId'));
+  }
+
+  void _invalidateBranchCatalogCache() {
+    _branchCatalogCache = null;
+    _branchDirectoryCache.clear();
+  }
+
+  Future<List<Branch>> _fetchBranchCatalog({bool forceRefresh = false}) async {
+    if (!forceRefresh) {
+      final cached = _branchCatalogCache;
+      if (cached != null) {
+        return cached;
+      }
+    }
+
+    final branches = List<Branch>.unmodifiable(await catalog.fetchBranches());
+    _branchCatalogCache = branches;
+    return branches;
+  }
+
+  DateTime? _resolveInventoryTimestamp(
+    InventoryItem? inventory,
+    Branch? branch,
+  ) {
+    return inventory?.lastSyncAt ??
+        inventory?.updatedAt ??
+        branch?.lastSyncAt ??
+        branch?.updatedAt;
+  }
+
+  InventoryDataReliability _buildInventoryReliability({
+    required InventoryItem? inventory,
+    required Branch? branch,
+  }) {
+    final lastUpdatedAt = _resolveInventoryTimestamp(inventory, branch);
+    final age = lastUpdatedAt == null
+        ? null
+        : _clock().difference(lastUpdatedAt);
+
+    if (inventory == null) {
+      return InventoryDataReliability(
+        level: InventoryDataReliabilityLevel.red,
+        lastUpdatedAt: lastUpdatedAt,
+        age: age,
+        message: 'No hay inventario consolidado para esta sucursal.',
+        isIncomplete: true,
+      );
+    }
+
+    if (lastUpdatedAt == null) {
+      return const InventoryDataReliability(
+        level: InventoryDataReliabilityLevel.red,
+        lastUpdatedAt: null,
+        age: null,
+        message: 'El inventario no tiene timestamp de actualizacion.',
+        isIncomplete: true,
+      );
+    }
+
+    final resolvedAge = age!;
+
+    if (resolvedAge <= _greenDataThreshold) {
+      return InventoryDataReliability(
+        level: InventoryDataReliabilityLevel.green,
+        lastUpdatedAt: lastUpdatedAt,
+        age: resolvedAge,
+        message: 'Dato reciente para informar al cliente con confianza.',
+        isIncomplete: false,
+      );
+    }
+
+    if (resolvedAge <= _yellowDataThreshold) {
+      return InventoryDataReliability(
+        level: InventoryDataReliabilityLevel.yellow,
+        lastUpdatedAt: lastUpdatedAt,
+        age: resolvedAge,
+        message: 'Dato util, pero conviene confirmarlo pronto.',
+        isIncomplete: false,
+      );
+    }
+
+    return InventoryDataReliability(
+      level: InventoryDataReliabilityLevel.red,
+      lastUpdatedAt: lastUpdatedAt,
+      age: resolvedAge,
+      message: 'Dato vencido para comunicar sin validacion adicional.',
+      isIncomplete: false,
+    );
+  }
+
+  double _distanceInKm(BranchLocation origin, BranchLocation destination) {
+    const earthRadiusKm = 6371.0;
+    final latDelta = _degreesToRadians(destination.lat - origin.lat);
+    final lngDelta = _degreesToRadians(destination.lng - origin.lng);
+    final originLat = _degreesToRadians(origin.lat);
+    final destinationLat = _degreesToRadians(destination.lat);
+
+    final haversine =
+        math.sin(latDelta / 2) * math.sin(latDelta / 2) +
+        math.cos(originLat) *
+            math.cos(destinationLat) *
+            math.sin(lngDelta / 2) *
+            math.sin(lngDelta / 2);
+    final angularDistance =
+        2 * math.atan2(math.sqrt(haversine), math.sqrt(1 - haversine));
+    return earthRadiusKm * angularDistance;
+  }
+
+  double calculateDistanceKm({
+    required BranchLocation origin,
+    required BranchLocation destination,
+  }) {
+    return _distanceInKm(origin, destination);
+  }
+
+  double _degreesToRadians(double value) => value * (math.pi / 180.0);
+
+  Duration _estimateTransferTime(double distanceKm) {
+    final minutes = 25 + (distanceKm / 24 * 60).round();
+    return Duration(minutes: math.max(minutes, 25));
+  }
+
+  int _recommendationScore({
+    required ProductBranchStockEntry entry,
+    required double distanceKm,
+    required Duration estimatedTransferTime,
+  }) {
+    final reliabilityPenalty = switch (entry.reliability.level) {
+      InventoryDataReliabilityLevel.green => 0,
+      InventoryDataReliabilityLevel.yellow => 12,
+      InventoryDataReliabilityLevel.red => 30,
+    };
+
+    return (entry.availableStock * 18) -
+        (distanceKm * 2).round() -
+        (estimatedTransferTime.inMinutes / 8).round() -
+        reliabilityPenalty;
+  }
+
+  List<ProductBranchSuggestion> _buildBranchSuggestions({
+    required Branch? currentBranch,
+    required String currentBranchId,
+    required List<ProductBranchStockEntry> stockByBranch,
+  }) {
+    final suggestions =
+        stockByBranch
+            .where(
+              (entry) =>
+                  entry.branch.id != currentBranchId &&
+                  entry.availableStock > 0,
+            )
+            .map((entry) {
+              final distanceKm = currentBranch == null
+                  ? 0.0
+                  : _distanceInKm(
+                      currentBranch.location,
+                      entry.branch.location,
+                    );
+              final estimatedTransferTime = _estimateTransferTime(distanceKm);
+              final priorityScore = _recommendationScore(
+                entry: entry,
+                distanceKm: distanceKm,
+                estimatedTransferTime: estimatedTransferTime,
+              );
+
+              return ProductBranchSuggestion(
+                stockEntry: entry,
+                distanceKm: distanceKm,
+                estimatedTransferTime: estimatedTransferTime,
+                priorityScore: priorityScore,
+              );
+            })
+            .toList(growable: false)
+          ..sort((left, right) {
+            final score = right.priorityScore.compareTo(left.priorityScore);
+            if (score != 0) {
+              return score;
+            }
+
+            final eta = left.estimatedTransferTime.compareTo(
+              right.estimatedTransferTime,
+            );
+            if (eta != 0) {
+              return eta;
+            }
+
+            final distance = left.distanceKm.compareTo(right.distanceKm);
+            if (distance != 0) {
+              return distance;
+            }
+
+            return right.availableStock.compareTo(left.availableStock);
+          });
+
+    return List<ProductBranchSuggestion>.unmodifiable(suggestions);
+  }
 
   void _ensurePermission(AppUser actorUser, AppPermission permission) {
     if (actorUser.can(permission)) {
@@ -257,6 +656,8 @@ class InventoryWorkflowService {
     batch.set(_auditLogsCollection.doc(auditLog.id), auditLog.toFirestore());
 
     await batch.commit();
+    _invalidateProductCaches();
+    _invalidateBranchCatalogCache();
   }
 
   Future<Branch> createBranch({
@@ -323,6 +724,8 @@ class InventoryWorkflowService {
     );
     batch.set(_auditLogsCollection.doc(auditLog.id), auditLog.toFirestore());
     await batch.commit();
+    _invalidateProductCaches();
+    _invalidateBranchCatalogCache();
 
     return branch;
   }
@@ -438,6 +841,230 @@ class InventoryWorkflowService {
     );
   }
 
+  Future<ProductDetailData> fetchProductDetail({
+    required AppUser actorUser,
+    required String branchId,
+    required String productId,
+    bool forceRefresh = false,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.viewOwnInventory);
+    _ensureBranchAccess(actorUser, branchId);
+
+    final cacheKey = '${branchId}_$productId';
+    if (!forceRefresh) {
+      final cached = _productDetailCache[cacheKey];
+      if (cached != null) {
+        return cached.copyWith(isFromCache: true);
+      }
+    }
+
+    final product = await catalog.fetchProduct(productId);
+    if (product == null || !product.isActive) {
+      throw const InventoryException(
+        'No se encontro el producto solicitado en el catalogo.',
+      );
+    }
+
+    final branch = await catalog.fetchBranch(branchId);
+    final inventory = await inventories.fetchInventory(branchId, product.id);
+    final category = product.categoryId.isEmpty
+        ? null
+        : await catalog.fetchCategory(product.categoryId);
+    final stockByBranch = await fetchProductStockByBranch(
+      actorUser: actorUser,
+      productId: product.id,
+      forceRefresh: forceRefresh,
+    );
+    final branchSuggestions = _buildBranchSuggestions(
+      currentBranch: branch,
+      currentBranchId: branchId,
+      stockByBranch: stockByBranch,
+    );
+    final reliability = _buildInventoryReliability(
+      inventory: inventory,
+      branch: branch,
+    );
+
+    final detail = ProductDetailData(
+      product: product,
+      inventory: inventory,
+      category: category,
+      branch: branch,
+      stockByBranch: stockByBranch,
+      branchSuggestions: branchSuggestions,
+      recommendedSuggestion: branchSuggestions.isEmpty
+          ? null
+          : branchSuggestions.first,
+      reliability: reliability,
+      isFromCache: false,
+    );
+    _productDetailCache[cacheKey] = detail;
+    return detail;
+  }
+
+  Future<List<ProductBranchStockEntry>> fetchProductStockByBranch({
+    required AppUser actorUser,
+    required String productId,
+    bool forceRefresh = false,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.viewStockByBranch);
+
+    final cacheKey = '${actorUser.id}_$productId';
+    if (!forceRefresh) {
+      final cached = _productStockByBranchCache[cacheKey];
+      if (cached != null) {
+        return cached;
+      }
+    }
+
+    final product = await catalog.fetchProduct(productId);
+    if (product == null || !product.isActive) {
+      throw const InventoryException(
+        'No se encontro el producto solicitado en el catalogo.',
+      );
+    }
+
+    final branches = await _fetchBranchCatalog(forceRefresh: forceRefresh);
+    final productInventories = await inventories.fetchProductInventory(
+      productId,
+    );
+    final inventoryByBranchId = {
+      for (final item in productInventories.where((item) => item.isActive))
+        item.branchId: item,
+    };
+
+    final stockByBranch =
+        branches
+            .where((branch) => branch.isActive)
+            .map((branch) {
+              final inventory = inventoryByBranchId[branch.id];
+              final lastUpdatedAt = _resolveInventoryTimestamp(
+                inventory,
+                branch,
+              );
+              final reliability = _buildInventoryReliability(
+                inventory: inventory,
+                branch: branch,
+              );
+
+              return ProductBranchStockEntry(
+                branch: branch,
+                inventory: inventory,
+                lastUpdatedAt: lastUpdatedAt,
+                reliability: reliability,
+              );
+            })
+            .toList(growable: false)
+          ..sort((left, right) {
+            final availability = right.availableStock.compareTo(
+              left.availableStock,
+            );
+            if (availability != 0) {
+              return availability;
+            }
+
+            final inTransit = right.inTransitStock.compareTo(
+              left.inTransitStock,
+            );
+            if (inTransit != 0) {
+              return inTransit;
+            }
+
+            return left.branch.name.compareTo(right.branch.name);
+          });
+
+    final immutableStockByBranch = List<ProductBranchStockEntry>.unmodifiable(
+      stockByBranch,
+    );
+    _productStockByBranchCache[cacheKey] = immutableStockByBranch;
+    return immutableStockByBranch;
+  }
+
+  Future<BranchDirectoryData> fetchBranchDirectory({
+    required AppUser actorUser,
+    String? productId,
+    bool forceRefresh = false,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.viewOwnInventory);
+
+    final normalizedProductId = productId?.trim();
+    final cacheKey = '${actorUser.id}_${normalizedProductId ?? 'catalog'}';
+    if (!forceRefresh) {
+      final cached = _branchDirectoryCache[cacheKey];
+      if (cached != null) {
+        return cached.copyWith(isFromCache: true);
+      }
+    }
+
+    final branches = await _fetchBranchCatalog(forceRefresh: forceRefresh);
+    final currentBranch = branches.cast<Branch?>().firstWhere(
+      (branch) => branch?.id == actorUser.branchId,
+      orElse: () => null,
+    );
+
+    Product? selectedProduct;
+    Map<String, ProductBranchStockEntry> stockByBranchId =
+        const <String, ProductBranchStockEntry>{};
+
+    if (normalizedProductId != null && normalizedProductId.isNotEmpty) {
+      selectedProduct = await catalog.fetchProduct(normalizedProductId);
+      if (selectedProduct == null || !selectedProduct.isActive) {
+        throw const InventoryException(
+          'No se encontro el producto solicitado en el catalogo.',
+        );
+      }
+
+      final stockByBranch = await fetchProductStockByBranch(
+        actorUser: actorUser,
+        productId: normalizedProductId,
+        forceRefresh: forceRefresh,
+      );
+      stockByBranchId = {
+        for (final entry in stockByBranch) entry.branch.id: entry,
+      };
+    }
+
+    final entries =
+        branches
+            .where((branch) => branch.isActive)
+            .map(
+              (branch) => BranchDirectoryEntry(
+                branch: branch,
+                distanceKm: currentBranch == null
+                    ? 0
+                    : _distanceInKm(currentBranch.location, branch.location),
+                stockEntry: stockByBranchId[branch.id],
+              ),
+            )
+            .toList(growable: false)
+          ..sort((left, right) {
+            if (selectedProduct != null) {
+              final availability = right.availableStock.compareTo(
+                left.availableStock,
+              );
+              if (availability != 0) {
+                return availability;
+              }
+            }
+
+            final distance = left.distanceKm.compareTo(right.distanceKm);
+            if (distance != 0) {
+              return distance;
+            }
+
+            return left.branch.name.compareTo(right.branch.name);
+          });
+
+    final directory = BranchDirectoryData(
+      entries: List<BranchDirectoryEntry>.unmodifiable(entries),
+      selectedProduct: selectedProduct,
+      currentBranch: currentBranch,
+      isFromCache: false,
+    );
+    _branchDirectoryCache[cacheKey] = directory;
+    return directory;
+  }
+
   Future<ProductSearchFilterOptions> fetchSearchFilterOptions({
     required AppUser actorUser,
   }) async {
@@ -473,6 +1100,51 @@ class InventoryWorkflowService {
       brands: brands,
       branches: visibleBranches,
     );
+  }
+
+  Future<List<TransferRequestCatalogItem>> fetchTransferRequestCatalog({
+    required AppUser actorUser,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.requestTransfer);
+
+    final products = await catalog.fetchProducts();
+    final branchInventory = await inventories.fetchBranchInventory(
+      actorUser.branchId,
+    );
+    final inventoryByProductId = {
+      for (final item in branchInventory.where((item) => item.isActive))
+        item.productId: item,
+    };
+
+    final items =
+        products
+            .where((product) => product.isActive)
+            .map(
+              (product) => TransferRequestCatalogItem(
+                product: product,
+                currentInventory: inventoryByProductId[product.id],
+              ),
+            )
+            .toList(growable: false)
+          ..sort((left, right) {
+            final stockComparison = left.currentAvailableStock.compareTo(
+              right.currentAvailableStock,
+            );
+            if (stockComparison != 0) {
+              return stockComparison;
+            }
+
+            final incomingComparison = left.incomingStock.compareTo(
+              right.incomingStock,
+            );
+            if (incomingComparison != 0) {
+              return incomingComparison;
+            }
+
+            return left.product.name.compareTo(right.product.name);
+          });
+
+    return List<TransferRequestCatalogItem>.unmodifiable(items);
   }
 
   Stream<List<SearchHistoryEntry>> watchRecentSearches({
@@ -651,7 +1323,9 @@ class InventoryWorkflowService {
       inventories.inventoryId(branchId, productId),
     );
 
-    return _firestore.runTransaction((transaction) async {
+    final updatedInventory = await _firestore.runTransaction((
+      transaction,
+    ) async {
       final inventorySnapshot = await transaction.get(inventoryRef);
       if (!inventorySnapshot.exists) {
         throw const InventoryException(
@@ -674,6 +1348,8 @@ class InventoryWorkflowService {
       transaction.set(inventoryRef, updatedInventory.toFirestore());
       return updatedInventory;
     });
+    _invalidateProductCaches(productId);
+    return updatedInventory;
   }
 
   Future<Reservation> createReservation({
@@ -701,7 +1377,7 @@ class InventoryWorkflowService {
     );
     final reservationRef = _reservationsCollection.doc();
 
-    return _firestore.runTransaction((transaction) async {
+    final reservation = await _firestore.runTransaction((transaction) async {
       final inventorySnapshot = await transaction.get(inventoryRef);
       if (!inventorySnapshot.exists) {
         throw const InventoryException(
@@ -753,6 +1429,8 @@ class InventoryWorkflowService {
 
       return reservation;
     });
+    _invalidateProductCaches(productId);
+    return reservation;
   }
 
   Future<Reservation> updateReservationStatus({
@@ -769,7 +1447,9 @@ class InventoryWorkflowService {
     final now = _clock();
     final reservationRef = _reservationsCollection.doc(reservationId);
 
-    return _firestore.runTransaction((transaction) async {
+    final updatedReservation = await _firestore.runTransaction((
+      transaction,
+    ) async {
       final reservationSnapshot = await transaction.get(reservationRef);
       if (!reservationSnapshot.exists) {
         throw const InventoryException('La reserva no existe.');
@@ -825,6 +1505,8 @@ class InventoryWorkflowService {
 
       return updatedReservation;
     });
+    _invalidateProductCaches(updatedReservation.productId);
+    return updatedReservation;
   }
 
   Future<TransferRequest> requestTransfer({
@@ -837,7 +1519,7 @@ class InventoryWorkflowService {
     String notes = '',
   }) async {
     _ensurePermission(actorUser, AppPermission.requestTransfer);
-    _ensureBranchAccess(actorUser, fromBranchId);
+    _ensureBranchAccess(actorUser, toBranchId);
 
     if (quantity <= 0) {
       throw const InventoryException(
@@ -850,6 +1532,13 @@ class InventoryWorkflowService {
       );
     }
 
+    final normalizedReason = reason.trim();
+    if (normalizedReason.isEmpty) {
+      throw const InventoryException(
+        'Debes indicar el motivo de la solicitud de traslado.',
+      );
+    }
+
     final product = await catalog.fetchProduct(productId);
     final sourceBranch = await catalog.fetchBranch(fromBranchId);
     final destinationBranch = await catalog.fetchBranch(toBranchId);
@@ -857,6 +1546,21 @@ class InventoryWorkflowService {
     if (product == null || sourceBranch == null || destinationBranch == null) {
       throw const InventoryException(
         'No se encontro el producto o alguna de las sucursales del traslado.',
+      );
+    }
+
+    final sourceInventory = await inventories.fetchInventory(
+      fromBranchId,
+      productId,
+    );
+    if (sourceInventory == null || !sourceInventory.isActive) {
+      throw const InventoryException(
+        'La sucursal origen no tiene inventario activo para este producto.',
+      );
+    }
+    if (sourceInventory.availableStock < quantity) {
+      throw InventoryException(
+        'Stock insuficiente en ${sourceBranch.name}. Disponible: ${sourceInventory.availableStock}.',
       );
     }
 
@@ -875,8 +1579,8 @@ class InventoryWorkflowService {
       approvedBy: null,
       quantity: quantity,
       status: TransferStatus.pending,
-      reason: reason,
-      notes: notes,
+      reason: normalizedReason,
+      notes: notes.trim(),
       requestedAt: now,
       approvedAt: null,
       shippedAt: null,
@@ -885,6 +1589,7 @@ class InventoryWorkflowService {
     );
 
     await transferRef.set(transfer.toFirestore());
+    _invalidateProductCaches(product.id);
     return transfer;
   }
 
@@ -898,7 +1603,9 @@ class InventoryWorkflowService {
     final transferRef = _transfersCollection.doc(transferId);
     final notificationRef = _notificationsCollection.doc();
 
-    return _firestore.runTransaction((transaction) async {
+    final updatedTransfer = await _firestore.runTransaction((
+      transaction,
+    ) async {
       final transferSnapshot = await transaction.get(transferRef);
       if (!transferSnapshot.exists) {
         throw const InventoryException('El traslado no existe.');
@@ -1006,6 +1713,8 @@ class InventoryWorkflowService {
 
       return updatedTransfer;
     });
+    _invalidateProductCaches(updatedTransfer.productId);
+    return updatedTransfer;
   }
 
   Future<TransferRequest> markTransferInTransit({
@@ -1017,7 +1726,9 @@ class InventoryWorkflowService {
     final now = _clock();
     final transferRef = _transfersCollection.doc(transferId);
 
-    return _firestore.runTransaction((transaction) async {
+    final updatedTransfer = await _firestore.runTransaction((
+      transaction,
+    ) async {
       final transferSnapshot = await transaction.get(transferRef);
       if (!transferSnapshot.exists) {
         throw const InventoryException('El traslado no existe.');
@@ -1045,6 +1756,8 @@ class InventoryWorkflowService {
       transaction.set(transferRef, updatedTransfer.toFirestore());
       return updatedTransfer;
     });
+    _invalidateProductCaches(updatedTransfer.productId);
+    return updatedTransfer;
   }
 
   Future<TransferRequest> receiveTransfer({
@@ -1057,7 +1770,9 @@ class InventoryWorkflowService {
     final transferRef = _transfersCollection.doc(transferId);
     final notificationRef = _notificationsCollection.doc();
 
-    return _firestore.runTransaction((transaction) async {
+    final updatedTransfer = await _firestore.runTransaction((
+      transaction,
+    ) async {
       final transferSnapshot = await transaction.get(transferRef);
       if (!transferSnapshot.exists) {
         throw const InventoryException('El traslado no existe.');
@@ -1132,6 +1847,8 @@ class InventoryWorkflowService {
 
       return updatedTransfer;
     });
+    _invalidateProductCaches(updatedTransfer.productId);
+    return updatedTransfer;
   }
 
   String _normalizeBranchCode(String value) {

@@ -100,6 +100,15 @@ class CatalogRepository {
     return Product.fromFirestore(snapshot.id, data);
   }
 
+  Future<Category?> fetchCategory(String categoryId) async {
+    final snapshot = await _categories.doc(categoryId).get();
+    final data = snapshot.data();
+    if (data == null) {
+      return null;
+    }
+    return Category.fromFirestore(snapshot.id, data);
+  }
+
   Future<List<Branch>> fetchBranches() async {
     final snapshot = await _branches.orderBy('name').get();
     return snapshot.docs
@@ -196,6 +205,15 @@ class InventoryRepository {
         .toList(growable: false);
   }
 
+  Future<List<InventoryItem>> fetchProductInventory(String productId) async {
+    final snapshot = await _collection
+        .where('productId', isEqualTo: productId)
+        .get();
+    return snapshot.docs
+        .map((doc) => InventoryItem.fromFirestore(doc.id, doc.data()))
+        .toList(growable: false);
+  }
+
   Stream<List<InventoryItem>> watchBranchInventory(String branchId) {
     return _collection
         .where('branchId', isEqualTo: branchId)
@@ -223,7 +241,6 @@ class InventoryRepository {
   Stream<List<InventoryItem>> watchProductInventory(String productId) {
     return _collection
         .where('productId', isEqualTo: productId)
-        .orderBy('availableStock')
         .snapshots()
         .map(
           (snapshot) => snapshot.docs

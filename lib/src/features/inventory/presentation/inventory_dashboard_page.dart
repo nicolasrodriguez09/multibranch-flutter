@@ -8,8 +8,10 @@ import '../../auth/presentation/employee_management_page.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
 import '../domain/role_permissions.dart';
+import 'branch_directory_page.dart';
 import 'create_branch_dialog.dart';
 import 'product_search_page.dart';
+import 'transfer_request_page.dart';
 
 enum _BranchDashboardSection { overview, inventory, workflow, metrics, modules }
 
@@ -150,6 +152,28 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (context) => ProductSearchPage(
+          service: widget.service,
+          currentUser: widget.currentUser,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openBranchDirectoryPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => BranchDirectoryPage(
+          service: widget.service,
+          currentUser: widget.currentUser,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openTransferRequestPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => TransferRequestPage(
           service: widget.service,
           currentUser: widget.currentUser,
         ),
@@ -376,6 +400,36 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
         branchId: user.branchId,
         role: user.role,
       ),
+      if (user.role == UserRole.seller) ...[
+        const SizedBox(height: 18),
+        const _AdminSectionHeader(title: 'Prioridades inmediatas'),
+        const SizedBox(height: 12),
+        _DashboardGrid(
+          children: [
+            _LowStockPanel(
+              service: widget.service,
+              branchId: user.branchId,
+              title: 'Stock bajo prioritario',
+              subtitle:
+                  'Productos con cobertura reducida que pueden afectar ventas hoy.',
+            ),
+            _OutOfStockPanel(
+              service: widget.service,
+              branchId: user.branchId,
+              title: 'Quiebres de mostrador',
+              subtitle:
+                  'Productos agotados que requieren alternativa o seguimiento inmediato.',
+            ),
+            _PendingRequestsPanel(
+              service: widget.service,
+              branchId: user.branchId,
+              title: 'Compromisos activos',
+              subtitle:
+                  'Reservas activas y traslados pendientes vinculados a la atencion comercial.',
+            ),
+          ],
+        ),
+      ],
       const SizedBox(height: 18),
       _AdminRefreshCard(
         service: widget.service,
@@ -440,6 +494,14 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
 
     return [
       ..._buildBranchSectionShell(user, title),
+      const SizedBox(height: 18),
+      _WorkflowActionCard(
+        title: 'Solicitar traslado',
+        subtitle:
+            'Crea una solicitud hacia tu sucursal cuando otra sede tenga disponibilidad.',
+        buttonLabel: 'Nuevo traslado',
+        onPressed: _openTransferRequestPage,
+      ),
       const SizedBox(height: 18),
       _DashboardGrid(
         children: [
@@ -621,6 +683,9 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
             _branchSectionLabel(user.role, section),
         sectionIconBuilder: _branchSectionIcon,
         onSelectSection: _selectBranchSection,
+        onOpenBranches: () => _runDrawerAction(_openBranchDirectoryPage),
+        onOpenTransferRequests: () =>
+            _runDrawerAction(_openTransferRequestPage),
         onSignOut: widget.authService.signOut,
       ),
       body: Container(
@@ -1963,6 +2028,74 @@ class _AdminRefreshCard extends StatelessWidget {
   }
 }
 
+class _WorkflowActionCard extends StatelessWidget {
+  const _WorkflowActionCard({
+    required this.title,
+    required this.subtitle,
+    required this.buttonLabel,
+    required this.onPressed,
+  });
+
+  final String title;
+  final String subtitle;
+  final String buttonLabel;
+  final Future<void> Function() onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF102540),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0x26FFFFFF)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: AppPalette.amber.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Icon(
+              Icons.local_shipping_rounded,
+              color: AppPalette.amber,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          FilledButton(
+            onPressed: () => unawaited(onPressed()),
+            child: Text(buttonLabel),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _AdminNotificationButton extends StatelessWidget {
   const _AdminNotificationButton({
     required this.service,
@@ -2158,6 +2291,8 @@ class _BranchDrawer extends StatelessWidget {
     required this.sectionLabelBuilder,
     required this.sectionIconBuilder,
     required this.onSelectSection,
+    required this.onOpenBranches,
+    required this.onOpenTransferRequests,
     required this.onSignOut,
   });
 
@@ -2167,6 +2302,8 @@ class _BranchDrawer extends StatelessWidget {
   final String Function(_BranchDashboardSection section) sectionLabelBuilder;
   final IconData Function(_BranchDashboardSection section) sectionIconBuilder;
   final Future<void> Function(_BranchDashboardSection section) onSelectSection;
+  final VoidCallback onOpenBranches;
+  final VoidCallback onOpenTransferRequests;
   final VoidCallback onSignOut;
 
   @override
@@ -2199,19 +2336,31 @@ class _BranchDrawer extends StatelessWidget {
                 child: SingleChildScrollView(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: sections
-                        .map(
-                          (section) => Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: _BranchDrawerTile(
-                              icon: sectionIconBuilder(section),
-                              title: sectionLabelBuilder(section),
-                              isSelected: section == selectedSection,
-                              onTap: () => unawaited(onSelectSection(section)),
-                            ),
+                    children: [
+                      ...sections.map(
+                        (section) => Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: _BranchDrawerTile(
+                            icon: sectionIconBuilder(section),
+                            title: sectionLabelBuilder(section),
+                            isSelected: section == selectedSection,
+                            onTap: () => unawaited(onSelectSection(section)),
                           ),
-                        )
-                        .toList(growable: false),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      _AdminDrawerTile(
+                        icon: Icons.store_mall_directory_rounded,
+                        title: 'Sucursales',
+                        onTap: onOpenBranches,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.local_shipping_rounded,
+                        title: 'Solicitar traslado',
+                        onTap: onOpenTransferRequests,
+                      ),
+                    ],
                   ),
                 ),
               ),
