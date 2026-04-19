@@ -473,6 +473,121 @@ void main() {
   );
 
   test(
+    'seller can reserve in another branch and the operation is audited',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      final reservation = await service.createReservation(
+        actorUser: seller,
+        branchId: DemoIds.branchNorth,
+        productId: DemoIds.phoneProduct,
+        customerName: 'Cliente Reserva Norte',
+        customerPhone: '3001234567',
+        quantity: 2,
+        expiresIn: const Duration(hours: 24),
+      );
+
+      final reservedInventory = await service.inventories.fetchInventory(
+        DemoIds.branchNorth,
+        DemoIds.phoneProduct,
+      );
+      final auditLogs = await firestore
+          .collection('audit_logs')
+          .where('action', isEqualTo: 'reservation_created')
+          .get();
+
+      expect(reservation.branchId, DemoIds.branchNorth);
+      expect(reservation.reservedBy, seller.id);
+      expect(reservedInventory, isNotNull);
+      expect(reservedInventory!.reservedStock, 3);
+      expect(reservedInventory.availableStock, 13);
+      expect(auditLogs.docs, hasLength(1));
+      expect(auditLogs.docs.first.data()['actorUserId'], seller.id);
+      expect(
+        auditLogs.docs.first.data()['metadata']['requestingBranchId'],
+        DemoIds.branchCenter,
+      );
+
+      await service.updateReservationStatus(
+        actorUser: seller,
+        reservationId: reservation.id,
+        nextStatus: ReservationStatus.cancelled,
+      );
+
+      final releasedInventory = await service.inventories.fetchInventory(
+        DemoIds.branchNorth,
+        DemoIds.phoneProduct,
+      );
+      final storedReservation = await service.reservations.fetchReservation(
+        reservation.id,
+      );
+      final cancelledAuditLogs = await firestore
+          .collection('audit_logs')
+          .where('action', isEqualTo: 'reservation_cancelled')
+          .get();
+
+      expect(releasedInventory!.reservedStock, 1);
+      expect(releasedInventory.availableStock, 15);
+      expect(storedReservation!.status, ReservationStatus.cancelled);
+      expect(cancelledAuditLogs.docs, hasLength(1));
+      expect(cancelledAuditLogs.docs.first.data()['actorUserId'], seller.id);
+    },
+  );
+
+  test(
+    'reservation traceability exposes requester, inventory and audited timeline',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final admin = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.adminUser,
+      );
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      final reservation = await service.createReservation(
+        actorUser: seller,
+        branchId: DemoIds.branchNorth,
+        productId: DemoIds.phoneProduct,
+        customerName: 'Cliente Seguimiento',
+        customerPhone: '3009990000',
+        quantity: 2,
+        expiresIn: const Duration(hours: 24),
+      );
+      await service.updateReservationStatus(
+        actorUser: seller,
+        reservationId: reservation.id,
+        nextStatus: ReservationStatus.completed,
+      );
+
+      final detail = await service.fetchReservationTraceability(
+        actorUser: admin,
+        reservationId: reservation.id,
+      );
+
+      expect(detail.reservation.status, ReservationStatus.completed);
+      expect(detail.requesterUser?.id, seller.id);
+      expect(detail.branchInventory, isNotNull);
+      expect(detail.branchInventory!.branchId, DemoIds.branchNorth);
+      expect(
+        detail.auditTrail.map((item) => item.action).toList(growable: false),
+        <String>['reservation_created', 'reservation_completed'],
+      );
+      expect(
+        detail.requestLog?.metadata['requestingBranchId'],
+        DemoIds.branchCenter,
+      );
+      expect(
+        detail.requestLog?.metadata['customerName'],
+        'Cliente Seguimiento',
+      );
+    },
+  );
+
+  test(
     'seller requests a transfer into own branch and source stock is validated',
     () async {
       await service.seedMasterData(actorUser: sampleData.users.first);
@@ -570,6 +685,76 @@ void main() {
       expect(destinationInventoryAfterReceipt.availableStock, 9);
       expect(destinationInventoryAfterReceipt.incomingStock, 0);
       expect(notifications.docs, hasLength(2));
+    },
+  );
+
+  test(
+    'transfer traceability exposes actors, inventories and audited timeline',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final admin = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.adminUser,
+      );
+      final supervisor = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.secondBranchSeller,
+      );
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      final transfer = await service.requestTransfer(
+        actorUser: seller,
+        productId: DemoIds.laptopProduct,
+        fromBranchId: DemoIds.branchNorth,
+        toBranchId: DemoIds.branchCenter,
+        quantity: 2,
+        reason: 'Venta prioritaria',
+        notes: 'Cliente confirmado en caja',
+      );
+
+      await service.approveTransfer(
+        actorUser: supervisor,
+        transferId: transfer.id,
+      );
+      await service.markTransferInTransit(
+        actorUser: supervisor,
+        transferId: transfer.id,
+      );
+      await service.receiveTransfer(actorUser: seller, transferId: transfer.id);
+
+      final detail = await service.fetchTransferTraceability(
+        actorUser: admin,
+        transferId: transfer.id,
+      );
+
+      expect(detail.transfer.status, TransferStatus.received);
+      expect(detail.requesterUser?.id, seller.id);
+      expect(detail.approverUser?.id, supervisor.id);
+      expect(detail.sourceInventory, isNotNull);
+      expect(detail.sourceInventory!.stock, 10);
+      expect(detail.destinationInventory, isNotNull);
+      expect(detail.destinationInventory!.stock, 10);
+      expect(
+        detail.auditTrail.map((item) => item.action).toList(growable: false),
+        <String>[
+          'transfer_requested',
+          'transfer_approved',
+          'transfer_in_transit',
+          'transfer_received',
+        ],
+      );
+      expect(detail.requestLog?.metadata['fromBranchId'], DemoIds.branchNorth);
+      expect(detail.requestLog?.metadata['toBranchId'], DemoIds.branchCenter);
+      expect(detail.requestLog?.metadata['quantity'], '2');
+      expect(detail.requestLog?.metadata['reason'], 'Venta prioritaria');
+      expect(
+        detail.dispatchLog?.metadata['dispatchedByUserId'],
+        DemoIds.secondBranchSeller,
+      );
+      expect(
+        detail.receiveLog?.metadata['receivedByUserId'],
+        DemoIds.branchSeller,
+      );
     },
   );
 

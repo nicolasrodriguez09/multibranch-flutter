@@ -4,12 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:flutter_multibranch_proyect/src/app.dart';
+import 'package:flutter_multibranch_proyect/src/features/auth/application/auth_service.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/application/inventory_workflow_service.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/data/sample_seed_data.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/domain/models.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/branch_directory_page.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/branch_location_resolver.dart';
+import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/inventory_dashboard_page.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/product_detail_page.dart';
+import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/reservation_request_page.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/transfer_request_page.dart';
 
 void main() {
@@ -86,6 +89,7 @@ void main() {
 
     expect(find.text('Menu administrativo'), findsOneWidget);
     expect(find.text('Gestion de empleados'), findsOneWidget);
+    expect(find.text('Trazabilidad operativa'), findsOneWidget);
     expect(find.text('Agregar sucursal'), findsOneWidget);
     expect(find.text('Crear base de datos inicial'), findsOneWidget);
     expect(find.text('Cerrar sesion'), findsOneWidget);
@@ -97,6 +101,120 @@ void main() {
     expect(find.text('Nuevo empleado'), findsOneWidget);
     expect(find.text('Ana Admin'), findsOneWidget);
   });
+
+  testWidgets('admin can open traceability module from drawer', (
+    WidgetTester tester,
+  ) async {
+    final firestore = FakeFirebaseFirestore();
+    await _seedUserProfile(
+      firestore,
+      uid: 'uid_admin_trace',
+      fullName: 'Ana Admin',
+      email: 'admintrace@empresa.com',
+      role: 'admin',
+      branchId: 'branch_001',
+    );
+
+    await tester.pumpWidget(
+      MyApp(
+        firestore: firestore,
+        auth: MockFirebaseAuth(
+          signedIn: true,
+          mockUser: MockUser(
+            uid: 'uid_admin_trace',
+            email: 'admintrace@empresa.com',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.menu));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Trazabilidad operativa'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Trazabilidad operativa'), findsOneWidget);
+    expect(
+      find.text('Trazabilidad de traslados y solicitudes'),
+      findsOneWidget,
+    );
+    expect(find.text('Traslados auditados'), findsOneWidget);
+    expect(find.text('Solicitudes auditadas'), findsOneWidget);
+  });
+
+  testWidgets(
+    'admin can open transfer traceability detail from audit activity',
+    (WidgetTester tester) async {
+      final firestore = FakeFirebaseFirestore();
+      final now = DateTime.utc(2026, 3, 26, 12, 0);
+      final service = InventoryWorkflowService(
+        firestore: firestore,
+        clock: () => now,
+      );
+      final sampleData = SampleSeedData.build(now);
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final admin = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.adminUser,
+      );
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+      final supervisor = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.secondBranchSeller,
+      );
+
+      final transfer = await service.requestTransfer(
+        actorUser: seller,
+        productId: DemoIds.laptopProduct,
+        fromBranchId: DemoIds.branchNorth,
+        toBranchId: DemoIds.branchCenter,
+        quantity: 2,
+        reason: 'Venta prioritaria',
+        notes: 'Cliente confirmado en caja',
+      );
+      await service.approveTransfer(
+        actorUser: supervisor,
+        transferId: transfer.id,
+      );
+
+      final authService = AuthService(
+        auth: MockFirebaseAuth(
+          signedIn: true,
+          mockUser: MockUser(uid: admin.id, email: admin.email),
+        ),
+        firestore: firestore,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(useMaterial3: true),
+          home: InventoryDashboardPage(
+            service: service,
+            authService: authService,
+            currentUser: admin,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.scrollUntilVisible(
+        find.text('Actividad administrativa'),
+        220,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Traslado aprobado').first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Trazabilidad del traslado'), findsOneWidget);
+      expect(find.text('Ruta del movimiento'), findsOneWidget);
+      expect(find.text('Actores clave'), findsOneWidget);
+      expect(find.text('Timeline auditado'), findsOneWidget);
+      expect(find.textContaining('Juan Centro'), findsWidgets);
+      expect(find.textContaining('Sucursal Norte'), findsWidgets);
+    },
+  );
 
   testWidgets('seller dashboard hides admin and supervisor sections', (
     WidgetTester tester,
@@ -150,6 +268,7 @@ void main() {
     expect(find.text('Compromisos y sincronizacion'), findsOneWidget);
     expect(find.text('Modulos habilitados'), findsOneWidget);
     expect(find.text('Sucursales'), findsOneWidget);
+    expect(find.text('Reservar producto'), findsOneWidget);
     await tester.scrollUntilVisible(
       find.descendant(
         of: find.byType(Drawer),
@@ -161,6 +280,90 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Solicitar traslado'), findsOneWidget);
   });
+
+  testWidgets(
+    'reservation request page creates an active reservation in another branch',
+    (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1080, 2200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final firestore = FakeFirebaseFirestore();
+      final now = DateTime.utc(2026, 3, 26, 12, 0);
+      final service = InventoryWorkflowService(
+        firestore: firestore,
+        clock: () => now,
+      );
+      final sampleData = SampleSeedData.build(now);
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(useMaterial3: true),
+          home: ReservationRequestPage(
+            service: service,
+            currentUser: seller,
+            initialProductId: DemoIds.phoneProduct,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Reservar producto'), findsOneWidget);
+      expect(find.text('Formulario de reserva'), findsOneWidget);
+      expect(
+        find.textContaining('Sin stock local para Samsung A55'),
+        findsOneWidget,
+      );
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Cantidad a reservar'),
+        '2',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Cliente'),
+        'Cliente Reserva Norte',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Telefono del cliente'),
+        '3001234567',
+      );
+
+      await tester.scrollUntilVisible(
+        find.text('Crear reserva'),
+        220,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Crear reserva'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Reserva creada'), findsOneWidget);
+      expect(
+        find.textContaining('quedo activa en Sucursal Norte'),
+        findsOneWidget,
+      );
+
+      final reservations = await service.reservations
+          .watchReservationsByUser(seller.id)
+          .first;
+      final reservation = reservations.cast<Reservation?>().firstWhere(
+        (item) => item?.customerName == 'Cliente Reserva Norte',
+        orElse: () => null,
+      );
+
+      expect(reservation, isNotNull);
+      expect(reservation!.branchId, DemoIds.branchNorth);
+      expect(reservation.status, ReservationStatus.active);
+      expect(reservation.quantity, 2);
+    },
+  );
 
   testWidgets(
     'transfer request page creates a pending request for seller branch',
@@ -683,6 +886,7 @@ void main() {
       expect(find.text('Inventario y alertas'), findsOneWidget);
       expect(find.text('Solicitudes y sincronizacion'), findsOneWidget);
       expect(find.text('Modulos habilitados'), findsOneWidget);
+      expect(find.text('Reservar producto'), findsOneWidget);
 
       await tester.tap(find.text('KPIs operativos').first);
       await tester.pumpAndSettle();

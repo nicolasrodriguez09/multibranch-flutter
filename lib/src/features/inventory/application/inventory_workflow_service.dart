@@ -103,6 +103,80 @@ class TransferRequestCatalogItem {
   bool get isLowStock => currentInventory?.isLowStock ?? false;
 }
 
+class ReservationRequestCatalogItem {
+  const ReservationRequestCatalogItem({
+    required this.product,
+    required this.currentInventory,
+  });
+
+  final Product product;
+  final InventoryItem? currentInventory;
+
+  int get currentAvailableStock => currentInventory?.availableStock ?? 0;
+  int get incomingStock => currentInventory?.incomingStock ?? 0;
+  bool get isOutOfStock => currentAvailableStock <= 0;
+  bool get isLowStock => currentInventory?.isLowStock ?? false;
+}
+
+class TransferTraceabilityData {
+  const TransferTraceabilityData({
+    required this.transfer,
+    required this.requesterUser,
+    required this.approverUser,
+    required this.sourceInventory,
+    required this.destinationInventory,
+    required this.auditTrail,
+  });
+
+  final TransferRequest transfer;
+  final AppUser? requesterUser;
+  final AppUser? approverUser;
+  final InventoryItem? sourceInventory;
+  final InventoryItem? destinationInventory;
+  final List<AuditLog> auditTrail;
+
+  AuditLog? get requestLog => _findAudit('transfer_requested');
+  AuditLog? get approvalLog => _findAudit('transfer_approved');
+  AuditLog? get dispatchLog => _findAudit('transfer_in_transit');
+  AuditLog? get receiveLog => _findAudit('transfer_received');
+
+  AuditLog? _findAudit(String action) {
+    return auditTrail.cast<AuditLog?>().firstWhere(
+      (item) => item?.action == action,
+      orElse: () => null,
+    );
+  }
+}
+
+class ReservationTraceabilityData {
+  const ReservationTraceabilityData({
+    required this.reservation,
+    required this.requesterUser,
+    required this.branchInventory,
+    required this.auditTrail,
+  });
+
+  final Reservation reservation;
+  final AppUser? requesterUser;
+  final InventoryItem? branchInventory;
+  final List<AuditLog> auditTrail;
+
+  AuditLog? get requestLog => _findAudit('reservation_created');
+  AuditLog? get completionLog => _findAudit('reservation_completed');
+  AuditLog? get cancellationLog => _findAudit('reservation_cancelled');
+  AuditLog? get expirationLog => _findAudit('reservation_expired');
+
+  AuditLog? get latestStatusLog =>
+      expirationLog ?? cancellationLog ?? completionLog ?? requestLog;
+
+  AuditLog? _findAudit(String action) {
+    return auditTrail.cast<AuditLog?>().firstWhere(
+      (item) => item?.action == action,
+      orElse: () => null,
+    );
+  }
+}
+
 enum InventoryDataReliabilityLevel { green, yellow, red }
 
 class InventoryDataReliability {
@@ -564,6 +638,41 @@ class InventoryWorkflowService {
       message: message,
       metadata: metadata,
       createdAt: now,
+      branchId: branchId,
+      branchName: branchName,
+    );
+  }
+
+  AuditLog _buildTransferAuditLog({
+    required AppUser actorUser,
+    required TransferRequest transfer,
+    required String action,
+    required String message,
+    required String branchId,
+    required String branchName,
+    Map<String, String> extraMetadata = const {},
+  }) {
+    return _buildAuditLog(
+      actorUser: actorUser,
+      action: action,
+      entityType: 'transfer',
+      entityId: transfer.id,
+      entityLabel: transfer.productName,
+      message: message,
+      metadata: {
+        'productId': transfer.productId,
+        'sku': transfer.sku,
+        'quantity': '${transfer.quantity}',
+        'fromBranchId': transfer.fromBranchId,
+        'fromBranchName': transfer.fromBranchName,
+        'toBranchId': transfer.toBranchId,
+        'toBranchName': transfer.toBranchName,
+        'requestedByUserId': transfer.requestedBy,
+        'status': transfer.status.firestoreValue,
+        'reason': transfer.reason,
+        if (transfer.notes.isNotEmpty) 'notes': transfer.notes,
+        ...extraMetadata,
+      },
       branchId: branchId,
       branchName: branchName,
     );
@@ -1147,6 +1256,148 @@ class InventoryWorkflowService {
     return List<TransferRequestCatalogItem>.unmodifiable(items);
   }
 
+  Future<List<ReservationRequestCatalogItem>> fetchReservationRequestCatalog({
+    required AppUser actorUser,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.createReservation);
+
+    final products = await catalog.fetchProducts();
+    final branchInventory = await inventories.fetchBranchInventory(
+      actorUser.branchId,
+    );
+    final inventoryByProductId = {
+      for (final item in branchInventory.where((item) => item.isActive))
+        item.productId: item,
+    };
+
+    final items =
+        products
+            .where((product) => product.isActive)
+            .map(
+              (product) => ReservationRequestCatalogItem(
+                product: product,
+                currentInventory: inventoryByProductId[product.id],
+              ),
+            )
+            .toList(growable: false)
+          ..sort((left, right) {
+            final stockComparison = left.currentAvailableStock.compareTo(
+              right.currentAvailableStock,
+            );
+            if (stockComparison != 0) {
+              return stockComparison;
+            }
+
+            final incomingComparison = left.incomingStock.compareTo(
+              right.incomingStock,
+            );
+            if (incomingComparison != 0) {
+              return incomingComparison;
+            }
+
+            return left.product.name.compareTo(right.product.name);
+          });
+
+    return List<ReservationRequestCatalogItem>.unmodifiable(items);
+  }
+
+  Future<TransferTraceabilityData> fetchTransferTraceability({
+    required AppUser actorUser,
+    required String transferId,
+  }) async {
+    final transfer = await transfers.fetchTransfer(transferId);
+    if (transfer == null) {
+      throw const InventoryException('El traslado solicitado no existe.');
+    }
+
+    final canInspect =
+        actorUser.role == UserRole.admin ||
+        actorUser.canAccessBranch(transfer.fromBranchId) ||
+        actorUser.canAccessBranch(transfer.toBranchId);
+    if (!canInspect) {
+      throw const InventoryException(
+        'No tienes permiso para revisar la trazabilidad de este traslado.',
+      );
+    }
+
+    final requesterFuture =
+        actorUser.role == UserRole.admin || actorUser.id == transfer.requestedBy
+        ? users.fetchUser(transfer.requestedBy)
+        : Future<AppUser?>.value(null);
+    final approverFuture =
+        actorUser.role == UserRole.admin && transfer.approvedBy != null
+        ? users.fetchUser(transfer.approvedBy!)
+        : Future<AppUser?>.value(null);
+    final auditTrailFuture = actorUser.role == UserRole.admin
+        ? system.fetchAuditLogsForEntity(
+            entityId: transfer.id,
+            entityType: 'transfer',
+          )
+        : Future<List<AuditLog>>.value(const <AuditLog>[]);
+
+    final results = await Future.wait<Object?>([
+      requesterFuture,
+      approverFuture,
+      inventories.fetchInventory(transfer.fromBranchId, transfer.productId),
+      inventories.fetchInventory(transfer.toBranchId, transfer.productId),
+      auditTrailFuture,
+    ]);
+
+    return TransferTraceabilityData(
+      transfer: transfer,
+      requesterUser: results[0] as AppUser?,
+      approverUser: results[1] as AppUser?,
+      sourceInventory: results[2] as InventoryItem?,
+      destinationInventory: results[3] as InventoryItem?,
+      auditTrail: List<AuditLog>.unmodifiable(results[4] as List<AuditLog>),
+    );
+  }
+
+  Future<ReservationTraceabilityData> fetchReservationTraceability({
+    required AppUser actorUser,
+    required String reservationId,
+  }) async {
+    final reservation = await reservations.fetchReservation(reservationId);
+    if (reservation == null) {
+      throw const InventoryException('La reserva solicitada no existe.');
+    }
+
+    final canInspect =
+        actorUser.role == UserRole.admin ||
+        actorUser.canAccessBranch(reservation.branchId) ||
+        actorUser.id == reservation.reservedBy;
+    if (!canInspect) {
+      throw const InventoryException(
+        'No tienes permiso para revisar la trazabilidad de esta reserva.',
+      );
+    }
+
+    final requesterFuture =
+        actorUser.role == UserRole.admin ||
+            actorUser.id == reservation.reservedBy
+        ? users.fetchUser(reservation.reservedBy)
+        : Future<AppUser?>.value(null);
+    final auditTrailFuture = actorUser.role == UserRole.admin
+        ? system.fetchAuditLogsForEntity(
+            entityId: reservation.id,
+            entityType: 'reservation',
+          )
+        : Future<List<AuditLog>>.value(const <AuditLog>[]);
+
+    final results = await Future.wait<Object?>([
+      requesterFuture,
+      inventories.fetchInventory(reservation.branchId, reservation.productId),
+      auditTrailFuture,
+    ]);
+
+    return ReservationTraceabilityData(
+      reservation: reservation,
+      requesterUser: results[0] as AppUser?,
+      branchInventory: results[1] as InventoryItem?,
+      auditTrail: List<AuditLog>.unmodifiable(results[2] as List<AuditLog>),
+    );
+  }
+
   Stream<List<SearchHistoryEntry>> watchRecentSearches({
     required AppUser actorUser,
     int limit = 8,
@@ -1362,11 +1613,16 @@ class InventoryWorkflowService {
     required Duration expiresIn,
   }) async {
     _ensurePermission(actorUser, AppPermission.createReservation);
-    _ensureBranchAccess(actorUser, branchId);
 
     if (quantity <= 0) {
       throw const InventoryException(
         'La cantidad reservada debe ser mayor que cero.',
+      );
+    }
+    final normalizedCustomerName = customerName.trim();
+    if (normalizedCustomerName.isEmpty) {
+      throw const InventoryException(
+        'Debes asociar la reserva a un cliente o referencia comercial.',
       );
     }
 
@@ -1376,6 +1632,7 @@ class InventoryWorkflowService {
       inventories.inventoryId(branchId, productId),
     );
     final reservationRef = _reservationsCollection.doc();
+    final auditLogRef = _auditLogsCollection.doc();
 
     final reservation = await _firestore.runTransaction((transaction) async {
       final inventorySnapshot = await transaction.get(inventoryRef);
@@ -1414,8 +1671,8 @@ class InventoryWorkflowService {
         sku: inventory.sku,
         branchId: inventory.branchId,
         branchName: inventory.branchName,
-        customerName: customerName,
-        customerPhone: customerPhone,
+        customerName: normalizedCustomerName,
+        customerPhone: customerPhone.trim(),
         quantity: quantity,
         status: ReservationStatus.active,
         reservedBy: actorUser.id,
@@ -1423,9 +1680,27 @@ class InventoryWorkflowService {
         createdAt: now,
         updatedAt: now,
       );
+      final auditLog = _buildAuditLog(
+        actorUser: actorUser,
+        action: 'reservation_created',
+        entityType: 'reservation',
+        entityId: reservation.id,
+        entityLabel: reservation.productName,
+        message: 'Registro una reserva activa para',
+        metadata: {
+          'reservationBranchId': reservation.branchId,
+          'reservationBranchName': reservation.branchName,
+          'quantity': '${reservation.quantity}',
+          'customerName': reservation.customerName,
+          'requestingBranchId': actorUser.branchId,
+        },
+        branchId: reservation.branchId,
+        branchName: reservation.branchName,
+      );
 
       transaction.set(inventoryRef, updatedInventory.toFirestore());
       transaction.set(reservationRef, reservation.toFirestore());
+      transaction.set(auditLogRef, auditLog.toFirestore());
 
       return reservation;
     });
@@ -1459,7 +1734,14 @@ class InventoryWorkflowService {
         reservationSnapshot.id,
         reservationSnapshot.data()!,
       );
-      _ensureBranchAccess(actorUser, reservation.branchId);
+      final canManageReservation =
+          actorUser.canAccessBranch(reservation.branchId) ||
+          actorUser.id == reservation.reservedBy;
+      if (!canManageReservation) {
+        throw const InventoryException(
+          'No puedes operar esta reserva desde una sucursal diferente.',
+        );
+      }
 
       if (reservation.status != ReservationStatus.active) {
         throw InventoryException(
@@ -1499,9 +1781,31 @@ class InventoryWorkflowService {
         status: nextStatus,
         updatedAt: now,
       );
+      final auditLog = _buildAuditLog(
+        actorUser: actorUser,
+        action: switch (nextStatus) {
+          ReservationStatus.completed => 'reservation_completed',
+          ReservationStatus.cancelled => 'reservation_cancelled',
+          ReservationStatus.expired => 'reservation_expired',
+          ReservationStatus.active => 'reservation_updated',
+        },
+        entityType: 'reservation',
+        entityId: updatedReservation.id,
+        entityLabel: updatedReservation.productName,
+        message: 'Actualizo el estado de la reserva para',
+        metadata: {
+          'status': nextStatus.name,
+          'reservationBranchId': updatedReservation.branchId,
+          'customerName': updatedReservation.customerName,
+        },
+        branchId: updatedReservation.branchId,
+        branchName: updatedReservation.branchName,
+      );
+      final auditLogRef = _auditLogsCollection.doc();
 
       transaction.set(inventoryRef, updatedInventory.toFirestore());
       transaction.set(reservationRef, updatedReservation.toFirestore());
+      transaction.set(auditLogRef, auditLog.toFirestore());
 
       return updatedReservation;
     });
@@ -1566,6 +1870,7 @@ class InventoryWorkflowService {
 
     final now = _clock();
     final transferRef = _transfersCollection.doc();
+    final auditLogRef = _auditLogsCollection.doc();
     final transfer = TransferRequest(
       id: transferRef.id,
       productId: product.id,
@@ -1587,8 +1892,23 @@ class InventoryWorkflowService {
       receivedAt: null,
       updatedAt: now,
     );
+    final auditLog = _buildTransferAuditLog(
+      actorUser: actorUser,
+      transfer: transfer,
+      action: 'transfer_requested',
+      message: 'Solicito un traslado para',
+      branchId: transfer.toBranchId,
+      branchName: transfer.toBranchName,
+      extraMetadata: {
+        'requestingBranchId': transfer.toBranchId,
+        'requestingBranchName': transfer.toBranchName,
+      },
+    );
 
-    await transferRef.set(transfer.toFirestore());
+    final batch = _firestore.batch();
+    batch.set(transferRef, transfer.toFirestore());
+    batch.set(auditLogRef, auditLog.toFirestore());
+    await batch.commit();
     _invalidateProductCaches(product.id);
     return transfer;
   }
@@ -1602,6 +1922,7 @@ class InventoryWorkflowService {
     final now = _clock();
     final transferRef = _transfersCollection.doc(transferId);
     final notificationRef = _notificationsCollection.doc();
+    final auditLogRef = _auditLogsCollection.doc();
 
     final updatedTransfer = await _firestore.runTransaction((
       transaction,
@@ -1701,6 +2022,15 @@ class InventoryWorkflowService {
         isRead: false,
         createdAt: now,
       );
+      final auditLog = _buildTransferAuditLog(
+        actorUser: actorUser,
+        transfer: updatedTransfer,
+        action: 'transfer_approved',
+        message: 'Aprobo el traslado de',
+        branchId: updatedTransfer.fromBranchId,
+        branchName: updatedTransfer.fromBranchName,
+        extraMetadata: {'approvedByUserId': actorUser.id},
+      );
 
       transaction.set(sourceInventoryRef, updatedSourceInventory.toFirestore());
       transaction.set(
@@ -1710,6 +2040,7 @@ class InventoryWorkflowService {
       );
       transaction.set(transferRef, updatedTransfer.toFirestore());
       transaction.set(notificationRef, notification.toFirestore());
+      transaction.set(auditLogRef, auditLog.toFirestore());
 
       return updatedTransfer;
     });
@@ -1725,6 +2056,7 @@ class InventoryWorkflowService {
 
     final now = _clock();
     final transferRef = _transfersCollection.doc(transferId);
+    final auditLogRef = _auditLogsCollection.doc();
 
     final updatedTransfer = await _firestore.runTransaction((
       transaction,
@@ -1752,8 +2084,18 @@ class InventoryWorkflowService {
         updatedAt: now,
         approvedBy: transfer.approvedBy ?? actorUser.id,
       );
+      final auditLog = _buildTransferAuditLog(
+        actorUser: actorUser,
+        transfer: updatedTransfer,
+        action: 'transfer_in_transit',
+        message: 'Despacho el traslado de',
+        branchId: updatedTransfer.fromBranchId,
+        branchName: updatedTransfer.fromBranchName,
+        extraMetadata: {'dispatchedByUserId': actorUser.id},
+      );
 
       transaction.set(transferRef, updatedTransfer.toFirestore());
+      transaction.set(auditLogRef, auditLog.toFirestore());
       return updatedTransfer;
     });
     _invalidateProductCaches(updatedTransfer.productId);
@@ -1769,6 +2111,7 @@ class InventoryWorkflowService {
     final now = _clock();
     final transferRef = _transfersCollection.doc(transferId);
     final notificationRef = _notificationsCollection.doc();
+    final auditLogRef = _auditLogsCollection.doc();
 
     final updatedTransfer = await _firestore.runTransaction((
       transaction,
@@ -1837,6 +2180,15 @@ class InventoryWorkflowService {
         isRead: false,
         createdAt: now,
       );
+      final auditLog = _buildTransferAuditLog(
+        actorUser: actorUser,
+        transfer: updatedTransfer,
+        action: 'transfer_received',
+        message: 'Recibio el traslado de',
+        branchId: updatedTransfer.toBranchId,
+        branchName: updatedTransfer.toBranchName,
+        extraMetadata: {'receivedByUserId': actorUser.id},
+      );
 
       transaction.set(
         destinationInventoryRef,
@@ -1844,6 +2196,7 @@ class InventoryWorkflowService {
       );
       transaction.set(transferRef, updatedTransfer.toFirestore());
       transaction.set(notificationRef, notification.toFirestore());
+      transaction.set(auditLogRef, auditLog.toFirestore());
 
       return updatedTransfer;
     });

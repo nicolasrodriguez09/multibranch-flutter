@@ -11,6 +11,7 @@ import '../domain/role_permissions.dart';
 import 'branch_directory_page.dart';
 import 'create_branch_dialog.dart';
 import 'product_search_page.dart';
+import 'reservation_request_page.dart';
 import 'transfer_request_page.dart';
 
 enum _BranchDashboardSection { overview, inventory, workflow, metrics, modules }
@@ -148,6 +149,17 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
     );
   }
 
+  Future<void> _openAdminTraceabilityPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => _AdminTraceabilityPage(
+          service: widget.service,
+          currentUser: widget.currentUser,
+        ),
+      ),
+    );
+  }
+
   Future<void> _openProductSearchPage() async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -174,6 +186,17 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (context) => TransferRequestPage(
+          service: widget.service,
+          currentUser: widget.currentUser,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openReservationRequestPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => ReservationRequestPage(
           service: widget.service,
           currentUser: widget.currentUser,
         ),
@@ -358,7 +381,10 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
       const SizedBox(height: 18),
       _AdminPendingSection(service: widget.service, branchId: user.branchId),
       const SizedBox(height: 18),
-      _AdminAuditSection(service: widget.service),
+      _AdminAuditSection(
+        service: widget.service,
+        currentUser: widget.currentUser,
+      ),
       const SizedBox(height: 12),
       _AdminRefreshCard(
         service: widget.service,
@@ -495,12 +521,23 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
     return [
       ..._buildBranchSectionShell(user, title),
       const SizedBox(height: 18),
-      _WorkflowActionCard(
-        title: 'Solicitar traslado',
-        subtitle:
-            'Crea una solicitud hacia tu sucursal cuando otra sede tenga disponibilidad.',
-        buttonLabel: 'Nuevo traslado',
-        onPressed: _openTransferRequestPage,
+      _DashboardGrid(
+        children: [
+          _WorkflowActionCard(
+            title: 'Reservar producto',
+            subtitle:
+                'Asegura unidades en otra sucursal para sostener una venta confirmada.',
+            buttonLabel: 'Nueva reserva',
+            onPressed: _openReservationRequestPage,
+          ),
+          _WorkflowActionCard(
+            title: 'Solicitar traslado',
+            subtitle:
+                'Crea una solicitud hacia tu sucursal cuando otra sede tenga disponibilidad.',
+            buttonLabel: 'Nuevo traslado',
+            onPressed: _openTransferRequestPage,
+          ),
+        ],
       ),
       const SizedBox(height: 18),
       _DashboardGrid(
@@ -614,6 +651,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
             ? null
             : () => _runDrawerAction(_openCreateBranchDialog),
         onManageEmployees: () => _runDrawerAction(_openEmployeeManagementPage),
+        onOpenTraceability: () => _runDrawerAction(_openAdminTraceabilityPage),
         onSignOut: widget.authService.signOut,
       ),
       body: Container(
@@ -684,6 +722,8 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
         sectionIconBuilder: _branchSectionIcon,
         onSelectSection: _selectBranchSection,
         onOpenBranches: () => _runDrawerAction(_openBranchDirectoryPage),
+        onOpenReservationRequests: () =>
+            _runDrawerAction(_openReservationRequestPage),
         onOpenTransferRequests: () =>
             _runDrawerAction(_openTransferRequestPage),
         onSignOut: widget.authService.signOut,
@@ -1832,9 +1872,10 @@ class _AdminPendingTile extends StatelessWidget {
 }
 
 class _AdminAuditSection extends StatelessWidget {
-  const _AdminAuditSection({required this.service});
+  const _AdminAuditSection({required this.service, required this.currentUser});
 
   final InventoryWorkflowService service;
+  final AppUser currentUser;
 
   @override
   Widget build(BuildContext context) {
@@ -1850,6 +1891,13 @@ class _AdminAuditSection extends StatelessWidget {
               style: Theme.of(
                 context,
               ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Toca un traslado para revisar trazabilidad completa, actores y estados internos.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: Colors.white70),
             ),
             const SizedBox(height: 12),
             if (items.isEmpty)
@@ -1869,7 +1917,17 @@ class _AdminAuditSection extends StatelessWidget {
               ...items.map(
                 (item) => Padding(
                   padding: const EdgeInsets.only(bottom: 10),
-                  child: _AdminAuditTile(auditLog: item),
+                  child: _AdminAuditTile(
+                    auditLog: item,
+                    onTap: item.entityType == 'transfer'
+                        ? () => _showTransferTraceabilityDialog(
+                            context,
+                            service: service,
+                            currentUser: currentUser,
+                            transferId: item.entityId,
+                          )
+                        : null,
+                  ),
                 ),
               ),
           ],
@@ -1880,34 +1938,1282 @@ class _AdminAuditSection extends StatelessWidget {
 }
 
 class _AdminAuditTile extends StatelessWidget {
-  const _AdminAuditTile({required this.auditLog});
+  const _AdminAuditTile({required this.auditLog, this.onTap});
 
   final AuditLog auditLog;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final accent = _auditActionColor(auditLog.action);
 
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
         borderRadius: BorderRadius.circular(18),
-        gradient: LinearGradient(
-          colors: [accent.withValues(alpha: 0.85), const Color(0xFF162E53)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            gradient: LinearGradient(
+              colors: [accent.withValues(alpha: 0.85), const Color(0xFF162E53)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  _auditActionIcon(auditLog.action),
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _formatAuditAction(auditLog.action),
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${auditLog.message} ${auditLog.entityLabel}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.9),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${auditLog.actorName} | ${auditLog.actorRole.displayName} | ${auditLog.branchName ?? 'Global'} | ${_formatRelativeTime(auditLog.createdAt)}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.72),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (onTap != null) ...[
+                const SizedBox(width: 8),
+                const Icon(Icons.visibility_rounded, color: Colors.white70),
+              ],
+            ],
+          ),
         ),
       ),
+    );
+  }
+}
+
+void _showTransferTraceabilityDialog(
+  BuildContext context, {
+  required InventoryWorkflowService service,
+  required AppUser currentUser,
+  required String transferId,
+}) {
+  showDialog<void>(
+    context: context,
+    builder: (context) => _TransferTraceabilityDialog(
+      service: service,
+      currentUser: currentUser,
+      transferId: transferId,
+    ),
+  );
+}
+
+class _TransferTraceabilityDialog extends StatelessWidget {
+  const _TransferTraceabilityDialog({
+    required this.service,
+    required this.currentUser,
+    required this.transferId,
+  });
+
+  final InventoryWorkflowService service;
+  final AppUser currentUser;
+  final String transferId;
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: const Color(0xFF08172D),
+      insetPadding: const EdgeInsets.all(16),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 860, maxHeight: 760),
+        child: FutureBuilder<TransferTraceabilityData>(
+          future: service.fetchTransferTraceability(
+            actorUser: currentUser,
+            transferId: transferId,
+          ),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'No se pudo cargar la trazabilidad del traslado.',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      '$transferId\n${snapshot.error}',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+                    ),
+                    const SizedBox(height: 18),
+                    FilledButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Cerrar'),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            final detail = snapshot.requireData;
+            final transfer = detail.transfer;
+            return Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Trazabilidad del traslado',
+                              style: Theme.of(context).textTheme.headlineSmall
+                                  ?.copyWith(fontWeight: FontWeight.w900),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              '${transfer.productName} | ${transfer.id}',
+                              style: Theme.of(context).textTheme.bodyLarge
+                                  ?.copyWith(color: Colors.white70),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      _TraceabilityStatusChip(
+                        label: _formatTransferStatusLabel(transfer.status),
+                        color: _transferStatusColor(transfer.status),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Wrap(
+                            spacing: 10,
+                            runSpacing: 10,
+                            children: [
+                              _TraceabilityMetricCard(
+                                label: 'Cantidad',
+                                value: '${transfer.quantity}',
+                                accent: AppPalette.amber,
+                              ),
+                              _TraceabilityMetricCard(
+                                label: 'SKU',
+                                value: transfer.sku,
+                                accent: AppPalette.blueSoft,
+                              ),
+                              _TraceabilityMetricCard(
+                                label: 'Solicitado',
+                                value: _formatDateTimeStamp(
+                                  transfer.requestedAt,
+                                ),
+                                accent: AppPalette.mint,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 18),
+                          const _TraceabilitySectionTitle(
+                            title: 'Ruta del movimiento',
+                          ),
+                          const SizedBox(height: 10),
+                          _TraceabilityBlock(
+                            child: Column(
+                              children: [
+                                _TraceabilityDataRow(
+                                  label: 'Sucursal origen',
+                                  value:
+                                      '${transfer.fromBranchName} | ${transfer.fromBranchId}',
+                                ),
+                                _TraceabilityDataRow(
+                                  label: 'Sucursal destino',
+                                  value:
+                                      '${transfer.toBranchName} | ${transfer.toBranchId}',
+                                ),
+                                _TraceabilityDataRow(
+                                  label: 'Motivo',
+                                  value: transfer.reason,
+                                ),
+                                _TraceabilityDataRow(
+                                  label: 'Notas internas',
+                                  value: transfer.notes.isEmpty
+                                      ? 'Sin notas registradas'
+                                      : transfer.notes,
+                                ),
+                                _TraceabilityDataRow(
+                                  label: 'Ultima actualizacion',
+                                  value: _formatDateTimeStamp(
+                                    transfer.updatedAt,
+                                  ),
+                                  isLast: true,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          const _TraceabilitySectionTitle(
+                            title: 'Actores clave',
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            children: [
+                              _TraceabilityActorCard(
+                                title: 'Solicitante',
+                                icon: Icons.assignment_ind_rounded,
+                                name:
+                                    detail.requestLog?.actorName ??
+                                    detail.requesterUser?.fullName ??
+                                    transfer.requestedBy,
+                                role:
+                                    detail.requestLog?.actorRole.displayName ??
+                                    detail.requesterUser?.role.displayName ??
+                                    'No disponible',
+                                branch:
+                                    detail.requestLog?.branchName ??
+                                    detail.requesterUser?.branchId ??
+                                    transfer.toBranchName,
+                                timestamp:
+                                    detail.requestLog?.createdAt ??
+                                    transfer.requestedAt,
+                              ),
+                              _TraceabilityActorCard(
+                                title: 'Aprobacion',
+                                icon: Icons.verified_user_rounded,
+                                name:
+                                    detail.approvalLog?.actorName ??
+                                    detail.approverUser?.fullName ??
+                                    (transfer.approvedBy ?? 'Pendiente'),
+                                role:
+                                    detail.approvalLog?.actorRole.displayName ??
+                                    detail.approverUser?.role.displayName ??
+                                    (transfer.approvedBy == null
+                                        ? 'Pendiente'
+                                        : 'No disponible'),
+                                branch:
+                                    detail.approvalLog?.branchName ??
+                                    detail.approverUser?.branchId ??
+                                    transfer.fromBranchName,
+                                timestamp:
+                                    detail.approvalLog?.createdAt ??
+                                    transfer.approvedAt,
+                              ),
+                              _TraceabilityActorCard(
+                                title: 'Despacho',
+                                icon: Icons.local_shipping_rounded,
+                                name:
+                                    detail.dispatchLog?.actorName ??
+                                    'Pendiente',
+                                role:
+                                    detail.dispatchLog?.actorRole.displayName ??
+                                    'Pendiente',
+                                branch:
+                                    detail.dispatchLog?.branchName ??
+                                    transfer.fromBranchName,
+                                timestamp:
+                                    detail.dispatchLog?.createdAt ??
+                                    transfer.shippedAt,
+                              ),
+                              _TraceabilityActorCard(
+                                title: 'Recepcion',
+                                icon: Icons.inventory_2_rounded,
+                                name:
+                                    detail.receiveLog?.actorName ?? 'Pendiente',
+                                role:
+                                    detail.receiveLog?.actorRole.displayName ??
+                                    'Pendiente',
+                                branch:
+                                    detail.receiveLog?.branchName ??
+                                    transfer.toBranchName,
+                                timestamp:
+                                    detail.receiveLog?.createdAt ??
+                                    transfer.receivedAt,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 18),
+                          const _TraceabilitySectionTitle(
+                            title: 'Inventario vinculado',
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            children: [
+                              _InventoryTraceabilityCard(
+                                title: 'Origen actual',
+                                branchLabel: transfer.fromBranchName,
+                                inventory: detail.sourceInventory,
+                                accent: AppPalette.amber,
+                              ),
+                              _InventoryTraceabilityCard(
+                                title: 'Destino actual',
+                                branchLabel: transfer.toBranchName,
+                                inventory: detail.destinationInventory,
+                                accent: AppPalette.blueSoft,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 18),
+                          const _TraceabilitySectionTitle(
+                            title: 'Timeline auditado',
+                          ),
+                          const SizedBox(height: 10),
+                          if (detail.auditTrail.isEmpty)
+                            _TraceabilityBlock(
+                              child: Text(
+                                'No hay eventos auditados para este traslado. Puede venir de datos previos o de la base inicial.',
+                                style: Theme.of(context).textTheme.bodyMedium
+                                    ?.copyWith(color: Colors.white70),
+                              ),
+                            )
+                          else
+                            Column(
+                              children: detail.auditTrail
+                                  .map(
+                                    (item) => Padding(
+                                      padding: const EdgeInsets.only(
+                                        bottom: 10,
+                                      ),
+                                      child: _TransferAuditTimelineTile(
+                                        auditLog: item,
+                                      ),
+                                    ),
+                                  )
+                                  .toList(growable: false),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _AdminTraceabilityPage extends StatelessWidget {
+  const _AdminTraceabilityPage({
+    required this.service,
+    required this.currentUser,
+  });
+
+  final InventoryWorkflowService service;
+  final AppUser currentUser;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Trazabilidad operativa')),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF081A33), Color(0xFF0A2142), Color(0xFF08172D)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: SafeArea(
+          top: false,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+            children: [
+              Text(
+                'Trazabilidad de traslados y solicitudes',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Consulta movimientos auditados, abre el detalle y revisa actores, roles, ramas, cantidades y estados internos.',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+              ),
+              const SizedBox(height: 18),
+              _DashboardGrid(
+                children: [
+                  _AdminTransferTraceabilityPanel(
+                    service: service,
+                    currentUser: currentUser,
+                  ),
+                  _AdminReservationTraceabilityPanel(
+                    service: service,
+                    currentUser: currentUser,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AdminTransferTraceabilityPanel extends StatelessWidget {
+  const _AdminTransferTraceabilityPanel({
+    required this.service,
+    required this.currentUser,
+  });
+
+  final InventoryWorkflowService service;
+  final AppUser currentUser;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<TransferRequest>>(
+      stream: service.transfers.watchTransfers(),
+      builder: (context, snapshot) {
+        final items = (snapshot.data ?? const <TransferRequest>[]).toList(
+          growable: false,
+        )..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
+
+        return _DashboardPanel(
+          title: 'Traslados auditados',
+          subtitle:
+              'Listado operativo para revisar solicitudes, aprobaciones, despachos y recepciones.',
+          accent: AppPalette.amber,
+          child: _TraceabilityEntryList(
+            emptyMessage: 'No hay traslados registrados para auditar.',
+            children: items
+                .take(12)
+                .map(
+                  (item) => _AdminTraceabilityEntryCard(
+                    icon: Icons.swap_horiz_rounded,
+                    accent: _transferStatusColor(item.status),
+                    title:
+                        '${_formatTransferStatusLabel(item.status)} | ${item.productName}',
+                    detail:
+                        '${item.fromBranchName} -> ${item.toBranchName} | ${item.quantity} unidad(es)',
+                    meta:
+                        'Solicitado ${_formatDateTimeStamp(item.requestedAt)} | actualizado ${_formatRelativeTime(item.updatedAt)}',
+                    onTap: () => _showTransferTraceabilityDialog(
+                      context,
+                      service: service,
+                      currentUser: currentUser,
+                      transferId: item.id,
+                    ),
+                  ),
+                )
+                .toList(growable: false),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _AdminReservationTraceabilityPanel extends StatelessWidget {
+  const _AdminReservationTraceabilityPanel({
+    required this.service,
+    required this.currentUser,
+  });
+
+  final InventoryWorkflowService service;
+  final AppUser currentUser;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<Reservation>>(
+      stream: service.reservations.watchReservations(),
+      builder: (context, snapshot) {
+        final items = (snapshot.data ?? const <Reservation>[]).toList(
+          growable: false,
+        )..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
+
+        return _DashboardPanel(
+          title: 'Solicitudes auditadas',
+          subtitle:
+              'Reservas activas y cerradas con detalle de cliente, responsable y evolucion del estado.',
+          accent: AppPalette.blueSoft,
+          child: _TraceabilityEntryList(
+            emptyMessage: 'No hay solicitudes registradas para auditar.',
+            children: items
+                .take(12)
+                .map(
+                  (item) => _AdminTraceabilityEntryCard(
+                    icon: Icons.bookmark_added_rounded,
+                    accent: _reservationStatusColor(item.status),
+                    title:
+                        '${_formatReservationStatusLabel(item.status)} | ${item.productName}',
+                    detail:
+                        '${item.branchName} | ${item.customerName} | ${item.quantity} unidad(es)',
+                    meta:
+                        'Creada ${_formatDateTimeStamp(item.createdAt)} | vence ${_formatDateTimeStamp(item.expiresAt)}',
+                    onTap: () => _showReservationTraceabilityDialog(
+                      context,
+                      service: service,
+                      currentUser: currentUser,
+                      reservationId: item.id,
+                    ),
+                  ),
+                )
+                .toList(growable: false),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _TraceabilityEntryList extends StatelessWidget {
+  const _TraceabilityEntryList({
+    required this.children,
+    required this.emptyMessage,
+  });
+
+  final List<Widget> children;
+  final String emptyMessage;
+
+  @override
+  Widget build(BuildContext context) {
+    if (children.isEmpty) {
+      return _TraceabilityBlock(
+        child: Text(
+          emptyMessage,
+          style: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+        ),
+      );
+    }
+
+    return Column(
+      children: children
+          .map(
+            (child) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: child,
+            ),
+          )
+          .toList(growable: false),
+    );
+  }
+}
+
+class _AdminTraceabilityEntryCard extends StatelessWidget {
+  const _AdminTraceabilityEntryCard({
+    required this.icon,
+    required this.accent,
+    required this.title,
+    required this.detail,
+    required this.meta,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final Color accent;
+  final String title;
+  final String detail;
+  final String meta;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0x40132647),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: accent.withValues(alpha: 0.28)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: accent),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(detail, style: Theme.of(context).textTheme.bodyMedium),
+                    const SizedBox(height: 4),
+                    Text(
+                      meta,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppPalette.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.chevron_right_rounded, color: Colors.white70),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+void _showReservationTraceabilityDialog(
+  BuildContext context, {
+  required InventoryWorkflowService service,
+  required AppUser currentUser,
+  required String reservationId,
+}) {
+  showDialog<void>(
+    context: context,
+    builder: (context) => _ReservationTraceabilityDialog(
+      service: service,
+      currentUser: currentUser,
+      reservationId: reservationId,
+    ),
+  );
+}
+
+class _ReservationTraceabilityDialog extends StatelessWidget {
+  const _ReservationTraceabilityDialog({
+    required this.service,
+    required this.currentUser,
+    required this.reservationId,
+  });
+
+  final InventoryWorkflowService service;
+  final AppUser currentUser;
+  final String reservationId;
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: const Color(0xFF08172D),
+      insetPadding: const EdgeInsets.all(16),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 860, maxHeight: 760),
+        child: FutureBuilder<ReservationTraceabilityData>(
+          future: service.fetchReservationTraceability(
+            actorUser: currentUser,
+            reservationId: reservationId,
+          ),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'No se pudo cargar la trazabilidad de la solicitud.',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      '$reservationId\n${snapshot.error}',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+                    ),
+                    const SizedBox(height: 18),
+                    FilledButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Cerrar'),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            final detail = snapshot.requireData;
+            final reservation = detail.reservation;
+            final latestLog = detail.latestStatusLog;
+
+            return Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Trazabilidad de la solicitud',
+                              style: Theme.of(context).textTheme.headlineSmall
+                                  ?.copyWith(fontWeight: FontWeight.w900),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              '${reservation.productName} | ${reservation.id}',
+                              style: Theme.of(context).textTheme.bodyLarge
+                                  ?.copyWith(color: Colors.white70),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      _TraceabilityStatusChip(
+                        label: _formatReservationStatusLabel(
+                          reservation.status,
+                        ),
+                        color: _reservationStatusColor(reservation.status),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Wrap(
+                            spacing: 10,
+                            runSpacing: 10,
+                            children: [
+                              _TraceabilityMetricCard(
+                                label: 'Cantidad',
+                                value: '${reservation.quantity}',
+                                accent: AppPalette.blueSoft,
+                              ),
+                              _TraceabilityMetricCard(
+                                label: 'SKU',
+                                value: reservation.sku,
+                                accent: AppPalette.amber,
+                              ),
+                              _TraceabilityMetricCard(
+                                label: 'Vigencia',
+                                value: _formatDateTimeStamp(
+                                  reservation.expiresAt,
+                                ),
+                                accent: AppPalette.mint,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 18),
+                          const _TraceabilitySectionTitle(
+                            title: 'Solicitud comercial',
+                          ),
+                          const SizedBox(height: 10),
+                          _TraceabilityBlock(
+                            child: Column(
+                              children: [
+                                _TraceabilityDataRow(
+                                  label: 'Sucursal reservada',
+                                  value:
+                                      '${reservation.branchName} | ${reservation.branchId}',
+                                ),
+                                _TraceabilityDataRow(
+                                  label: 'Cliente',
+                                  value: reservation.customerName,
+                                ),
+                                _TraceabilityDataRow(
+                                  label: 'Telefono',
+                                  value: reservation.customerPhone.isEmpty
+                                      ? 'Sin telefono'
+                                      : reservation.customerPhone,
+                                ),
+                                _TraceabilityDataRow(
+                                  label: 'Creada',
+                                  value: _formatDateTimeStamp(
+                                    reservation.createdAt,
+                                  ),
+                                ),
+                                _TraceabilityDataRow(
+                                  label: 'Ultima actualizacion',
+                                  value: _formatDateTimeStamp(
+                                    reservation.updatedAt,
+                                  ),
+                                  isLast: true,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          const _TraceabilitySectionTitle(
+                            title: 'Actores y seguimiento',
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            children: [
+                              _TraceabilityActorCard(
+                                title: 'Solicitante',
+                                icon: Icons.assignment_ind_rounded,
+                                name:
+                                    detail.requestLog?.actorName ??
+                                    detail.requesterUser?.fullName ??
+                                    reservation.reservedBy,
+                                role:
+                                    detail.requestLog?.actorRole.displayName ??
+                                    detail.requesterUser?.role.displayName ??
+                                    'No disponible',
+                                branch:
+                                    detail
+                                        .requestLog
+                                        ?.metadata['requestingBranchName'] ??
+                                    detail.requesterUser?.branchId ??
+                                    reservation.branchName,
+                                timestamp:
+                                    detail.requestLog?.createdAt ??
+                                    reservation.createdAt,
+                              ),
+                              _TraceabilityActorCard(
+                                title: 'Ultima gestion',
+                                icon: Icons.manage_history_rounded,
+                                name: latestLog?.actorName ?? 'Sin cambios',
+                                role:
+                                    latestLog?.actorRole.displayName ??
+                                    'Sin cambios',
+                                branch:
+                                    latestLog?.branchName ??
+                                    reservation.branchName,
+                                timestamp:
+                                    latestLog?.createdAt ??
+                                    reservation.updatedAt,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 18),
+                          const _TraceabilitySectionTitle(
+                            title: 'Inventario vinculado',
+                          ),
+                          const SizedBox(height: 10),
+                          _InventoryTraceabilityCard(
+                            title: 'Sucursal reservada',
+                            branchLabel: reservation.branchName,
+                            inventory: detail.branchInventory,
+                            accent: AppPalette.blueSoft,
+                          ),
+                          const SizedBox(height: 18),
+                          const _TraceabilitySectionTitle(
+                            title: 'Timeline auditado',
+                          ),
+                          const SizedBox(height: 10),
+                          if (detail.auditTrail.isEmpty)
+                            _TraceabilityBlock(
+                              child: Text(
+                                'No hay eventos auditados para esta solicitud. Puede venir de datos previos o de la base inicial.',
+                                style: Theme.of(context).textTheme.bodyMedium
+                                    ?.copyWith(color: Colors.white70),
+                              ),
+                            )
+                          else
+                            Column(
+                              children: detail.auditTrail
+                                  .map(
+                                    (item) => Padding(
+                                      padding: const EdgeInsets.only(
+                                        bottom: 10,
+                                      ),
+                                      child: _TransferAuditTimelineTile(
+                                        auditLog: item,
+                                      ),
+                                    ),
+                                  )
+                                  .toList(growable: false),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _TraceabilitySectionTitle extends StatelessWidget {
+  const _TraceabilitySectionTitle({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      title,
+      style: Theme.of(
+        context,
+      ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+    );
+  }
+}
+
+class _TraceabilityBlock extends StatelessWidget {
+  const _TraceabilityBlock({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF102540),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0x26FFFFFF)),
+      ),
+      child: child,
+    );
+  }
+}
+
+class _TraceabilityMetricCard extends StatelessWidget {
+  const _TraceabilityMetricCard({
+    required this.label,
+    required this.value,
+    required this.accent,
+  });
+
+  final String label;
+  final String value;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 180,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF102540),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: accent.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: Colors.white70),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TraceabilityStatusChip extends StatelessWidget {
+  const _TraceabilityStatusChip({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.42)),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+class _TraceabilityDataRow extends StatelessWidget {
+  const _TraceabilityDataRow({
+    required this.label,
+    required this.value,
+    this.isLast = false,
+  });
+
+  final String label;
+  final String value;
+  final bool isLast;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: isLast ? 0 : 10),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 150,
+            child: Text(
+              label,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(value, style: Theme.of(context).textTheme.bodyMedium),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TraceabilityActorCard extends StatelessWidget {
+  const _TraceabilityActorCard({
+    required this.title,
+    required this.icon,
+    required this.name,
+    required this.role,
+    required this.branch,
+    required this.timestamp,
+  });
+
+  final String title;
+  final IconData icon;
+  final String name;
+  final String role;
+  final String branch;
+  final DateTime? timestamp;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 190,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF102540),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0x26FFFFFF)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: Colors.white70),
+          const SizedBox(height: 10),
+          Text(
+            title,
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          Text(name, style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 4),
+          Text(
+            '$role | $branch',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: Colors.white70),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            timestamp == null
+                ? 'Sin fecha registrada'
+                : _formatDateTimeStamp(timestamp!),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: Colors.white60),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InventoryTraceabilityCard extends StatelessWidget {
+  const _InventoryTraceabilityCard({
+    required this.title,
+    required this.branchLabel,
+    required this.inventory,
+    required this.accent,
+  });
+
+  final String title;
+  final String branchLabel;
+  final InventoryItem? inventory;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 250,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF102540),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: accent.withValues(alpha: 0.28)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            branchLabel,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: Colors.white70),
+          ),
+          const SizedBox(height: 12),
+          if (inventory == null)
+            Text(
+              'No hay inventario disponible para inspeccionar.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+            )
+          else ...[
+            _TraceabilityDataRow(label: 'Fisico', value: '${inventory!.stock}'),
+            _TraceabilityDataRow(
+              label: 'Reservado',
+              value: '${inventory!.reservedStock}',
+            ),
+            _TraceabilityDataRow(
+              label: 'Disponible',
+              value: '${inventory!.availableStock}',
+            ),
+            _TraceabilityDataRow(
+              label: 'En transito',
+              value: '${inventory!.incomingStock}',
+            ),
+            _TraceabilityDataRow(
+              label: 'Actualizado',
+              value: _formatDateTimeStamp(inventory!.updatedAt),
+              isLast: true,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _TransferAuditTimelineTile extends StatelessWidget {
+  const _TransferAuditTimelineTile({required this.auditLog});
+
+  final AuditLog auditLog;
+
+  @override
+  Widget build(BuildContext context) {
+    final metadataEntries = auditLog.metadata.entries
+        .where(
+          (entry) =>
+              entry.key != 'productId' &&
+              entry.key != 'sku' &&
+              entry.key != 'status',
+        )
+        .toList(growable: false);
+
+    return _TraceabilityBlock(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 38,
-            height: 38,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.16),
+              color: _auditActionColor(auditLog.action).withValues(alpha: 0.18),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(_auditActionIcon(auditLog.action), color: Colors.white),
+            child: Icon(
+              _auditActionIcon(auditLog.action),
+              color: _auditActionColor(auditLog.action),
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1916,25 +3222,52 @@ class _AdminAuditTile extends StatelessWidget {
               children: [
                 Text(
                   _formatAuditAction(auditLog.action),
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${auditLog.message} ${auditLog.entityLabel}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.white.withValues(alpha: 0.9),
-                  ),
+                  '${auditLog.actorName} | ${auditLog.actorRole.displayName} | ${auditLog.branchName ?? 'Sin sucursal'}',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${auditLog.actorName} | ${auditLog.actorRole.displayName} | ${auditLog.branchName ?? 'Global'} | ${_formatRelativeTime(auditLog.createdAt)}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.white.withValues(alpha: 0.72),
-                  ),
+                  _formatDateTimeStamp(auditLog.createdAt),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: Colors.white60),
                 ),
+                if (metadataEntries.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: metadataEntries
+                        .map(
+                          (entry) => Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.06),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: const Color(0x26FFFFFF),
+                              ),
+                            ),
+                            child: Text(
+                              '${_formatAuditMetadataLabel(entry.key)}: ${entry.value}',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                        )
+                        .toList(growable: false),
+                  ),
+                ],
               ],
             ),
           ),
@@ -2171,6 +3504,7 @@ class _AdminDrawer extends StatelessWidget {
     required this.onCreateBaseData,
     required this.onCreateBranch,
     required this.onManageEmployees,
+    required this.onOpenTraceability,
     required this.onSignOut,
   });
 
@@ -2180,6 +3514,7 @@ class _AdminDrawer extends StatelessWidget {
   final VoidCallback? onCreateBaseData;
   final VoidCallback? onCreateBranch;
   final VoidCallback? onManageEmployees;
+  final VoidCallback? onOpenTraceability;
   final VoidCallback onSignOut;
 
   @override
@@ -2210,6 +3545,12 @@ class _AdminDrawer extends StatelessWidget {
                 icon: Icons.person_add_alt_1_rounded,
                 title: 'Gestion de empleados',
                 onTap: onManageEmployees,
+              ),
+              const SizedBox(height: 10),
+              _AdminDrawerTile(
+                icon: Icons.account_tree_rounded,
+                title: 'Trazabilidad operativa',
+                onTap: onOpenTraceability,
               ),
               const SizedBox(height: 10),
               _AdminDrawerTile(
@@ -2292,6 +3633,7 @@ class _BranchDrawer extends StatelessWidget {
     required this.sectionIconBuilder,
     required this.onSelectSection,
     required this.onOpenBranches,
+    required this.onOpenReservationRequests,
     required this.onOpenTransferRequests,
     required this.onSignOut,
   });
@@ -2303,6 +3645,7 @@ class _BranchDrawer extends StatelessWidget {
   final IconData Function(_BranchDashboardSection section) sectionIconBuilder;
   final Future<void> Function(_BranchDashboardSection section) onSelectSection;
   final VoidCallback onOpenBranches;
+  final VoidCallback onOpenReservationRequests;
   final VoidCallback onOpenTransferRequests;
   final VoidCallback onSignOut;
 
@@ -2353,6 +3696,12 @@ class _BranchDrawer extends StatelessWidget {
                         icon: Icons.store_mall_directory_rounded,
                         title: 'Sucursales',
                         onTap: onOpenBranches,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.bookmark_add_rounded,
+                        title: 'Reservar producto',
+                        onTap: onOpenReservationRequests,
                       ),
                       const SizedBox(height: 10),
                       _AdminDrawerTile(
@@ -3166,6 +4515,15 @@ String _formatAuditAction(String value) {
     'employee_updated' => 'Empleado actualizado',
     'branch_created' => 'Sucursal creada',
     'master_data_seeded' => 'Base inicial creada',
+    'transfer_requested' => 'Traslado solicitado',
+    'transfer_approved' => 'Traslado aprobado',
+    'transfer_in_transit' => 'Traslado despachado',
+    'transfer_received' => 'Traslado recibido',
+    'reservation_created' => 'Reserva creada',
+    'reservation_completed' => 'Reserva completada',
+    'reservation_cancelled' => 'Reserva cancelada',
+    'reservation_expired' => 'Reserva vencida',
+    'reservation_updated' => 'Reserva actualizada',
     _ => 'Actividad administrativa',
   };
 }
@@ -3177,6 +4535,15 @@ IconData _auditActionIcon(String value) {
     'employee_updated' => Icons.manage_accounts_rounded,
     'branch_created' => Icons.add_business_rounded,
     'master_data_seeded' => Icons.storage_rounded,
+    'transfer_requested' => Icons.swap_horiz_rounded,
+    'transfer_approved' => Icons.verified_rounded,
+    'transfer_in_transit' => Icons.local_shipping_rounded,
+    'transfer_received' => Icons.inventory_2_rounded,
+    'reservation_created' => Icons.bookmark_add_rounded,
+    'reservation_completed' => Icons.check_circle_rounded,
+    'reservation_cancelled' => Icons.cancel_rounded,
+    'reservation_expired' => Icons.timer_off_rounded,
+    'reservation_updated' => Icons.bookmark_rounded,
     _ => Icons.history_rounded,
   };
 }
@@ -3188,7 +4555,83 @@ Color _auditActionColor(String value) {
     'employee_updated' => const Color(0xFF2A5F89),
     'branch_created' => const Color(0xFFE67A16),
     'master_data_seeded' => const Color(0xFF6A5AE0),
+    'transfer_requested' => const Color(0xFFD39B2A),
+    'transfer_approved' => const Color(0xFF2E8B57),
+    'transfer_in_transit' => const Color(0xFF2A8AC7),
+    'transfer_received' => const Color(0xFF1F7A8C),
+    'reservation_created' => const Color(0xFF1F7A8C),
+    'reservation_completed' => const Color(0xFF2E8B57),
+    'reservation_cancelled' => const Color(0xFFC24949),
+    'reservation_expired' => const Color(0xFFD39B2A),
+    'reservation_updated' => const Color(0xFF31547D),
     _ => const Color(0xFF31547D),
+  };
+}
+
+String _formatTransferStatusLabel(TransferStatus status) {
+  return switch (status) {
+    TransferStatus.pending => 'Pendiente',
+    TransferStatus.approved => 'Aprobado',
+    TransferStatus.rejected => 'Rechazado',
+    TransferStatus.inTransit => 'En transito',
+    TransferStatus.received => 'Recibido',
+    TransferStatus.cancelled => 'Cancelado',
+  };
+}
+
+Color _transferStatusColor(TransferStatus status) {
+  return switch (status) {
+    TransferStatus.pending => AppPalette.amber,
+    TransferStatus.approved => AppPalette.mint,
+    TransferStatus.rejected || TransferStatus.cancelled => AppPalette.danger,
+    TransferStatus.inTransit => AppPalette.blueSoft,
+    TransferStatus.received => AppPalette.cyan,
+  };
+}
+
+String _formatReservationStatusLabel(ReservationStatus status) {
+  return switch (status) {
+    ReservationStatus.active => 'Activa',
+    ReservationStatus.completed => 'Completada',
+    ReservationStatus.cancelled => 'Cancelada',
+    ReservationStatus.expired => 'Vencida',
+  };
+}
+
+Color _reservationStatusColor(ReservationStatus status) {
+  return switch (status) {
+    ReservationStatus.active => AppPalette.blueSoft,
+    ReservationStatus.completed => AppPalette.mint,
+    ReservationStatus.cancelled => AppPalette.danger,
+    ReservationStatus.expired => AppPalette.amber,
+  };
+}
+
+String _formatDateTimeStamp(DateTime value) {
+  final minute = value.minute.toString().padLeft(2, '0');
+  return '${value.day}/${value.month}/${value.year} ${value.hour}:$minute';
+}
+
+String _formatAuditMetadataLabel(String value) {
+  return switch (value.trim().toLowerCase()) {
+    'quantity' => 'Unidades',
+    'frombranchid' => 'Origen ID',
+    'frombranchname' => 'Origen',
+    'tobranchid' => 'Destino ID',
+    'tobranchname' => 'Destino',
+    'reason' => 'Motivo',
+    'notes' => 'Notas',
+    'requestingbranchid' => 'Rama solicitante ID',
+    'requestingbranchname' => 'Rama solicitante',
+    'reservationbranchid' => 'Sucursal reserva ID',
+    'reservationbranchname' => 'Sucursal reserva',
+    'customername' => 'Cliente',
+    'requestedbyuserid' => 'Solicitado por',
+    'approvedbyuserid' => 'Aprobado por',
+    'dispatchedbyuserid' => 'Despachado por',
+    'receivedbyuserid' => 'Recibido por',
+    'status' => 'Estado',
+    _ => value,
   };
 }
 

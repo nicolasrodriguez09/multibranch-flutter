@@ -302,6 +302,19 @@ class ReservationRepository {
         );
   }
 
+  Stream<List<Reservation>> watchReservationsByUser(String userId) {
+    return _collection.where('reservedBy', isEqualTo: userId).snapshots().map((
+      snapshot,
+    ) {
+      final items =
+          snapshot.docs
+              .map((doc) => Reservation.fromFirestore(doc.id, doc.data()))
+              .toList(growable: false)
+            ..sort((left, right) => right.createdAt.compareTo(left.createdAt));
+      return items;
+    });
+  }
+
   Future<Reservation?> fetchFirstActiveReservation(String branchId) async {
     final snapshot = await _collection
         .where('branchId', isEqualTo: branchId)
@@ -498,6 +511,24 @@ class SystemRepository {
               .map((doc) => AuditLog.fromFirestore(doc.id, doc.data()))
               .toList(),
         );
+  }
+
+  Future<List<AuditLog>> fetchAuditLogsForEntity({
+    required String entityId,
+    String? entityType,
+  }) async {
+    final snapshot = await _auditLogs
+        .where('entityId', isEqualTo: entityId)
+        .get();
+    final items =
+        snapshot.docs
+            .map((doc) => AuditLog.fromFirestore(doc.id, doc.data()))
+            .where(
+              (item) => entityType == null || item.entityType == entityType,
+            )
+            .toList(growable: false)
+          ..sort((left, right) => left.createdAt.compareTo(right.createdAt));
+    return List<AuditLog>.unmodifiable(items);
   }
 
   Stream<List<SearchHistoryEntry>> watchRecentSearchHistory(
