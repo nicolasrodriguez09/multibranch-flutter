@@ -50,6 +50,10 @@ service cloud.firestore {
       return isAdmin() || ((isSeller() || isSupervisor()) && hasSameBranch(branchId));
     }
 
+    function canApproveReservation(branchId) {
+      return isAdmin() || (isSupervisor() && hasSameBranch(branchId));
+    }
+
     function canReadReservation(data) {
       return isAdmin()
         || canReadBranch(data.branchId)
@@ -93,8 +97,36 @@ service cloud.firestore {
         && data.toBranchId == existing.toBranchId
         && data.toBranchName == existing.toBranchName
         && data.requestedBy == existing.requestedBy
+        && data.requestedByName == existing.requestedByName
         && data.quantity == existing.quantity
-        && data.reason == existing.reason;
+        && data.reason == existing.reason
+        && data.notes == existing.notes;
+    }
+
+    function sameReservationScope(data, existing) {
+      return data.productId == existing.productId
+        && data.productName == existing.productName
+        && data.sku == existing.sku
+        && data.branchId == existing.branchId
+        && data.branchName == existing.branchName
+        && data.requestingBranchId == existing.requestingBranchId
+        && data.requestingBranchName == existing.requestingBranchName
+        && data.customerName == existing.customerName
+        && data.customerPhone == existing.customerPhone
+        && data.quantity == existing.quantity
+        && data.reservedBy == existing.reservedBy
+        && data.requestedByName == existing.requestedByName
+        && data.expiresAt == existing.expiresAt
+        && data.createdAt == existing.createdAt;
+    }
+
+    function sameNotificationScope(data, existing) {
+      return data.userId == existing.userId
+        && data.title == existing.title
+        && data.message == existing.message
+        && data.type == existing.type
+        && data.referenceId == existing.referenceId
+        && data.createdAt == existing.createdAt;
     }
 
     match /users/{userId} {
@@ -158,6 +190,14 @@ service cloud.firestore {
             && canApproveTransfer(resource.data.fromBranchId)
           )
           || (
+            resource.data.status == 'pending'
+            && request.resource.data.status == 'rejected'
+            && request.resource.data.rejectedBy == request.auth.uid
+            && request.resource.data.reviewComment is string
+            && request.resource.data.reviewComment != ''
+            && canApproveTransfer(resource.data.fromBranchId)
+          )
+          || (
             resource.data.status == 'approved'
             && request.resource.data.status == 'in_transit'
             && canDispatchTransfer(resource.data.fromBranchId)
@@ -175,8 +215,36 @@ service cloud.firestore {
       allow read: if canReadReservation(resource.data);
       allow create: if hasUserProfile()
         && request.resource.data.reservedBy == request.auth.uid
+        && request.resource.data.status == 'pending'
         && (isAdmin() || isSeller() || isSupervisor());
-      allow update: if hasUserProfile() && canUpdateReservation(resource.data);
+      allow update: if hasUserProfile()
+        && sameReservationScope(request.resource.data, resource.data)
+        && (
+          isAdmin()
+          || (
+            resource.data.status == 'pending'
+            && request.resource.data.status == 'active'
+            && request.resource.data.approvedBy == request.auth.uid
+            && canApproveReservation(resource.data.branchId)
+          )
+          || (
+            resource.data.status == 'pending'
+            && request.resource.data.status == 'rejected'
+            && request.resource.data.rejectedBy == request.auth.uid
+            && request.resource.data.reviewComment is string
+            && request.resource.data.reviewComment != ''
+            && canApproveReservation(resource.data.branchId)
+          )
+          || (
+            resource.data.status == 'active'
+            && (
+              request.resource.data.status == 'completed'
+              || request.resource.data.status == 'cancelled'
+              || request.resource.data.status == 'expired'
+            )
+            && canUpdateReservation(resource.data)
+          )
+        );
       allow delete: if isAdmin();
     }
 
@@ -187,7 +255,12 @@ service cloud.firestore {
 
     match /notifications/{notificationId} {
       allow read: if signedIn() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create, update, delete: if isAdmin();
+      allow create: if hasUserProfile();
+      allow update: if signedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.isRead == true
+        && sameNotificationScope(request.resource.data, resource.data);
+      allow delete: if isAdmin();
     }
 
     match /audit_logs/{auditId} {

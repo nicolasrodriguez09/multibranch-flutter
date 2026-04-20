@@ -2,12 +2,14 @@ import 'models.dart';
 
 enum AppPermission {
   viewOwnInventory('Ver inventario de sucursal'),
+  viewNotifications('Ver notificaciones personales'),
   viewStockByBranch('Ver stock por sucursal'),
   viewLowStock('Ver alertas de stock bajo'),
   viewBranchReservations('Ver reservas activas de la sucursal'),
   viewBranchTransfers('Ver traslados de la sucursal'),
   viewOperationalMetrics('Ver metricas operativas'),
   createReservation('Crear reservas'),
+  approveReservation('Aprobar reservas'),
   updateReservation('Cerrar o cancelar reservas'),
   requestTransfer('Solicitar traslados'),
   approveTransfer('Aprobar traslados'),
@@ -28,9 +30,11 @@ enum AppPermission {
 
 enum AppModule {
   inventory('Inventario', AppPermission.viewOwnInventory),
+  notifications('Notificaciones', AppPermission.viewNotifications),
   lowStock('Stock bajo', AppPermission.viewLowStock),
   reservations('Reservas', AppPermission.viewBranchReservations),
   transfers('Traslados', AppPermission.viewBranchTransfers),
+  approvals('Aprobaciones', AppPermission.approveTransfer),
   metrics('Metricas', AppPermission.viewOperationalMetrics),
   masterData('Base maestra', AppPermission.viewMasterData),
   employees('Empleados', AppPermission.manageEmployees),
@@ -54,6 +58,7 @@ extension UserRolePresentation on UserRole {
 extension UserRolePermissions on UserRole {
   bool can(AppPermission permission) => switch (this) {
     UserRole.seller => switch (permission) {
+      AppPermission.viewNotifications ||
       AppPermission.viewOwnInventory ||
       AppPermission.viewStockByBranch ||
       AppPermission.viewLowStock ||
@@ -64,6 +69,7 @@ extension UserRolePermissions on UserRole {
       _ => false,
     },
     UserRole.supervisor => switch (permission) {
+      AppPermission.viewNotifications ||
       AppPermission.viewOwnInventory ||
       AppPermission.viewStockByBranch ||
       AppPermission.viewLowStock ||
@@ -71,6 +77,7 @@ extension UserRolePermissions on UserRole {
       AppPermission.viewBranchTransfers ||
       AppPermission.viewOperationalMetrics ||
       AppPermission.createReservation ||
+      AppPermission.approveReservation ||
       AppPermission.updateReservation ||
       AppPermission.requestTransfer ||
       AppPermission.approveTransfer ||

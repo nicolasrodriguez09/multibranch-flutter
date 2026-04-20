@@ -168,9 +168,9 @@ class _ReservationRequestPageState extends State<ReservationRequestPage> {
       await showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Reserva creada'),
+          title: const Text('Solicitud enviada'),
           content: Text(
-            'La reserva ${reservation.id} quedo activa en ${reservation.branchName} para ${reservation.customerName}.',
+            'La solicitud ${reservation.id} quedo pendiente de aprobacion en ${reservation.branchName} para ${reservation.customerName}.',
           ),
           actions: [
             TextButton(
@@ -184,7 +184,7 @@ class _ReservationRequestPageState extends State<ReservationRequestPage> {
       if (!mounted) {
         return;
       }
-      _showStatusMessage('No se pudo crear la reserva: $error');
+      _showStatusMessage('No se pudo enviar la solicitud: $error');
     } finally {
       if (mounted && _isSubmitting) {
         setState(() {
@@ -204,7 +204,7 @@ class _ReservationRequestPageState extends State<ReservationRequestPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Reservar producto'),
+        title: const Text('Solicitar reserva'),
         actions: [
           IconButton(
             tooltip: 'Actualizar reservas',
@@ -354,7 +354,7 @@ class _ReservationHeader extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Reserva en otra sucursal',
+            'Solicitud de reserva',
             style: Theme.of(
               context,
             ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
@@ -406,7 +406,7 @@ class _ReservationRulesCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            'La reserva consume stock disponible real en la sucursal origen y queda asociada al cliente y al vendedor que la registra.',
+            'La solicitud queda pendiente hasta que un supervisor apruebe comprometer stock real en la sucursal origen.',
             style: Theme.of(
               context,
             ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
@@ -416,7 +416,7 @@ class _ReservationRulesCard extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
-              _ReservationInfoPill(label: 'Solo sucursales con stock real'),
+              _ReservationInfoPill(label: 'Aprobacion por supervisor'),
               _ReservationInfoPill(label: 'Vigencia configurable'),
               _ReservationInfoPill(label: 'Trazabilidad administrativa'),
             ],
@@ -545,9 +545,9 @@ class _ReservationStockContextCard extends StatelessWidget {
           Text(
             hasSources
                 ? selectedBranch == null
-                      ? 'Selecciona una sucursal con stock disponible para crear la reserva.'
+                      ? 'Selecciona una sucursal con stock disponible para enviar la solicitud.'
                       : 'Sucursal sugerida: ${selectedBranch!.branch.name} | ${selectedBranch!.availableStock} disponibles | ${selectedBranch!.distanceKm.toStringAsFixed(1)} km | ETA ${selectedBranch!.etaLabel}'
-                : 'No hay stock disponible en otras sucursales para reservar este producto.',
+                : 'No hay stock disponible en otras sucursales para solicitar este producto.',
             style: Theme.of(
               context,
             ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
@@ -612,7 +612,7 @@ class _ReservationFormCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Selecciona la sucursal, la cantidad y los datos del cliente para dejar la reserva activa.',
+              'Selecciona la sucursal, la cantidad y los datos del cliente para enviar la solicitud a aprobacion.',
               style: Theme.of(
                 context,
               ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
@@ -731,7 +731,9 @@ class _ReservationFormCard extends StatelessWidget {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.bookmark_add_rounded),
-                label: Text(isSubmitting ? 'Creando reserva' : 'Crear reserva'),
+                label: Text(
+                  isSubmitting ? 'Enviando solicitud' : 'Enviar solicitud',
+                ),
               ),
             ),
           ],
@@ -770,7 +772,7 @@ class _RecentReservationCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Reservas creadas por tu usuario aunque esten en otra sucursal.',
+            'Solicitudes y reservas creadas por tu usuario aunque esten en otra sucursal.',
             style: Theme.of(
               context,
             ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
@@ -819,7 +821,9 @@ class _RecentReservationTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final accent = switch (item.status) {
+      ReservationStatus.pending => AppPalette.amber,
       ReservationStatus.active => AppPalette.mint,
+      ReservationStatus.rejected => AppPalette.danger,
       ReservationStatus.completed => AppPalette.blueSoft,
       ReservationStatus.cancelled => AppPalette.danger,
       ReservationStatus.expired => AppPalette.amber,
@@ -883,7 +887,7 @@ class _ReservationEmptySelection extends StatelessWidget {
         border: Border.all(color: const Color(0x26FFFFFF)),
       ),
       child: Text(
-        'Selecciona un producto para validar sucursales disponibles y crear la reserva.',
+        'Selecciona un producto para validar sucursales disponibles y enviar la solicitud.',
         style: Theme.of(
           context,
         ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
@@ -1012,7 +1016,9 @@ class _ReservationMetricChip extends StatelessWidget {
 
 String _formatReservationStatus(ReservationStatus status) {
   return switch (status) {
+    ReservationStatus.pending => 'Pendiente',
     ReservationStatus.active => 'Activa',
+    ReservationStatus.rejected => 'Rechazada',
     ReservationStatus.completed => 'Completada',
     ReservationStatus.cancelled => 'Cancelada',
     ReservationStatus.expired => 'Vencida',
