@@ -427,9 +427,15 @@ void main() {
   );
 
   test(
-    'createReservation and completeReservation keep inventory consistent',
+    'reservation approval and completion keep inventory consistent',
     () async {
       await service.seedMasterData(actorUser: sampleData.users.first);
+      final admin = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.adminUser,
+      );
+      final supervisor = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.secondBranchSeller,
+      );
       final seller = sampleData.users.firstWhere(
         (user) => user.id == DemoIds.branchSeller,
       );
@@ -448,9 +454,22 @@ void main() {
         DemoIds.branchCenter,
         DemoIds.laptopProduct,
       );
-      expect(reservation.status, ReservationStatus.active);
-      expect(reservedInventory!.reservedStock, 2);
-      expect(reservedInventory.availableStock, 6);
+      expect(reservation.status, ReservationStatus.pending);
+      expect(reservedInventory!.reservedStock, 1);
+      expect(reservedInventory.availableStock, 7);
+
+      final approvedReservation = await service.approveReservation(
+        actorUser: admin,
+        reservationId: reservation.id,
+      );
+      final approvedInventory = await service.inventories.fetchInventory(
+        DemoIds.branchCenter,
+        DemoIds.laptopProduct,
+      );
+
+      expect(approvedReservation.status, ReservationStatus.active);
+      expect(approvedInventory!.reservedStock, 2);
+      expect(approvedInventory.availableStock, 6);
 
       await service.updateReservationStatus(
         actorUser: seller,
@@ -476,6 +495,9 @@ void main() {
     'seller can reserve in another branch and the operation is audited',
     () async {
       await service.seedMasterData(actorUser: sampleData.users.first);
+      final supervisor = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.secondBranchSeller,
+      );
       final seller = sampleData.users.firstWhere(
         (user) => user.id == DemoIds.branchSeller,
       );
@@ -502,14 +524,28 @@ void main() {
       expect(reservation.branchId, DemoIds.branchNorth);
       expect(reservation.reservedBy, seller.id);
       expect(reservedInventory, isNotNull);
-      expect(reservedInventory!.reservedStock, 3);
-      expect(reservedInventory.availableStock, 13);
+      expect(reservedInventory!.reservedStock, 1);
+      expect(reservedInventory.availableStock, 15);
       expect(auditLogs.docs, hasLength(1));
       expect(auditLogs.docs.first.data()['actorUserId'], seller.id);
       expect(
         auditLogs.docs.first.data()['metadata']['requestingBranchId'],
         DemoIds.branchCenter,
       );
+
+      final approvedReservation = await service.approveReservation(
+        actorUser: supervisor,
+        reservationId: reservation.id,
+        reviewComment: 'Stock validado para mostrador.',
+      );
+      final approvedInventory = await service.inventories.fetchInventory(
+        DemoIds.branchNorth,
+        DemoIds.phoneProduct,
+      );
+
+      expect(approvedReservation.status, ReservationStatus.active);
+      expect(approvedInventory!.reservedStock, 3);
+      expect(approvedInventory.availableStock, 13);
 
       await service.updateReservationStatus(
         actorUser: seller,
@@ -544,6 +580,9 @@ void main() {
       final admin = sampleData.users.firstWhere(
         (user) => user.id == DemoIds.adminUser,
       );
+      final supervisor = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.secondBranchSeller,
+      );
       final seller = sampleData.users.firstWhere(
         (user) => user.id == DemoIds.branchSeller,
       );
@@ -556,6 +595,10 @@ void main() {
         customerPhone: '3009990000',
         quantity: 2,
         expiresIn: const Duration(hours: 24),
+      );
+      await service.approveReservation(
+        actorUser: supervisor,
+        reservationId: reservation.id,
       );
       await service.updateReservationStatus(
         actorUser: seller,
@@ -574,7 +617,11 @@ void main() {
       expect(detail.branchInventory!.branchId, DemoIds.branchNorth);
       expect(
         detail.auditTrail.map((item) => item.action).toList(growable: false),
-        <String>['reservation_created', 'reservation_completed'],
+        <String>[
+          'reservation_created',
+          'reservation_approved',
+          'reservation_completed',
+        ],
       );
       expect(
         detail.requestLog?.metadata['requestingBranchId'],
@@ -584,6 +631,51 @@ void main() {
         detail.requestLog?.metadata['customerName'],
         'Cliente Seguimiento',
       );
+      expect(detail.approvalLog?.actorUserId, DemoIds.secondBranchSeller);
+    },
+  );
+
+  test(
+    'supervisor can reject reservation requests without touching reserved stock',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final supervisor = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.secondBranchSeller,
+      );
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      final reservation = await service.createReservation(
+        actorUser: seller,
+        branchId: DemoIds.branchNorth,
+        productId: DemoIds.phoneProduct,
+        customerName: 'Cliente Rechazado',
+        customerPhone: '3002220000',
+        quantity: 2,
+        expiresIn: const Duration(hours: 24),
+      );
+
+      final rejectedReservation = await service.rejectReservation(
+        actorUser: supervisor,
+        reservationId: reservation.id,
+        reviewComment: 'No hay prioridad comercial para liberar ese stock.',
+      );
+      final inventoryAfterRejection = await service.inventories.fetchInventory(
+        DemoIds.branchNorth,
+        DemoIds.phoneProduct,
+      );
+      final notifications = await firestore
+          .collection('notifications')
+          .where('userId', isEqualTo: seller.id)
+          .get();
+
+      expect(rejectedReservation.status, ReservationStatus.rejected);
+      expect(rejectedReservation.reviewComment, contains('prioridad'));
+      expect(inventoryAfterRejection!.reservedStock, 1);
+      expect(inventoryAfterRejection.availableStock, 15);
+      expect(notifications.docs, hasLength(1));
+      expect(notifications.docs.first.data()['type'], 'reservation');
     },
   );
 
@@ -755,6 +847,101 @@ void main() {
         detail.receiveLog?.metadata['receivedByUserId'],
         DemoIds.branchSeller,
       );
+    },
+  );
+
+  test(
+    'supervisor can reject transfer requests and notify the requester',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final supervisor = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.secondBranchSeller,
+      );
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      final transfer = await service.requestTransfer(
+        actorUser: seller,
+        productId: DemoIds.laptopProduct,
+        fromBranchId: DemoIds.branchNorth,
+        toBranchId: DemoIds.branchCenter,
+        quantity: 2,
+        reason: 'Solicitud sin urgencia',
+      );
+
+      final rejectedTransfer = await service.rejectTransfer(
+        actorUser: supervisor,
+        transferId: transfer.id,
+        reviewComment: 'Se prioriza stock para la demanda local.',
+      );
+      final sourceInventory = await service.inventories.fetchInventory(
+        DemoIds.branchNorth,
+        DemoIds.laptopProduct,
+      );
+      final destinationInventory = await service.inventories.fetchInventory(
+        DemoIds.branchCenter,
+        DemoIds.laptopProduct,
+      );
+      final notifications = await firestore
+          .collection('notifications')
+          .where('userId', isEqualTo: seller.id)
+          .get();
+
+      expect(rejectedTransfer.status, TransferStatus.rejected);
+      expect(rejectedTransfer.reviewComment, contains('demanda local'));
+      expect(sourceInventory!.stock, 12);
+      expect(destinationInventory!.incomingStock, 0);
+      expect(notifications.docs, hasLength(1));
+      expect(notifications.docs.first.data()['type'], 'transfer');
+    },
+  );
+
+  test(
+    'users can read their notification inbox and mark notifications as read',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final supervisor = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.secondBranchSeller,
+      );
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      final transfer = await service.requestTransfer(
+        actorUser: seller,
+        productId: DemoIds.laptopProduct,
+        fromBranchId: DemoIds.branchNorth,
+        toBranchId: DemoIds.branchCenter,
+        quantity: 1,
+        reason: 'Seguimiento de notificaciones',
+      );
+      await service.rejectTransfer(
+        actorUser: supervisor,
+        transferId: transfer.id,
+        reviewComment: 'Se mantiene prioridad para ventas locales.',
+      );
+
+      final inbox = await service.watchNotifications(actorUser: seller).first;
+      expect(inbox, hasLength(1));
+      expect(inbox.first.isRead, isFalse);
+      expect(inbox.first.message, contains('Motivo:'));
+      expect(inbox.first.message, contains('ventas locales'));
+
+      await service.markNotificationAsRead(
+        actorUser: seller,
+        notificationId: inbox.first.id,
+      );
+
+      final updatedInbox = await service
+          .watchNotifications(actorUser: seller)
+          .first;
+      expect(updatedInbox.first.isRead, isTrue);
+
+      final markedCount = await service.markAllNotificationsAsRead(
+        actorUser: seller,
+      );
+      expect(markedCount, 0);
     },
   );
 

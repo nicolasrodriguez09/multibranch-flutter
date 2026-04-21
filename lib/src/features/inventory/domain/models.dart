@@ -42,7 +42,9 @@ enum TransferStatus {
 }
 
 enum ReservationStatus {
+  pending,
   active,
+  rejected,
   expired,
   completed,
   cancelled;
@@ -498,13 +500,17 @@ class TransferRequest {
     required this.toBranchId,
     required this.toBranchName,
     required this.requestedBy,
+    this.requestedByName = '',
     required this.approvedBy,
+    this.rejectedBy,
     required this.quantity,
     required this.status,
     required this.reason,
     required this.notes,
+    this.reviewComment = '',
     required this.requestedAt,
     required this.approvedAt,
+    this.rejectedAt,
     required this.shippedAt,
     required this.receivedAt,
     required this.updatedAt,
@@ -519,22 +525,30 @@ class TransferRequest {
   final String toBranchId;
   final String toBranchName;
   final String requestedBy;
+  final String requestedByName;
   final String? approvedBy;
+  final String? rejectedBy;
   final int quantity;
   final TransferStatus status;
   final String reason;
   final String notes;
+  final String reviewComment;
   final DateTime requestedAt;
   final DateTime? approvedAt;
+  final DateTime? rejectedAt;
   final DateTime? shippedAt;
   final DateTime? receivedAt;
   final DateTime updatedAt;
 
   TransferRequest copyWith({
     String? id,
+    String? requestedByName,
     String? approvedBy,
+    String? rejectedBy,
     TransferStatus? status,
+    String? reviewComment,
     DateTime? approvedAt,
+    DateTime? rejectedAt,
     DateTime? shippedAt,
     DateTime? receivedAt,
     DateTime? updatedAt,
@@ -549,13 +563,17 @@ class TransferRequest {
       toBranchId: toBranchId,
       toBranchName: toBranchName,
       requestedBy: requestedBy,
+      requestedByName: requestedByName ?? this.requestedByName,
       approvedBy: approvedBy ?? this.approvedBy,
+      rejectedBy: rejectedBy ?? this.rejectedBy,
       quantity: quantity,
       status: status ?? this.status,
       reason: reason,
       notes: notes,
+      reviewComment: reviewComment ?? this.reviewComment,
       requestedAt: requestedAt,
       approvedAt: approvedAt ?? this.approvedAt,
+      rejectedAt: rejectedAt ?? this.rejectedAt,
       shippedAt: shippedAt ?? this.shippedAt,
       receivedAt: receivedAt ?? this.receivedAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -571,13 +589,17 @@ class TransferRequest {
     'toBranchId': toBranchId,
     'toBranchName': toBranchName,
     'requestedBy': requestedBy,
+    if (requestedByName.isNotEmpty) 'requestedByName': requestedByName,
     'approvedBy': approvedBy,
+    'rejectedBy': rejectedBy,
     'quantity': quantity,
     'status': status.firestoreValue,
     'reason': reason,
     'notes': notes,
+    if (reviewComment.isNotEmpty) 'reviewComment': reviewComment,
     'requestedAt': writeDateTime(requestedAt),
     'approvedAt': writeDateTime(approvedAt),
+    'rejectedAt': writeDateTime(rejectedAt),
     'shippedAt': writeDateTime(shippedAt),
     'receivedAt': writeDateTime(receivedAt),
     'updatedAt': writeDateTime(updatedAt),
@@ -594,15 +616,19 @@ class TransferRequest {
       toBranchId: readString(data, 'toBranchId'),
       toBranchName: readString(data, 'toBranchName'),
       requestedBy: readString(data, 'requestedBy'),
+      requestedByName: readString(data, 'requestedByName'),
       approvedBy: data['approvedBy'] as String?,
+      rejectedBy: data['rejectedBy'] as String?,
       quantity: readInt(data, 'quantity'),
       status: TransferStatus.fromValue(readString(data, 'status')),
       reason: readString(data, 'reason'),
       notes: readString(data, 'notes'),
+      reviewComment: readString(data, 'reviewComment'),
       requestedAt:
           readDateTime(data, 'requestedAt') ??
           DateTime.fromMillisecondsSinceEpoch(0),
       approvedAt: readDateTime(data, 'approvedAt'),
+      rejectedAt: readDateTime(data, 'rejectedAt'),
       shippedAt: readDateTime(data, 'shippedAt'),
       receivedAt: readDateTime(data, 'receivedAt'),
       updatedAt:
@@ -620,11 +646,19 @@ class Reservation {
     required this.sku,
     required this.branchId,
     required this.branchName,
+    this.requestingBranchId = '',
+    this.requestingBranchName = '',
     required this.customerName,
     required this.customerPhone,
     required this.quantity,
     required this.status,
     required this.reservedBy,
+    this.requestedByName = '',
+    this.approvedBy,
+    this.approvedAt,
+    this.rejectedBy,
+    this.rejectedAt,
+    this.reviewComment = '',
     required this.expiresAt,
     required this.createdAt,
     required this.updatedAt,
@@ -636,16 +670,32 @@ class Reservation {
   final String sku;
   final String branchId;
   final String branchName;
+  final String requestingBranchId;
+  final String requestingBranchName;
   final String customerName;
   final String customerPhone;
   final int quantity;
   final ReservationStatus status;
   final String reservedBy;
+  final String requestedByName;
+  final String? approvedBy;
+  final DateTime? approvedAt;
+  final String? rejectedBy;
+  final DateTime? rejectedAt;
+  final String reviewComment;
   final DateTime expiresAt;
   final DateTime createdAt;
   final DateTime updatedAt;
 
-  Reservation copyWith({ReservationStatus? status, DateTime? updatedAt}) {
+  Reservation copyWith({
+    ReservationStatus? status,
+    String? approvedBy,
+    DateTime? approvedAt,
+    String? rejectedBy,
+    DateTime? rejectedAt,
+    String? reviewComment,
+    DateTime? updatedAt,
+  }) {
     return Reservation(
       id: id,
       productId: productId,
@@ -653,11 +703,19 @@ class Reservation {
       sku: sku,
       branchId: branchId,
       branchName: branchName,
+      requestingBranchId: requestingBranchId,
+      requestingBranchName: requestingBranchName,
       customerName: customerName,
       customerPhone: customerPhone,
       quantity: quantity,
       status: status ?? this.status,
       reservedBy: reservedBy,
+      requestedByName: requestedByName,
+      approvedBy: approvedBy ?? this.approvedBy,
+      approvedAt: approvedAt ?? this.approvedAt,
+      rejectedBy: rejectedBy ?? this.rejectedBy,
+      rejectedAt: rejectedAt ?? this.rejectedAt,
+      reviewComment: reviewComment ?? this.reviewComment,
       expiresAt: expiresAt,
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -670,11 +728,20 @@ class Reservation {
     'sku': sku,
     'branchId': branchId,
     'branchName': branchName,
+    if (requestingBranchId.isNotEmpty) 'requestingBranchId': requestingBranchId,
+    if (requestingBranchName.isNotEmpty)
+      'requestingBranchName': requestingBranchName,
     'customerName': customerName,
     'customerPhone': customerPhone,
     'quantity': quantity,
     'status': status.name,
     'reservedBy': reservedBy,
+    if (requestedByName.isNotEmpty) 'requestedByName': requestedByName,
+    'approvedBy': approvedBy,
+    'approvedAt': writeDateTime(approvedAt),
+    'rejectedBy': rejectedBy,
+    'rejectedAt': writeDateTime(rejectedAt),
+    if (reviewComment.isNotEmpty) 'reviewComment': reviewComment,
     'expiresAt': writeDateTime(expiresAt),
     'createdAt': writeDateTime(createdAt),
     'updatedAt': writeDateTime(updatedAt),
@@ -688,11 +755,19 @@ class Reservation {
       sku: readString(data, 'sku'),
       branchId: readString(data, 'branchId'),
       branchName: readString(data, 'branchName'),
+      requestingBranchId: readString(data, 'requestingBranchId'),
+      requestingBranchName: readString(data, 'requestingBranchName'),
       customerName: readString(data, 'customerName'),
       customerPhone: readString(data, 'customerPhone'),
       quantity: readInt(data, 'quantity'),
       status: ReservationStatus.fromValue(readString(data, 'status')),
       reservedBy: readString(data, 'reservedBy'),
+      requestedByName: readString(data, 'requestedByName'),
+      approvedBy: data['approvedBy'] as String?,
+      approvedAt: readDateTime(data, 'approvedAt'),
+      rejectedBy: data['rejectedBy'] as String?,
+      rejectedAt: readDateTime(data, 'rejectedAt'),
+      reviewComment: readString(data, 'reviewComment'),
       expiresAt:
           readDateTime(data, 'expiresAt') ??
           DateTime.fromMillisecondsSinceEpoch(0),

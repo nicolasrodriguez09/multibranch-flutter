@@ -13,19 +13,24 @@ void main() {
   test(
     'permission matrix matches seller, supervisor and admin capabilities',
     () {
+      expect(UserRole.seller.can(AppPermission.viewNotifications), isTrue);
       expect(UserRole.seller.can(AppPermission.viewOwnInventory), isTrue);
       expect(UserRole.seller.can(AppPermission.approveTransfer), isFalse);
+      expect(UserRole.seller.can(AppPermission.approveReservation), isFalse);
       expect(
         UserRole.seller.can(AppPermission.viewOperationalMetrics),
         isFalse,
       );
       expect(UserRole.supervisor.can(AppPermission.approveTransfer), isTrue);
+      expect(UserRole.supervisor.can(AppPermission.approveReservation), isTrue);
+      expect(UserRole.supervisor.can(AppPermission.viewNotifications), isTrue);
       expect(
         UserRole.supervisor.can(AppPermission.viewOperationalMetrics),
         isTrue,
       );
       expect(UserRole.supervisor.can(AppPermission.manageEmployees), isFalse);
       expect(UserRole.admin.can(AppPermission.manageEmployees), isTrue);
+      expect(UserRole.admin.can(AppPermission.viewNotifications), isTrue);
       expect(UserRole.admin.can(AppPermission.seedMasterData), isTrue);
     },
   );

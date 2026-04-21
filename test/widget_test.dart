@@ -11,6 +11,7 @@ import 'package:flutter_multibranch_proyect/src/features/inventory/domain/models
 import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/branch_directory_page.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/branch_location_resolver.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/inventory_dashboard_page.dart';
+import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/notifications_page.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/product_detail_page.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/reservation_request_page.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/transfer_request_page.dart';
@@ -89,6 +90,14 @@ void main() {
 
     expect(find.text('Menu administrativo'), findsOneWidget);
     expect(find.text('Gestion de empleados'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(Drawer),
+        matching: find.widgetWithText(ListTile, 'Notificaciones'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Bandeja de aprobaciones'), findsWidgets);
     expect(find.text('Trazabilidad operativa'), findsOneWidget);
     expect(find.text('Agregar sucursal'), findsOneWidget);
     expect(find.text('Crear base de datos inicial'), findsOneWidget);
@@ -268,6 +277,13 @@ void main() {
     expect(find.text('Compromisos y sincronizacion'), findsOneWidget);
     expect(find.text('Modulos habilitados'), findsOneWidget);
     expect(find.text('Sucursales'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(Drawer),
+        matching: find.widgetWithText(ListTile, 'Notificaciones'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('Reservar producto'), findsOneWidget);
     await tester.scrollUntilVisible(
       find.descendant(
@@ -282,7 +298,7 @@ void main() {
   });
 
   testWidgets(
-    'reservation request page creates an active reservation in another branch',
+    'reservation request page creates a pending request in another branch',
     (WidgetTester tester) async {
       tester.view.physicalSize = const Size(1080, 2200);
       tester.view.devicePixelRatio = 1.0;
@@ -315,7 +331,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Reservar producto'), findsOneWidget);
+      expect(find.text('Solicitar reserva'), findsOneWidget);
       expect(find.text('Formulario de reserva'), findsOneWidget);
       expect(
         find.textContaining('Sin stock local para Samsung A55'),
@@ -336,17 +352,17 @@ void main() {
       );
 
       await tester.scrollUntilVisible(
-        find.text('Crear reserva'),
+        find.text('Enviar solicitud'),
         220,
         scrollable: find.byType(Scrollable).first,
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Crear reserva'));
+      await tester.tap(find.text('Enviar solicitud'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Reserva creada'), findsOneWidget);
+      expect(find.text('Solicitud enviada'), findsOneWidget);
       expect(
-        find.textContaining('quedo activa en Sucursal Norte'),
+        find.textContaining('quedo pendiente de aprobacion en Sucursal Norte'),
         findsOneWidget,
       );
 
@@ -360,7 +376,7 @@ void main() {
 
       expect(reservation, isNotNull);
       expect(reservation!.branchId, DemoIds.branchNorth);
-      expect(reservation.status, ReservationStatus.active);
+      expect(reservation.status, ReservationStatus.pending);
       expect(reservation.quantity, 2);
     },
   );
@@ -441,6 +457,60 @@ void main() {
       expect(transfer.fromBranchId, DemoIds.branchNorth);
       expect(transfer.toBranchId, DemoIds.branchCenter);
       expect(transfer.quantity, 2);
+    },
+  );
+
+  testWidgets(
+    'notification inbox shows request outcomes and marks them as read',
+    (WidgetTester tester) async {
+      final firestore = FakeFirebaseFirestore();
+      final now = DateTime.utc(2026, 3, 26, 12, 0);
+      final service = InventoryWorkflowService(
+        firestore: firestore,
+        clock: () => now,
+      );
+      final sampleData = SampleSeedData.build(now);
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final supervisor = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.secondBranchSeller,
+      );
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      final transfer = await service.requestTransfer(
+        actorUser: seller,
+        productId: DemoIds.laptopProduct,
+        fromBranchId: DemoIds.branchNorth,
+        toBranchId: DemoIds.branchCenter,
+        quantity: 1,
+        reason: 'Venta con seguimiento',
+      );
+      await service.rejectTransfer(
+        actorUser: supervisor,
+        transferId: transfer.id,
+        reviewComment: 'Se prioriza stock para la demanda local.',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(useMaterial3: true),
+          home: NotificationInboxPage(service: service, currentUser: seller),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Notificaciones'), findsOneWidget);
+      expect(find.text('Solicitud rechazada'), findsOneWidget);
+      expect(find.textContaining('Motivo: Se prioriza stock'), findsOneWidget);
+      expect(find.text('Marcar leida'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('Marcar leida'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Marcar leida'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Leida'), findsOneWidget);
     },
   );
 
@@ -884,11 +954,24 @@ void main() {
       expect(find.text('Menu de sucursal'), findsOneWidget);
       expect(find.text('KPIs operativos'), findsOneWidget);
       expect(find.text('Inventario y alertas'), findsOneWidget);
-      expect(find.text('Solicitudes y sincronizacion'), findsOneWidget);
+      expect(find.text('Solicitudes y sincronizacion'), findsWidgets);
       expect(find.text('Modulos habilitados'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(Drawer),
+          matching: find.widgetWithText(ListTile, 'Notificaciones'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Bandeja de aprobaciones'), findsWidgets);
       expect(find.text('Reservar producto'), findsOneWidget);
 
-      await tester.tap(find.text('KPIs operativos').first);
+      await tester.tap(
+        find.descendant(
+          of: find.byType(Drawer),
+          matching: find.widgetWithText(ListTile, 'KPIs operativos'),
+        ),
+      );
       await tester.pumpAndSettle();
 
       expect(find.text('Consultas sin stock'), findsOneWidget);
@@ -896,7 +979,12 @@ void main() {
 
       await tester.tap(find.byIcon(Icons.menu).first);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Inventario y alertas').first);
+      await tester.tap(
+        find.descendant(
+          of: find.byType(Drawer),
+          matching: find.widgetWithText(ListTile, 'Inventario y alertas'),
+        ),
+      );
       await tester.pumpAndSettle();
 
       expect(find.text('Productos mas consultados'), findsOneWidget);
@@ -905,11 +993,19 @@ void main() {
 
       await tester.tap(find.byIcon(Icons.menu).first);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Solicitudes y sincronizacion').first);
+      await tester.tap(
+        find.descendant(
+          of: find.byType(Drawer),
+          matching: find.widgetWithText(
+            ListTile,
+            'Solicitudes y sincronizacion',
+          ),
+        ),
+      );
       await tester.pumpAndSettle();
 
-      expect(find.text('Solicitudes pendientes'), findsWidgets);
-      expect(find.text('Ultimas sincronizaciones'), findsOneWidget);
+      expect(find.text('Solicitudes y sincronizacion'), findsWidgets);
+      expect(find.text('Bandeja de aprobaciones'), findsWidgets);
     },
   );
 

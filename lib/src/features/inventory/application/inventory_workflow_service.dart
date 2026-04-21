@@ -162,12 +162,19 @@ class ReservationTraceabilityData {
   final List<AuditLog> auditTrail;
 
   AuditLog? get requestLog => _findAudit('reservation_created');
+  AuditLog? get approvalLog => _findAudit('reservation_approved');
+  AuditLog? get rejectionLog => _findAudit('reservation_rejected');
   AuditLog? get completionLog => _findAudit('reservation_completed');
   AuditLog? get cancellationLog => _findAudit('reservation_cancelled');
   AuditLog? get expirationLog => _findAudit('reservation_expired');
 
   AuditLog? get latestStatusLog =>
-      expirationLog ?? cancellationLog ?? completionLog ?? requestLog;
+      rejectionLog ??
+      expirationLog ??
+      cancellationLog ??
+      completionLog ??
+      approvalLog ??
+      requestLog;
 
   AuditLog? _findAudit(String action) {
     return auditTrail.cast<AuditLog?>().firstWhere(
@@ -175,6 +182,24 @@ class ReservationTraceabilityData {
       orElse: () => null,
     );
   }
+}
+
+class ApprovalQueueData {
+  const ApprovalQueueData({
+    required this.pendingReservations,
+    required this.pendingTransfers,
+    required this.scopeLabel,
+    required this.scopeIsGlobal,
+  });
+
+  final List<Reservation> pendingReservations;
+  final List<TransferRequest> pendingTransfers;
+  final String scopeLabel;
+  final bool scopeIsGlobal;
+
+  int get totalPending => pendingReservations.length + pendingTransfers.length;
+
+  bool get hasItems => totalPending > 0;
 }
 
 enum InventoryDataReliabilityLevel { green, yellow, red }
@@ -668,9 +693,13 @@ class InventoryWorkflowService {
         'toBranchId': transfer.toBranchId,
         'toBranchName': transfer.toBranchName,
         'requestedByUserId': transfer.requestedBy,
+        if (transfer.requestedByName.isNotEmpty)
+          'requestedByName': transfer.requestedByName,
         'status': transfer.status.firestoreValue,
         'reason': transfer.reason,
         if (transfer.notes.isNotEmpty) 'notes': transfer.notes,
+        if (transfer.reviewComment.isNotEmpty)
+          'reviewComment': transfer.reviewComment,
         ...extraMetadata,
       },
       branchId: branchId,
@@ -1480,6 +1509,147 @@ class InventoryWorkflowService {
     await system.upsertSearchFilter(entry);
   }
 
+  Stream<ApprovalQueueData> watchApprovalQueue({required AppUser actorUser}) {
+    final canReviewTransfers = actorUser.can(AppPermission.approveTransfer);
+    final canReviewReservations = actorUser.can(
+      AppPermission.approveReservation,
+    );
+    if (!canReviewTransfers && !canReviewReservations) {
+      throw InventoryException(
+        'El rol ${actorUser.role.displayName} no tiene permiso para revisar solicitudes pendientes.',
+      );
+    }
+
+    final controller = StreamController<ApprovalQueueData>();
+    var reservationsState = const <Reservation>[];
+    var transfersState = const <TransferRequest>[];
+    var reservationsReady = false;
+    var transfersReady = false;
+    var subscriptions = <StreamSubscription<Object?>>[];
+
+    Iterable<Reservation> filterReservations() {
+      return reservationsState.where((item) {
+        if (item.status != ReservationStatus.pending) {
+          return false;
+        }
+        if (actorUser.role == UserRole.admin) {
+          return true;
+        }
+        return item.branchId == actorUser.branchId;
+      });
+    }
+
+    Iterable<TransferRequest> filterTransfers() {
+      return transfersState.where((item) {
+        if (item.status != TransferStatus.pending) {
+          return false;
+        }
+        if (actorUser.role == UserRole.admin) {
+          return true;
+        }
+        return item.fromBranchId == actorUser.branchId;
+      });
+    }
+
+    void emit() {
+      if (controller.isClosed || !reservationsReady || !transfersReady) {
+        return;
+      }
+
+      final pendingReservations = filterReservations().toList(growable: false)
+        ..sort((left, right) => right.createdAt.compareTo(left.createdAt));
+      final pendingTransfers = filterTransfers().toList(growable: false)
+        ..sort((left, right) => right.requestedAt.compareTo(left.requestedAt));
+
+      controller.add(
+        ApprovalQueueData(
+          pendingReservations: List<Reservation>.unmodifiable(
+            pendingReservations,
+          ),
+          pendingTransfers: List<TransferRequest>.unmodifiable(
+            pendingTransfers,
+          ),
+          scopeLabel: actorUser.role == UserRole.admin
+              ? 'Todas las sucursales'
+              : actorUser.branchId,
+          scopeIsGlobal: actorUser.role == UserRole.admin,
+        ),
+      );
+    }
+
+    controller.onListen = () {
+      if (subscriptions.isNotEmpty) {
+        return;
+      }
+
+      subscriptions = <StreamSubscription<Object?>>[
+        reservations.watchReservations().listen((items) {
+          reservationsState = items;
+          reservationsReady = true;
+          emit();
+        }, onError: controller.addError),
+        transfers.watchTransfers().listen((items) {
+          transfersState = items;
+          transfersReady = true;
+          emit();
+        }, onError: controller.addError),
+      ];
+    };
+
+    controller.onCancel = () async {
+      final currentSubscriptions = subscriptions;
+      subscriptions = <StreamSubscription<Object?>>[];
+      for (final subscription in currentSubscriptions) {
+        await subscription.cancel();
+      }
+    };
+
+    return controller.stream;
+  }
+
+  Stream<List<AppNotification>> watchNotifications({
+    required AppUser actorUser,
+    int limit = 40,
+  }) {
+    _ensurePermission(actorUser, AppPermission.viewNotifications);
+    return system.watchNotifications(actorUser.id, limit: limit);
+  }
+
+  Future<void> markNotificationAsRead({
+    required AppUser actorUser,
+    required String notificationId,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.viewNotifications);
+
+    final notificationSnapshot = await _notificationsCollection
+        .doc(notificationId)
+        .get();
+    if (!notificationSnapshot.exists) {
+      throw const InventoryException('La notificacion no existe.');
+    }
+
+    final notification = AppNotification.fromFirestore(
+      notificationSnapshot.id,
+      notificationSnapshot.data()!,
+    );
+    if (notification.userId != actorUser.id) {
+      throw const InventoryException(
+        'No puedes modificar notificaciones de otro usuario.',
+      );
+    }
+
+    if (notification.isRead) {
+      return;
+    }
+
+    await system.markNotificationAsRead(notificationId);
+  }
+
+  Future<int> markAllNotificationsAsRead({required AppUser actorUser}) async {
+    _ensurePermission(actorUser, AppPermission.viewNotifications);
+    return system.markAllNotificationsAsRead(actorUser.id);
+  }
+
   Stream<BranchOperationalStats> watchOperationalStats({
     required AppUser actorUser,
     required String branchId,
@@ -1628,6 +1798,7 @@ class InventoryWorkflowService {
 
     final now = _clock();
     final expiresAt = now.add(expiresIn);
+    final requestingBranch = await catalog.fetchBranch(actorUser.branchId);
     final inventoryRef = _inventoriesCollection.doc(
       inventories.inventoryId(branchId, productId),
     );
@@ -1657,13 +1828,6 @@ class InventoryWorkflowService {
         );
       }
 
-      final updatedInventory = inventory.recalculate(
-        reservedStock: inventory.reservedStock + quantity,
-        updatedBy: actorUser.id,
-        updatedAt: now,
-        lastMovementAt: now,
-      );
-
       final reservation = Reservation(
         id: reservationRef.id,
         productId: inventory.productId,
@@ -1671,11 +1835,16 @@ class InventoryWorkflowService {
         sku: inventory.sku,
         branchId: inventory.branchId,
         branchName: inventory.branchName,
+        requestingBranchId: actorUser.branchId,
+        requestingBranchName: requestingBranch?.name.isNotEmpty == true
+            ? requestingBranch!.name
+            : actorUser.branchId,
         customerName: normalizedCustomerName,
         customerPhone: customerPhone.trim(),
         quantity: quantity,
-        status: ReservationStatus.active,
+        status: ReservationStatus.pending,
         reservedBy: actorUser.id,
+        requestedByName: actorUser.fullName,
         expiresAt: expiresAt,
         createdAt: now,
         updatedAt: now,
@@ -1686,19 +1855,20 @@ class InventoryWorkflowService {
         entityType: 'reservation',
         entityId: reservation.id,
         entityLabel: reservation.productName,
-        message: 'Registro una reserva activa para',
+        message: 'Registro una solicitud de reserva para',
         metadata: {
           'reservationBranchId': reservation.branchId,
           'reservationBranchName': reservation.branchName,
           'quantity': '${reservation.quantity}',
           'customerName': reservation.customerName,
           'requestingBranchId': actorUser.branchId,
+          'requestingBranchName': reservation.requestingBranchName,
+          'status': reservation.status.name,
         },
         branchId: reservation.branchId,
         branchName: reservation.branchName,
       );
 
-      transaction.set(inventoryRef, updatedInventory.toFirestore());
       transaction.set(reservationRef, reservation.toFirestore());
       transaction.set(auditLogRef, auditLog.toFirestore());
 
@@ -1706,6 +1876,208 @@ class InventoryWorkflowService {
     });
     _invalidateProductCaches(productId);
     return reservation;
+  }
+
+  Future<Reservation> approveReservation({
+    required AppUser actorUser,
+    required String reservationId,
+    String reviewComment = '',
+  }) async {
+    _ensurePermission(actorUser, AppPermission.approveReservation);
+
+    final now = _clock();
+    final normalizedComment = reviewComment.trim();
+    final reservationRef = _reservationsCollection.doc(reservationId);
+    final notificationRef = _notificationsCollection.doc();
+    final auditLogRef = _auditLogsCollection.doc();
+
+    final updatedReservation = await _firestore.runTransaction((
+      transaction,
+    ) async {
+      final reservationSnapshot = await transaction.get(reservationRef);
+      if (!reservationSnapshot.exists) {
+        throw const InventoryException('La reserva no existe.');
+      }
+
+      final reservation = Reservation.fromFirestore(
+        reservationSnapshot.id,
+        reservationSnapshot.data()!,
+      );
+      _ensureBranchAccess(actorUser, reservation.branchId);
+
+      if (reservation.status != ReservationStatus.pending) {
+        throw InventoryException(
+          'Solo se pueden aprobar reservas pendientes. Estado actual: ${reservation.status.name}.',
+        );
+      }
+
+      final inventoryRef = _inventoriesCollection.doc(
+        inventories.inventoryId(reservation.branchId, reservation.productId),
+      );
+      final inventorySnapshot = await transaction.get(inventoryRef);
+      if (!inventorySnapshot.exists) {
+        throw const InventoryException(
+          'El inventario vinculado a la reserva no existe.',
+        );
+      }
+
+      final inventory = InventoryItem.fromFirestore(
+        inventorySnapshot.id,
+        inventorySnapshot.data()!,
+      );
+      if (!inventory.isActive) {
+        throw const InventoryException('El inventario se encuentra inactivo.');
+      }
+      if (inventory.availableStock < reservation.quantity) {
+        throw InventoryException(
+          'Stock insuficiente para aprobar la reserva. Disponible: ${inventory.availableStock}.',
+        );
+      }
+
+      final updatedInventory = inventory.recalculate(
+        reservedStock: inventory.reservedStock + reservation.quantity,
+        updatedBy: actorUser.id,
+        updatedAt: now,
+        lastMovementAt: now,
+      );
+      final updatedReservation = reservation.copyWith(
+        status: ReservationStatus.active,
+        approvedBy: actorUser.id,
+        approvedAt: now,
+        reviewComment: normalizedComment,
+        updatedAt: now,
+      );
+      final notification = AppNotification(
+        id: notificationRef.id,
+        userId: reservation.reservedBy,
+        title: 'Reserva aprobada',
+        message:
+            'La solicitud ${reservation.id} fue aprobada en ${reservation.branchName}.${normalizedComment.isNotEmpty ? ' Nota: $normalizedComment' : ''}',
+        type: 'reservation',
+        referenceId: reservation.id,
+        isRead: false,
+        createdAt: now,
+      );
+      final auditLog = _buildAuditLog(
+        actorUser: actorUser,
+        action: 'reservation_approved',
+        entityType: 'reservation',
+        entityId: updatedReservation.id,
+        entityLabel: updatedReservation.productName,
+        message: 'Aprobo la solicitud de reserva para',
+        metadata: {
+          'status': updatedReservation.status.name,
+          'reservationBranchId': updatedReservation.branchId,
+          'reservationBranchName': updatedReservation.branchName,
+          'quantity': '${updatedReservation.quantity}',
+          'customerName': updatedReservation.customerName,
+          'requestingBranchId': updatedReservation.requestingBranchId,
+          'requestingBranchName': updatedReservation.requestingBranchName,
+          if (normalizedComment.isNotEmpty) 'reviewComment': normalizedComment,
+          'approvedByUserId': actorUser.id,
+        },
+        branchId: updatedReservation.branchId,
+        branchName: updatedReservation.branchName,
+      );
+
+      transaction.set(inventoryRef, updatedInventory.toFirestore());
+      transaction.set(reservationRef, updatedReservation.toFirestore());
+      transaction.set(notificationRef, notification.toFirestore());
+      transaction.set(auditLogRef, auditLog.toFirestore());
+
+      return updatedReservation;
+    });
+    _invalidateProductCaches(updatedReservation.productId);
+    return updatedReservation;
+  }
+
+  Future<Reservation> rejectReservation({
+    required AppUser actorUser,
+    required String reservationId,
+    required String reviewComment,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.approveReservation);
+
+    final normalizedComment = reviewComment.trim();
+    if (normalizedComment.isEmpty) {
+      throw const InventoryException(
+        'Debes registrar un motivo para rechazar la reserva.',
+      );
+    }
+
+    final now = _clock();
+    final reservationRef = _reservationsCollection.doc(reservationId);
+    final notificationRef = _notificationsCollection.doc();
+    final auditLogRef = _auditLogsCollection.doc();
+
+    final updatedReservation = await _firestore.runTransaction((
+      transaction,
+    ) async {
+      final reservationSnapshot = await transaction.get(reservationRef);
+      if (!reservationSnapshot.exists) {
+        throw const InventoryException('La reserva no existe.');
+      }
+
+      final reservation = Reservation.fromFirestore(
+        reservationSnapshot.id,
+        reservationSnapshot.data()!,
+      );
+      _ensureBranchAccess(actorUser, reservation.branchId);
+
+      if (reservation.status != ReservationStatus.pending) {
+        throw InventoryException(
+          'Solo se pueden rechazar reservas pendientes. Estado actual: ${reservation.status.name}.',
+        );
+      }
+
+      final updatedReservation = reservation.copyWith(
+        status: ReservationStatus.rejected,
+        rejectedBy: actorUser.id,
+        rejectedAt: now,
+        reviewComment: normalizedComment,
+        updatedAt: now,
+      );
+      final notification = AppNotification(
+        id: notificationRef.id,
+        userId: reservation.reservedBy,
+        title: 'Reserva rechazada',
+        message:
+            'La solicitud ${reservation.id} fue rechazada en ${reservation.branchName}. Motivo: $normalizedComment',
+        type: 'reservation',
+        referenceId: reservation.id,
+        isRead: false,
+        createdAt: now,
+      );
+      final auditLog = _buildAuditLog(
+        actorUser: actorUser,
+        action: 'reservation_rejected',
+        entityType: 'reservation',
+        entityId: updatedReservation.id,
+        entityLabel: updatedReservation.productName,
+        message: 'Rechazo la solicitud de reserva para',
+        metadata: {
+          'status': updatedReservation.status.name,
+          'reservationBranchId': updatedReservation.branchId,
+          'reservationBranchName': updatedReservation.branchName,
+          'quantity': '${updatedReservation.quantity}',
+          'customerName': updatedReservation.customerName,
+          'requestingBranchId': updatedReservation.requestingBranchId,
+          'requestingBranchName': updatedReservation.requestingBranchName,
+          'reviewComment': normalizedComment,
+          'rejectedByUserId': actorUser.id,
+        },
+        branchId: updatedReservation.branchId,
+        branchName: updatedReservation.branchName,
+      );
+
+      transaction.set(reservationRef, updatedReservation.toFirestore());
+      transaction.set(notificationRef, notification.toFirestore());
+      transaction.set(auditLogRef, auditLog.toFirestore());
+
+      return updatedReservation;
+    });
+    _invalidateProductCaches(updatedReservation.productId);
+    return updatedReservation;
   }
 
   Future<Reservation> updateReservationStatus({
@@ -1716,7 +2088,15 @@ class InventoryWorkflowService {
     _ensurePermission(actorUser, AppPermission.updateReservation);
 
     if (nextStatus == ReservationStatus.active) {
-      throw const InventoryException('La reserva ya se crea en estado activo.');
+      throw const InventoryException(
+        'Las reservas pendientes se aprueban desde la bandeja de solicitudes.',
+      );
+    }
+    if (nextStatus == ReservationStatus.pending ||
+        nextStatus == ReservationStatus.rejected) {
+      throw const InventoryException(
+        'Ese estado se gestiona desde la bandeja de aprobaciones.',
+      );
     }
 
     final now = _clock();
@@ -1784,10 +2164,12 @@ class InventoryWorkflowService {
       final auditLog = _buildAuditLog(
         actorUser: actorUser,
         action: switch (nextStatus) {
+          ReservationStatus.pending => 'reservation_updated',
+          ReservationStatus.active => 'reservation_updated',
+          ReservationStatus.rejected => 'reservation_updated',
           ReservationStatus.completed => 'reservation_completed',
           ReservationStatus.cancelled => 'reservation_cancelled',
           ReservationStatus.expired => 'reservation_expired',
-          ReservationStatus.active => 'reservation_updated',
         },
         entityType: 'reservation',
         entityId: updatedReservation.id,
@@ -1881,6 +2263,7 @@ class InventoryWorkflowService {
       toBranchId: destinationBranch.id,
       toBranchName: destinationBranch.name,
       requestedBy: actorUser.id,
+      requestedByName: actorUser.fullName,
       approvedBy: null,
       quantity: quantity,
       status: TransferStatus.pending,
@@ -1916,10 +2299,12 @@ class InventoryWorkflowService {
   Future<TransferRequest> approveTransfer({
     required AppUser actorUser,
     required String transferId,
+    String reviewComment = '',
   }) async {
     _ensurePermission(actorUser, AppPermission.approveTransfer);
 
     final now = _clock();
+    final normalizedComment = reviewComment.trim();
     final transferRef = _transfersCollection.doc(transferId);
     final notificationRef = _notificationsCollection.doc();
     final auditLogRef = _auditLogsCollection.doc();
@@ -2007,6 +2392,7 @@ class InventoryWorkflowService {
       final updatedTransfer = transfer.copyWith(
         status: TransferStatus.approved,
         approvedBy: actorUser.id,
+        reviewComment: normalizedComment,
         approvedAt: now,
         updatedAt: now,
       );
@@ -2016,7 +2402,7 @@ class InventoryWorkflowService {
         userId: transfer.requestedBy,
         title: 'Solicitud aprobada',
         message:
-            'El traslado ${transfer.id} fue aprobado y quedo listo para despacho.',
+            'El traslado ${transfer.id} fue aprobado y quedo listo para despacho.${normalizedComment.isNotEmpty ? ' Nota: $normalizedComment' : ''}',
         type: 'transfer',
         referenceId: transfer.id,
         isRead: false,
@@ -2029,7 +2415,10 @@ class InventoryWorkflowService {
         message: 'Aprobo el traslado de',
         branchId: updatedTransfer.fromBranchId,
         branchName: updatedTransfer.fromBranchName,
-        extraMetadata: {'approvedByUserId': actorUser.id},
+        extraMetadata: {
+          'approvedByUserId': actorUser.id,
+          if (normalizedComment.isNotEmpty) 'reviewComment': normalizedComment,
+        },
       );
 
       transaction.set(sourceInventoryRef, updatedSourceInventory.toFirestore());
@@ -2038,6 +2427,86 @@ class InventoryWorkflowService {
         updatedDestinationInventory.toFirestore(),
         SetOptions(merge: true),
       );
+      transaction.set(transferRef, updatedTransfer.toFirestore());
+      transaction.set(notificationRef, notification.toFirestore());
+      transaction.set(auditLogRef, auditLog.toFirestore());
+
+      return updatedTransfer;
+    });
+    _invalidateProductCaches(updatedTransfer.productId);
+    return updatedTransfer;
+  }
+
+  Future<TransferRequest> rejectTransfer({
+    required AppUser actorUser,
+    required String transferId,
+    required String reviewComment,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.approveTransfer);
+
+    final normalizedComment = reviewComment.trim();
+    if (normalizedComment.isEmpty) {
+      throw const InventoryException(
+        'Debes registrar un motivo para rechazar el traslado.',
+      );
+    }
+
+    final now = _clock();
+    final transferRef = _transfersCollection.doc(transferId);
+    final notificationRef = _notificationsCollection.doc();
+    final auditLogRef = _auditLogsCollection.doc();
+
+    final updatedTransfer = await _firestore.runTransaction((
+      transaction,
+    ) async {
+      final transferSnapshot = await transaction.get(transferRef);
+      if (!transferSnapshot.exists) {
+        throw const InventoryException('El traslado no existe.');
+      }
+
+      final transfer = TransferRequest.fromFirestore(
+        transferSnapshot.id,
+        transferSnapshot.data()!,
+      );
+      _ensureBranchAccess(actorUser, transfer.fromBranchId);
+
+      if (transfer.status != TransferStatus.pending) {
+        throw InventoryException(
+          'Solo se pueden rechazar traslados pendientes. Estado: ${transfer.status.firestoreValue}.',
+        );
+      }
+
+      final updatedTransfer = transfer.copyWith(
+        status: TransferStatus.rejected,
+        rejectedBy: actorUser.id,
+        rejectedAt: now,
+        reviewComment: normalizedComment,
+        updatedAt: now,
+      );
+      final notification = AppNotification(
+        id: notificationRef.id,
+        userId: transfer.requestedBy,
+        title: 'Solicitud rechazada',
+        message:
+            'El traslado ${transfer.id} fue rechazado por ${transfer.fromBranchName}. Motivo: $normalizedComment',
+        type: 'transfer',
+        referenceId: transfer.id,
+        isRead: false,
+        createdAt: now,
+      );
+      final auditLog = _buildTransferAuditLog(
+        actorUser: actorUser,
+        transfer: updatedTransfer,
+        action: 'transfer_rejected',
+        message: 'Rechazo el traslado de',
+        branchId: updatedTransfer.fromBranchId,
+        branchName: updatedTransfer.fromBranchName,
+        extraMetadata: {
+          'rejectedByUserId': actorUser.id,
+          'reviewComment': normalizedComment,
+        },
+      );
+
       transaction.set(transferRef, updatedTransfer.toFirestore());
       transaction.set(notificationRef, notification.toFirestore());
       transaction.set(auditLogRef, auditLog.toFirestore());

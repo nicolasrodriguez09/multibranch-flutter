@@ -489,10 +489,38 @@ class SystemRepository {
         );
   }
 
-  Stream<List<AppNotification>> watchNotifications(String userId) {
+  Future<void> markNotificationAsRead(String notificationId) async {
+    await _notifications.doc(notificationId).update(<String, dynamic>{
+      'isRead': true,
+    });
+  }
+
+  Future<int> markAllNotificationsAsRead(String userId) async {
+    final snapshot = await _notifications
+        .where('userId', isEqualTo: userId)
+        .where('isRead', isEqualTo: false)
+        .get();
+
+    if (snapshot.docs.isEmpty) {
+      return 0;
+    }
+
+    final batch = _firestore.batch();
+    for (final doc in snapshot.docs) {
+      batch.update(doc.reference, <String, dynamic>{'isRead': true});
+    }
+    await batch.commit();
+    return snapshot.docs.length;
+  }
+
+  Stream<List<AppNotification>> watchNotifications(
+    String userId, {
+    int limit = 40,
+  }) {
     return _notifications
         .where('userId', isEqualTo: userId)
         .orderBy('createdAt', descending: true)
+        .limit(limit)
         .snapshots()
         .map(
           (snapshot) => snapshot.docs
