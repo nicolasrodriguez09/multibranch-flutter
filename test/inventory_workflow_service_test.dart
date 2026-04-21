@@ -156,6 +156,81 @@ void main() {
   );
 
   test(
+    'stock alerts can be marked as read and reopen after inventory updates',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final admin = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.adminUser,
+      );
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      final initialFeed = await service.fetchLowStockAlerts(actorUser: seller);
+      final initialAlert = initialFeed.alerts.firstWhere(
+        (item) => item.productId == DemoIds.laptopProduct,
+      );
+
+      expect(initialAlert.isRead, isFalse);
+      expect(initialAlert.thresholdSource, StockAlertThresholdSource.product);
+
+      await service.markStockAlertAsRead(
+        actorUser: seller,
+        alert: initialAlert,
+      );
+
+      final readFeed = await service.fetchLowStockAlerts(actorUser: seller);
+      final readAlert = readFeed.alerts.firstWhere(
+        (item) => item.productId == DemoIds.laptopProduct,
+      );
+      expect(readAlert.isRead, isTrue);
+
+      now = now.add(const Duration(minutes: 5));
+      await service.setInventoryStock(
+        actorUser: admin,
+        branchId: DemoIds.branchCenter,
+        productId: DemoIds.laptopProduct,
+        stock: 6,
+        minimumStock: 10,
+      );
+
+      final reopenedFeed = await service.fetchLowStockAlerts(actorUser: seller);
+      final reopenedAlert = reopenedFeed.alerts.firstWhere(
+        (item) => item.productId == DemoIds.laptopProduct,
+      );
+      expect(reopenedAlert.isRead, isFalse);
+    },
+  );
+
+  test('critical stock changes notify supervisors and admins', () async {
+    await service.seedMasterData(actorUser: sampleData.users.first);
+    final supervisor = sampleData.users.firstWhere(
+      (user) => user.id == DemoIds.secondBranchSeller,
+    );
+
+    now = now.add(const Duration(minutes: 3));
+    await service.setInventoryStock(
+      actorUser: supervisor,
+      branchId: DemoIds.branchNorth,
+      productId: DemoIds.printerProduct,
+      stock: 1,
+      minimumStock: 2,
+    );
+
+    final criticalNotifications = await firestore
+        .collection('notifications')
+        .where('type', isEqualTo: 'stock_alert_critical')
+        .get();
+    final recipients = criticalNotifications.docs
+        .map((doc) => doc.data()['userId'] as String)
+        .toSet();
+
+    expect(criticalNotifications.docs, hasLength(2));
+    expect(recipients, contains(DemoIds.adminUser));
+    expect(recipients, contains(DemoIds.secondBranchSeller));
+  });
+
+  test(
     'product search returns ranked results and persists recent searches',
     () async {
       await service.seedMasterData(actorUser: sampleData.users.first);

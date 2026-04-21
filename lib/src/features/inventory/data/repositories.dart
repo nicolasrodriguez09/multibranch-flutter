@@ -52,6 +52,13 @@ class UserRepository {
               .toList(),
         );
   }
+
+  Future<List<AppUser>> fetchUsers() async {
+    final snapshot = await _collection.orderBy('fullName').get();
+    return snapshot.docs
+        .map((doc) => AppUser.fromFirestore(doc.id, doc.data()))
+        .toList(growable: false);
+  }
 }
 
 class CatalogRepository {
@@ -226,6 +233,24 @@ class InventoryRepository {
               .map((doc) => InventoryItem.fromFirestore(doc.id, doc.data()))
               .toList(),
         );
+  }
+
+  Stream<List<InventoryItem>> watchInventories() {
+    return _collection
+        .orderBy('productName')
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => InventoryItem.fromFirestore(doc.id, doc.data()))
+              .toList(),
+        );
+  }
+
+  Future<List<InventoryItem>> fetchInventories() async {
+    final snapshot = await _collection.orderBy('productName').get();
+    return snapshot.docs
+        .map((doc) => InventoryItem.fromFirestore(doc.id, doc.data()))
+        .toList(growable: false);
   }
 
   Stream<List<InventoryItem>> watchLowStock(String branchId) {
@@ -525,6 +550,8 @@ class SystemRepository {
 
   CollectionReference<Map<String, dynamic>> get _syncLogs =>
       _firestore.collection(FirestoreCollections.syncLogs);
+  CollectionReference<Map<String, dynamic>> get _stockAlertReads =>
+      _firestore.collection(FirestoreCollections.stockAlertReads);
   CollectionReference<Map<String, dynamic>> get _notifications =>
       _firestore.collection(FirestoreCollections.notifications);
   CollectionReference<Map<String, dynamic>> get _auditLogs =>
@@ -540,6 +567,12 @@ class SystemRepository {
 
   Future<void> addNotification(AppNotification notification) async {
     await _notifications.doc(notification.id).set(notification.toFirestore());
+  }
+
+  Future<void> upsertStockAlertReadState(StockAlertReadState readState) async {
+    await _stockAlertReads
+        .doc(readState.id)
+        .set(readState.toFirestore(), SetOptions(merge: true));
   }
 
   Future<void> addAuditLog(AuditLog auditLog) async {
@@ -616,6 +649,30 @@ class SystemRepository {
 
     return snapshot.docs
         .map((doc) => SyncLog.fromFirestore(doc.id, doc.data()))
+        .toList(growable: false);
+  }
+
+  Stream<List<StockAlertReadState>> watchStockAlertReadStates(String userId) {
+    return _stockAlertReads
+        .where('userId', isEqualTo: userId)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map(
+                (doc) => StockAlertReadState.fromFirestore(doc.id, doc.data()),
+              )
+              .toList(),
+        );
+  }
+
+  Future<List<StockAlertReadState>> fetchStockAlertReadStates(
+    String userId,
+  ) async {
+    final snapshot = await _stockAlertReads
+        .where('userId', isEqualTo: userId)
+        .get();
+    return snapshot.docs
+        .map((doc) => StockAlertReadState.fromFirestore(doc.id, doc.data()))
         .toList(growable: false);
   }
 

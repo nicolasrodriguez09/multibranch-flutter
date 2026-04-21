@@ -152,6 +152,73 @@ class SyncStatusOverview {
   }
 }
 
+enum StockAlertSeverity { warning, critical }
+
+enum StockAlertThresholdSource { product, category }
+
+class StockAlertItem {
+  const StockAlertItem({
+    required this.id,
+    required this.branchId,
+    required this.branchName,
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.categoryId,
+    required this.categoryName,
+    required this.availableStock,
+    required this.reservedStock,
+    required this.incomingStock,
+    required this.resolvedThreshold,
+    required this.productThreshold,
+    required this.categoryThreshold,
+    required this.thresholdSource,
+    required this.severity,
+    required this.lastMovementAt,
+    required this.updatedAt,
+    required this.isRead,
+    required this.readAt,
+  });
+
+  final String id;
+  final String branchId;
+  final String branchName;
+  final String productId;
+  final String productName;
+  final String sku;
+  final String categoryId;
+  final String categoryName;
+  final int availableStock;
+  final int reservedStock;
+  final int incomingStock;
+  final int resolvedThreshold;
+  final int? productThreshold;
+  final int? categoryThreshold;
+  final StockAlertThresholdSource thresholdSource;
+  final StockAlertSeverity severity;
+  final DateTime? lastMovementAt;
+  final DateTime updatedAt;
+  final bool isRead;
+  final DateTime? readAt;
+
+  bool get isCritical => severity == StockAlertSeverity.critical;
+  bool get isWarning => severity == StockAlertSeverity.warning;
+  int get shortfall => math.max(0, resolvedThreshold - availableStock);
+}
+
+class StockAlertFeedData {
+  const StockAlertFeedData({required this.alerts, required this.generatedAt});
+
+  final List<StockAlertItem> alerts;
+  final DateTime generatedAt;
+
+  int get unreadCount => alerts.where((item) => !item.isRead).length;
+  int get criticalCount => alerts.where((item) => item.isCritical).length;
+  int get warningCount => alerts.where((item) => item.isWarning).length;
+  int get readCount => alerts.where((item) => item.isRead).length;
+  bool get hasCritical => criticalCount > 0;
+}
+
 class ProductSearchResult {
   const ProductSearchResult({
     required this.product,
@@ -639,6 +706,7 @@ class InventoryWorkflowService {
   static const Duration _redDataThreshold = Duration(minutes: 60);
   static const Duration _syncStatusTick = Duration(minutes: 1);
   static const int _syncStatusLogLimit = 180;
+  static const double _criticalStockThresholdFactor = 0.5;
   static const Map<InventoryRefreshDataType, InventoryRefreshPolicy>
   _refreshPolicies = <InventoryRefreshDataType, InventoryRefreshPolicy>{
     InventoryRefreshDataType.dashboard: InventoryRefreshPolicy(
@@ -2709,6 +2777,158 @@ class InventoryWorkflowService {
     return system.markAllNotificationsAsRead(actorUser.id);
   }
 
+  Future<StockAlertFeedData> fetchLowStockAlerts({
+    required AppUser actorUser,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.viewLowStock);
+
+    final inventoryItems = actorUser.role == UserRole.admin
+        ? await inventories.fetchInventories()
+        : await inventories.fetchBranchInventory(actorUser.branchId);
+    final products = await catalog.fetchProducts();
+    final categories = await catalog.fetchCategories();
+    final readStates = await system.fetchStockAlertReadStates(actorUser.id);
+
+    return _buildStockAlertFeedData(
+      inventoryItems: inventoryItems,
+      products: products,
+      categories: categories,
+      readStates: readStates,
+    );
+  }
+
+  Stream<StockAlertFeedData> watchLowStockAlerts({required AppUser actorUser}) {
+    _ensurePermission(actorUser, AppPermission.viewLowStock);
+
+    final inventoryStream = actorUser.role == UserRole.admin
+        ? inventories.watchInventories()
+        : inventories.watchBranchInventory(actorUser.branchId);
+    final controller = StreamController<StockAlertFeedData>();
+    var inventoryState = const <InventoryItem>[];
+    var productsState = const <Product>[];
+    var categoriesState = const <Category>[];
+    var readStatesState = const <StockAlertReadState>[];
+    var inventoryReady = false;
+    var productsReady = false;
+    var categoriesReady = false;
+    var readStatesReady = false;
+    var subscriptions = <StreamSubscription<Object?>>[];
+
+    void emit() {
+      if (controller.isClosed ||
+          !inventoryReady ||
+          !productsReady ||
+          !categoriesReady ||
+          !readStatesReady) {
+        return;
+      }
+
+      controller.add(
+        _buildStockAlertFeedData(
+          inventoryItems: inventoryState,
+          products: productsState,
+          categories: categoriesState,
+          readStates: readStatesState,
+        ),
+      );
+    }
+
+    controller.onListen = () {
+      if (subscriptions.isNotEmpty) {
+        return;
+      }
+
+      subscriptions = <StreamSubscription<Object?>>[
+        inventoryStream.listen((items) {
+          inventoryState = items;
+          inventoryReady = true;
+          emit();
+        }, onError: controller.addError),
+        catalog.watchProducts().listen((items) {
+          productsState = items;
+          productsReady = true;
+          emit();
+        }, onError: controller.addError),
+        catalog.watchCategories().listen((items) {
+          categoriesState = items;
+          categoriesReady = true;
+          emit();
+        }, onError: controller.addError),
+        system.watchStockAlertReadStates(actorUser.id).listen((items) {
+          readStatesState = items;
+          readStatesReady = true;
+          emit();
+        }, onError: controller.addError),
+      ];
+    };
+
+    controller.onCancel = () async {
+      final currentSubscriptions = subscriptions;
+      subscriptions = <StreamSubscription<Object?>>[];
+      for (final subscription in currentSubscriptions) {
+        await subscription.cancel();
+      }
+    };
+
+    return controller.stream;
+  }
+
+  Future<void> markStockAlertAsRead({
+    required AppUser actorUser,
+    required StockAlertItem alert,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.viewLowStock);
+    if (actorUser.role != UserRole.admin) {
+      _ensureBranchAccess(actorUser, alert.branchId);
+    }
+
+    final readState = StockAlertReadState(
+      id: _stockAlertReadStateId(actorUser.id, alert.id),
+      userId: actorUser.id,
+      alertId: alert.id,
+      branchId: alert.branchId,
+      productId: alert.productId,
+      alertUpdatedAt: alert.updatedAt,
+      readAt: _clock(),
+    );
+    await system.upsertStockAlertReadState(readState);
+  }
+
+  Future<int> markAllStockAlertsAsRead({
+    required AppUser actorUser,
+    required List<StockAlertItem> alerts,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.viewLowStock);
+
+    final unreadAlerts = alerts
+        .where((item) => !item.isRead)
+        .toList(growable: false);
+    if (unreadAlerts.isEmpty) {
+      return 0;
+    }
+
+    final now = _clock();
+    await Future.wait(
+      unreadAlerts.map((alert) {
+        if (actorUser.role != UserRole.admin) {
+          _ensureBranchAccess(actorUser, alert.branchId);
+        }
+        return system.upsertStockAlertReadState(
+          StockAlertReadState(
+            id: _stockAlertReadStateId(actorUser.id, alert.id),
+            userId: actorUser.id,
+            alertId: alert.id,
+            branchId: alert.branchId,
+            productId: alert.productId,
+            alertUpdatedAt: alert.updatedAt,
+            readAt: now,
+          ),
+        );
+      }),
+    );
+    return unreadAlerts.length;
+  }
+
   Future<SyncStatusOverview> fetchSyncStatusOverview({
     required AppUser actorUser,
   }) async {
@@ -3188,6 +3408,7 @@ class InventoryWorkflowService {
     final inventoryRef = _inventoriesCollection.doc(
       inventories.inventoryId(branchId, productId),
     );
+    InventoryItem? previousInventory;
 
     final updatedInventory = await _firestore.runTransaction((
       transaction,
@@ -3203,6 +3424,7 @@ class InventoryWorkflowService {
         inventorySnapshot.id,
         inventorySnapshot.data()!,
       );
+      previousInventory = inventory;
       final updatedInventory = inventory.recalculate(
         stock: stock,
         minimumStock: minimumStock,
@@ -3214,6 +3436,10 @@ class InventoryWorkflowService {
       transaction.set(inventoryRef, updatedInventory.toFirestore());
       return updatedInventory;
     });
+    await _handleLowStockAlertTransition(
+      previousInventory: previousInventory,
+      updatedInventory: updatedInventory,
+    );
     _invalidateProductCaches(productId);
     return updatedInventory;
   }
@@ -3335,6 +3561,8 @@ class InventoryWorkflowService {
     final reservationRef = _reservationsCollection.doc(reservationId);
     final notificationRef = _notificationsCollection.doc();
     final auditLogRef = _auditLogsCollection.doc();
+    InventoryItem? previousInventory;
+    InventoryItem? updatedInventory;
 
     final updatedReservation = await _firestore.runTransaction((
       transaction,
@@ -3370,6 +3598,7 @@ class InventoryWorkflowService {
         inventorySnapshot.id,
         inventorySnapshot.data()!,
       );
+      previousInventory = inventory;
       if (!inventory.isActive) {
         throw const InventoryException('El inventario se encuentra inactivo.');
       }
@@ -3379,7 +3608,7 @@ class InventoryWorkflowService {
         );
       }
 
-      final updatedInventory = inventory.recalculate(
+      updatedInventory = inventory.recalculate(
         reservedStock: inventory.reservedStock + reservation.quantity,
         updatedBy: actorUser.id,
         updatedAt: now,
@@ -3425,13 +3654,19 @@ class InventoryWorkflowService {
         branchName: updatedReservation.branchName,
       );
 
-      transaction.set(inventoryRef, updatedInventory.toFirestore());
+      transaction.set(inventoryRef, updatedInventory!.toFirestore());
       transaction.set(reservationRef, updatedReservation.toFirestore());
       transaction.set(notificationRef, notification.toFirestore());
       transaction.set(auditLogRef, auditLog.toFirestore());
 
       return updatedReservation;
     });
+    if (updatedInventory != null) {
+      await _handleLowStockAlertTransition(
+        previousInventory: previousInventory,
+        updatedInventory: updatedInventory!,
+      );
+    }
     _invalidateProductCaches(updatedReservation.productId);
     return updatedReservation;
   }
@@ -3546,6 +3781,8 @@ class InventoryWorkflowService {
 
     final now = _clock();
     final reservationRef = _reservationsCollection.doc(reservationId);
+    InventoryItem? previousInventory;
+    InventoryItem? updatedInventory;
 
     final updatedReservation = await _firestore.runTransaction((
       transaction,
@@ -3588,6 +3825,7 @@ class InventoryWorkflowService {
         inventorySnapshot.id,
         inventorySnapshot.data()!,
       );
+      previousInventory = inventory;
       final updatedReservedStock =
           inventory.reservedStock - reservation.quantity;
       if (updatedReservedStock < 0) {
@@ -3596,7 +3834,7 @@ class InventoryWorkflowService {
         );
       }
 
-      final updatedInventory = inventory.recalculate(
+      updatedInventory = inventory.recalculate(
         reservedStock: updatedReservedStock,
         updatedBy: actorUser.id,
         updatedAt: now,
@@ -3630,12 +3868,18 @@ class InventoryWorkflowService {
       );
       final auditLogRef = _auditLogsCollection.doc();
 
-      transaction.set(inventoryRef, updatedInventory.toFirestore());
+      transaction.set(inventoryRef, updatedInventory!.toFirestore());
       transaction.set(reservationRef, updatedReservation.toFirestore());
       transaction.set(auditLogRef, auditLog.toFirestore());
 
       return updatedReservation;
     });
+    if (updatedInventory != null) {
+      await _handleLowStockAlertTransition(
+        previousInventory: previousInventory,
+        updatedInventory: updatedInventory!,
+      );
+    }
     _invalidateProductCaches(updatedReservation.productId);
     return updatedReservation;
   }
@@ -3753,6 +3997,10 @@ class InventoryWorkflowService {
     final transferRef = _transfersCollection.doc(transferId);
     final notificationRef = _notificationsCollection.doc();
     final auditLogRef = _auditLogsCollection.doc();
+    InventoryItem? previousSourceInventory;
+    InventoryItem? updatedSourceInventory;
+    InventoryItem? previousDestinationInventory;
+    InventoryItem? updatedDestinationInventory;
 
     final updatedTransfer = await _firestore.runTransaction((
       transaction,
@@ -3792,6 +4040,7 @@ class InventoryWorkflowService {
         sourceInventorySnapshot.id,
         sourceInventorySnapshot.data()!,
       );
+      previousSourceInventory = sourceInventory;
       if (sourceInventory.availableStock < transfer.quantity) {
         throw InventoryException(
           'Stock insuficiente para aprobar el traslado. Disponible: ${sourceInventory.availableStock}.',
@@ -3821,14 +4070,17 @@ class InventoryWorkflowService {
               updatedAt: now,
               lastMovementAt: now,
             );
+      previousDestinationInventory = destinationInventorySnapshot.exists
+          ? destinationInventory
+          : null;
 
-      final updatedSourceInventory = sourceInventory.recalculate(
+      updatedSourceInventory = sourceInventory.recalculate(
         stock: sourceInventory.stock - transfer.quantity,
         updatedBy: actorUser.id,
         updatedAt: now,
         lastMovementAt: now,
       );
-      final updatedDestinationInventory = destinationInventory.recalculate(
+      updatedDestinationInventory = destinationInventory.recalculate(
         incomingStock: destinationInventory.incomingStock + transfer.quantity,
         updatedBy: actorUser.id,
         updatedAt: now,
@@ -3866,10 +4118,13 @@ class InventoryWorkflowService {
         },
       );
 
-      transaction.set(sourceInventoryRef, updatedSourceInventory.toFirestore());
+      transaction.set(
+        sourceInventoryRef,
+        updatedSourceInventory!.toFirestore(),
+      );
       transaction.set(
         destinationInventoryRef,
-        updatedDestinationInventory.toFirestore(),
+        updatedDestinationInventory!.toFirestore(),
         SetOptions(merge: true),
       );
       transaction.set(transferRef, updatedTransfer.toFirestore());
@@ -3878,6 +4133,18 @@ class InventoryWorkflowService {
 
       return updatedTransfer;
     });
+    if (updatedSourceInventory != null) {
+      await _handleLowStockAlertTransition(
+        previousInventory: previousSourceInventory,
+        updatedInventory: updatedSourceInventory!,
+      );
+    }
+    if (updatedDestinationInventory != null) {
+      await _handleLowStockAlertTransition(
+        previousInventory: previousDestinationInventory,
+        updatedInventory: updatedDestinationInventory!,
+      );
+    }
     _invalidateProductCaches(updatedTransfer.productId);
     return updatedTransfer;
   }
@@ -4026,6 +4293,8 @@ class InventoryWorkflowService {
     final transferRef = _transfersCollection.doc(transferId);
     final notificationRef = _notificationsCollection.doc();
     final auditLogRef = _auditLogsCollection.doc();
+    InventoryItem? previousInventory;
+    InventoryItem? updatedInventory;
 
     final updatedTransfer = await _firestore.runTransaction((
       transaction,
@@ -4063,6 +4332,7 @@ class InventoryWorkflowService {
         destinationInventorySnapshot.id,
         destinationInventorySnapshot.data()!,
       );
+      previousInventory = destinationInventory;
 
       if (destinationInventory.incomingStock < transfer.quantity) {
         throw const InventoryException(
@@ -4070,7 +4340,7 @@ class InventoryWorkflowService {
         );
       }
 
-      final updatedDestinationInventory = destinationInventory.recalculate(
+      updatedInventory = destinationInventory.recalculate(
         stock: destinationInventory.stock + transfer.quantity,
         incomingStock: destinationInventory.incomingStock - transfer.quantity,
         updatedBy: actorUser.id,
@@ -4104,16 +4374,19 @@ class InventoryWorkflowService {
         extraMetadata: {'receivedByUserId': actorUser.id},
       );
 
-      transaction.set(
-        destinationInventoryRef,
-        updatedDestinationInventory.toFirestore(),
-      );
+      transaction.set(destinationInventoryRef, updatedInventory!.toFirestore());
       transaction.set(transferRef, updatedTransfer.toFirestore());
       transaction.set(notificationRef, notification.toFirestore());
       transaction.set(auditLogRef, auditLog.toFirestore());
 
       return updatedTransfer;
     });
+    if (updatedInventory != null) {
+      await _handleLowStockAlertTransition(
+        previousInventory: previousInventory,
+        updatedInventory: updatedInventory!,
+      );
+    }
     _invalidateProductCaches(updatedTransfer.productId);
     return updatedTransfer;
   }
@@ -4130,6 +4403,236 @@ class InventoryWorkflowService {
       );
     }
     return compact;
+  }
+
+  StockAlertFeedData _buildStockAlertFeedData({
+    required List<InventoryItem> inventoryItems,
+    required List<Product> products,
+    required List<Category> categories,
+    required List<StockAlertReadState> readStates,
+  }) {
+    final productsById = <String, Product>{
+      for (final product in products) product.id: product,
+    };
+    final categoriesById = <String, Category>{
+      for (final category in categories) category.id: category,
+    };
+    final readStateByAlertId = <String, StockAlertReadState>{
+      for (final readState in readStates) readState.alertId: readState,
+    };
+
+    final alerts =
+        inventoryItems
+            .map(
+              (inventory) => _buildStockAlertItem(
+                inventory: inventory,
+                product: productsById[inventory.productId],
+                category:
+                    categoriesById[productsById[inventory.productId]
+                        ?.categoryId],
+                readState: readStateByAlertId[_stockAlertId(inventory)],
+              ),
+            )
+            .whereType<StockAlertItem>()
+            .toList(growable: false)
+          ..sort(_compareStockAlerts);
+
+    return StockAlertFeedData(
+      alerts: List<StockAlertItem>.unmodifiable(alerts),
+      generatedAt: _clock(),
+    );
+  }
+
+  StockAlertItem? _buildStockAlertItem({
+    required InventoryItem inventory,
+    required Product? product,
+    required Category? category,
+    required StockAlertReadState? readState,
+  }) {
+    final resolvedThreshold = _resolveLowStockThreshold(
+      inventory: inventory,
+      category: category,
+    );
+    if (resolvedThreshold == null ||
+        resolvedThreshold <= 0 ||
+        inventory.availableStock > resolvedThreshold) {
+      return null;
+    }
+
+    final severity = _stockAlertSeverity(
+      availableStock: inventory.availableStock,
+      resolvedThreshold: resolvedThreshold,
+    );
+    final thresholdSource = inventory.minimumStock > 0
+        ? StockAlertThresholdSource.product
+        : StockAlertThresholdSource.category;
+
+    return StockAlertItem(
+      id: _stockAlertId(inventory),
+      branchId: inventory.branchId,
+      branchName: inventory.branchName,
+      productId: inventory.productId,
+      productName: inventory.productName,
+      sku: inventory.sku,
+      categoryId: product?.categoryId ?? '',
+      categoryName: category?.name ?? 'Sin categoria',
+      availableStock: inventory.availableStock,
+      reservedStock: inventory.reservedStock,
+      incomingStock: inventory.incomingStock,
+      resolvedThreshold: resolvedThreshold,
+      productThreshold: inventory.minimumStock > 0
+          ? inventory.minimumStock
+          : null,
+      categoryThreshold: category?.lowStockThreshold,
+      thresholdSource: thresholdSource,
+      severity: severity,
+      lastMovementAt: inventory.lastMovementAt,
+      updatedAt: inventory.updatedAt,
+      isRead: _isStockAlertRead(inventory, readState),
+      readAt: readState?.readAt,
+    );
+  }
+
+  int? _resolveLowStockThreshold({
+    required InventoryItem inventory,
+    required Category? category,
+  }) {
+    if (inventory.minimumStock > 0) {
+      return inventory.minimumStock;
+    }
+    final categoryThreshold = category?.lowStockThreshold;
+    if (categoryThreshold != null && categoryThreshold > 0) {
+      return categoryThreshold;
+    }
+    return null;
+  }
+
+  StockAlertSeverity _stockAlertSeverity({
+    required int availableStock,
+    required int resolvedThreshold,
+  }) {
+    if (availableStock <= 0) {
+      return StockAlertSeverity.critical;
+    }
+
+    final criticalThreshold = math.max(
+      1,
+      (resolvedThreshold * _criticalStockThresholdFactor).ceil(),
+    );
+    if (availableStock <= criticalThreshold) {
+      return StockAlertSeverity.critical;
+    }
+    return StockAlertSeverity.warning;
+  }
+
+  bool _isStockAlertRead(
+    InventoryItem inventory,
+    StockAlertReadState? readState,
+  ) {
+    if (readState == null) {
+      return false;
+    }
+    return !inventory.updatedAt.isAfter(readState.alertUpdatedAt);
+  }
+
+  int _compareStockAlerts(StockAlertItem left, StockAlertItem right) {
+    if (left.isCritical != right.isCritical) {
+      return left.isCritical ? -1 : 1;
+    }
+    if (left.isRead != right.isRead) {
+      return left.isRead ? 1 : -1;
+    }
+    final stockComparison = left.availableStock.compareTo(right.availableStock);
+    if (stockComparison != 0) {
+      return stockComparison;
+    }
+    return right.updatedAt.compareTo(left.updatedAt);
+  }
+
+  String _stockAlertId(InventoryItem inventory) =>
+      '${inventory.branchId}_${inventory.productId}';
+
+  String _stockAlertReadStateId(String userId, String alertId) =>
+      '${userId}_$alertId';
+
+  Future<void> _handleLowStockAlertTransition({
+    required InventoryItem? previousInventory,
+    required InventoryItem updatedInventory,
+  }) async {
+    final product = await catalog.fetchProduct(updatedInventory.productId);
+    if (product == null) {
+      return;
+    }
+    final category = await catalog.fetchCategory(product.categoryId);
+
+    final previousThreshold = previousInventory == null
+        ? null
+        : _resolveLowStockThreshold(
+            inventory: previousInventory,
+            category: category,
+          );
+    final nextThreshold = _resolveLowStockThreshold(
+      inventory: updatedInventory,
+      category: category,
+    );
+
+    final previousSeverity =
+        previousThreshold == null ||
+            previousThreshold <= 0 ||
+            previousInventory == null ||
+            previousInventory.availableStock > previousThreshold
+        ? null
+        : _stockAlertSeverity(
+            availableStock: previousInventory.availableStock,
+            resolvedThreshold: previousThreshold,
+          );
+    final nextSeverity =
+        nextThreshold == null ||
+            nextThreshold <= 0 ||
+            updatedInventory.availableStock > nextThreshold
+        ? null
+        : _stockAlertSeverity(
+            availableStock: updatedInventory.availableStock,
+            resolvedThreshold: nextThreshold,
+          );
+
+    if (nextSeverity != StockAlertSeverity.critical ||
+        previousSeverity == StockAlertSeverity.critical) {
+      return;
+    }
+
+    final allUsers = await users.fetchUsers();
+    final targetUsers = allUsers
+        .where(
+          (user) =>
+              user.isActive &&
+              (user.role == UserRole.admin ||
+                  (user.role == UserRole.supervisor &&
+                      user.branchId == updatedInventory.branchId)),
+        )
+        .toList(growable: false);
+    if (targetUsers.isEmpty) {
+      return;
+    }
+
+    final now = _clock();
+    final batch = _firestore.batch();
+    for (final user in targetUsers) {
+      final notificationRef = _notificationsCollection.doc();
+      final notification = AppNotification(
+        id: notificationRef.id,
+        userId: user.id,
+        title: 'Alerta critica de stock',
+        message:
+            '${updatedInventory.productName} quedo en ${updatedInventory.availableStock} unidad(es) en ${updatedInventory.branchName}. Umbral: $nextThreshold.',
+        type: 'stock_alert_critical',
+        referenceId: _stockAlertId(updatedInventory),
+        isRead: false,
+        createdAt: now,
+      );
+      batch.set(notificationRef, notification.toFirestore());
+    }
+    await batch.commit();
   }
 
   SyncStatusOverview _buildSyncStatusOverview({

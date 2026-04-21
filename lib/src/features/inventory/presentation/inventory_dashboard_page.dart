@@ -17,6 +17,7 @@ import 'product_search_page.dart';
 import 'request_tracking_page.dart';
 import 'reservation_request_page.dart';
 import 'sync_status_page.dart';
+import 'stock_alerts_page.dart';
 import 'transfer_request_page.dart';
 
 enum _BranchDashboardSection { overview, inventory, workflow, metrics, modules }
@@ -330,6 +331,17 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
     );
   }
 
+  Future<void> _openStockAlertsPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => StockAlertsPage(
+          service: widget.service,
+          currentUser: widget.currentUser,
+        ),
+      ),
+    );
+  }
+
   List<_BranchDashboardSection> _branchSectionsFor(UserRole role) {
     return switch (role) {
       UserRole.seller => const <_BranchDashboardSection>[
@@ -440,6 +452,12 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         onOpen: _openNotificationsPage,
       ),
       const SizedBox(height: 18),
+      _StockAlertsOverviewPanel(
+        service: widget.service,
+        currentUser: user,
+        onOpen: _openStockAlertsPage,
+      ),
+      const SizedBox(height: 18),
       _SyncStatusOverviewPanel(
         service: widget.service,
         currentUser: user,
@@ -514,6 +532,12 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         onOpen: _openNotificationsPage,
       ),
       const SizedBox(height: 18),
+      _StockAlertsOverviewPanel(
+        service: widget.service,
+        currentUser: user,
+        onOpen: _openStockAlertsPage,
+      ),
+      const SizedBox(height: 18),
       _RequestTrackingOverviewPanel(
         service: widget.service,
         currentUser: user,
@@ -576,6 +600,16 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
 
     return [
       ..._buildBranchSectionShell(user, 'Inventario y alertas'),
+      const SizedBox(height: 18),
+      _WorkflowActionCard(
+        title: 'Alertas de stock',
+        subtitle:
+            'Consolida umbrales, criticidad y lectura de alertas para actuar a tiempo.',
+        buttonLabel: 'Abrir bandeja',
+        icon: Icons.notification_important_rounded,
+        accent: AppPalette.amber,
+        onPressed: _openStockAlertsPage,
+      ),
       const SizedBox(height: 18),
       _DashboardGrid(
         children: [
@@ -792,6 +826,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
             : () => _runDrawerAction(_openCreateBranchDialog),
         onManageEmployees: () => _runDrawerAction(_openEmployeeManagementPage),
         onOpenNotifications: () => _runDrawerAction(_openNotificationsPage),
+        onOpenStockAlerts: () => _runDrawerAction(_openStockAlertsPage),
         onOpenSyncStatus: () => _runDrawerAction(_openSyncStatusPage),
         onOpenApprovals: () => _runDrawerAction(_openApprovalRequestsPage),
         onOpenTraceability: () => _runDrawerAction(_openAdminTraceabilityPage),
@@ -884,6 +919,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         onSelectSection: _selectBranchSection,
         onOpenBranches: () => _runDrawerAction(_openBranchDirectoryPage),
         onOpenNotifications: () => _runDrawerAction(_openNotificationsPage),
+        onOpenStockAlerts: () => _runDrawerAction(_openStockAlertsPage),
         onOpenSyncStatus: () => _runDrawerAction(_openSyncStatusPage),
         onOpenRequestTracking: () => _runDrawerAction(_openRequestTrackingPage),
         onOpenApprovalRequests:
@@ -2012,6 +2048,111 @@ class _RequestTrackingOverviewPanel extends StatelessWidget {
                   onPressed: () => unawaited(onOpen()),
                   icon: const Icon(Icons.open_in_new_rounded),
                   label: const Text('Ver seguimiento'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _StockAlertsOverviewPanel extends StatelessWidget {
+  const _StockAlertsOverviewPanel({
+    required this.service,
+    required this.currentUser,
+    required this.onOpen,
+  });
+
+  final InventoryWorkflowService service;
+  final AppUser currentUser;
+  final Future<void> Function() onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<StockAlertFeedData>(
+      stream: service.watchLowStockAlerts(actorUser: currentUser),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _DashboardPanel(
+            title: 'Alertas de stock',
+            subtitle:
+                'Seguimiento de umbrales y criticidad para actuar antes de una ruptura.',
+            accent: AppPalette.danger,
+            child: Text(
+              'No fue posible cargar las alertas de stock.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+            ),
+          );
+        }
+
+        final data = snapshot.data;
+        if (data == null) {
+          return _DashboardPanel(
+            title: 'Alertas de stock',
+            subtitle:
+                'Seguimiento de umbrales y criticidad para actuar antes de una ruptura.',
+            accent: AppPalette.amber,
+            child: const Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final accent = data.hasCritical
+            ? AppPalette.danger
+            : data.unreadCount > 0
+            ? AppPalette.amber
+            : AppPalette.blueSoft;
+        final items = data.alerts
+            .take(3)
+            .map(
+              (alert) => _InsightItem(
+                icon: alert.isCritical
+                    ? Icons.notification_important_rounded
+                    : Icons.warning_amber_rounded,
+                iconColor: alert.isCritical
+                    ? AppPalette.danger
+                    : AppPalette.amber,
+                title: '${alert.productName} | ${alert.branchName}',
+                detail:
+                    'Disponible ${alert.availableStock} | umbral ${alert.resolvedThreshold}',
+                meta:
+                    '${alert.isCritical ? 'Critica' : 'Advertencia'} | ${alert.isRead ? 'Leida' : 'Sin leer'}',
+              ),
+            )
+            .toList(growable: false);
+
+        return _DashboardPanel(
+          title: 'Alertas de stock',
+          subtitle:
+              'Vista rapida de productos que ya cayeron en zona preventiva o critica.',
+          accent: accent,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                data.alerts.isEmpty
+                    ? 'No hay alertas activas en este momento.'
+                    : 'Sin leer: ${data.unreadCount} | Criticas: ${data.criticalCount} | Advertencia: ${data.warningCount}',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+              ),
+              const SizedBox(height: 12),
+              _InsightList(
+                items: items,
+                emptyMessage:
+                    'Cuando un producto baje del umbral configurado, aparecera aqui.',
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () => unawaited(onOpen()),
+                  icon: const Icon(Icons.open_in_new_rounded),
+                  label: const Text('Abrir bandeja'),
                 ),
               ),
             ],
@@ -4022,6 +4163,7 @@ class _AdminDrawer extends StatelessWidget {
     required this.onCreateBranch,
     required this.onManageEmployees,
     required this.onOpenNotifications,
+    required this.onOpenStockAlerts,
     required this.onOpenSyncStatus,
     required this.onOpenApprovals,
     required this.onOpenTraceability,
@@ -4035,6 +4177,7 @@ class _AdminDrawer extends StatelessWidget {
   final VoidCallback? onCreateBranch;
   final VoidCallback? onManageEmployees;
   final VoidCallback? onOpenNotifications;
+  final VoidCallback? onOpenStockAlerts;
   final VoidCallback? onOpenSyncStatus;
   final VoidCallback? onOpenApprovals;
   final VoidCallback? onOpenTraceability;
@@ -4079,6 +4222,12 @@ class _AdminDrawer extends StatelessWidget {
                         icon: Icons.notifications_none_rounded,
                         title: 'Notificaciones',
                         onTap: onOpenNotifications,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.notification_important_rounded,
+                        title: 'Alertas de stock',
+                        onTap: onOpenStockAlerts,
                       ),
                       const SizedBox(height: 10),
                       _AdminDrawerTile(
@@ -4184,6 +4333,7 @@ class _BranchDrawer extends StatelessWidget {
     required this.onSelectSection,
     required this.onOpenBranches,
     required this.onOpenNotifications,
+    required this.onOpenStockAlerts,
     required this.onOpenSyncStatus,
     required this.onOpenRequestTracking,
     required this.onOpenApprovalRequests,
@@ -4200,6 +4350,7 @@ class _BranchDrawer extends StatelessWidget {
   final Future<void> Function(_BranchDashboardSection section) onSelectSection;
   final VoidCallback onOpenBranches;
   final VoidCallback onOpenNotifications;
+  final VoidCallback onOpenStockAlerts;
   final VoidCallback onOpenSyncStatus;
   final VoidCallback onOpenRequestTracking;
   final VoidCallback? onOpenApprovalRequests;
@@ -4260,6 +4411,12 @@ class _BranchDrawer extends StatelessWidget {
                         icon: Icons.notifications_none_rounded,
                         title: 'Notificaciones',
                         onTap: onOpenNotifications,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.notification_important_rounded,
+                        title: 'Alertas de stock',
+                        onTap: onOpenStockAlerts,
                       ),
                       const SizedBox(height: 10),
                       _AdminDrawerTile(
