@@ -6,20 +6,26 @@ import 'core/app_theme.dart';
 import 'features/auth/application/auth_service.dart';
 import 'features/auth/presentation/auth_page.dart';
 import 'features/inventory/application/inventory_workflow_service.dart';
+import 'features/inventory/data/inventory_offline_cache.dart';
 import 'features/inventory/domain/models.dart';
 import 'features/inventory/presentation/inventory_dashboard_page.dart';
 
 class MyApp extends StatelessWidget {
-  MyApp({super.key, FirebaseFirestore? firestore, FirebaseAuth? auth})
-    : firestore = firestore ?? FirebaseFirestore.instance,
-      auth = auth ?? FirebaseAuth.instance,
-      authService = AuthService(
-        auth: auth ?? FirebaseAuth.instance,
-        firestore: firestore ?? FirebaseFirestore.instance,
-      ),
-      inventoryService = InventoryWorkflowService(
-        firestore: firestore ?? FirebaseFirestore.instance,
-      );
+  MyApp({
+    super.key,
+    FirebaseFirestore? firestore,
+    FirebaseAuth? auth,
+    InventoryOfflineCache? offlineCache,
+  }) : firestore = firestore ?? FirebaseFirestore.instance,
+       auth = auth ?? FirebaseAuth.instance,
+       authService = AuthService(
+         auth: auth ?? FirebaseAuth.instance,
+         firestore: firestore ?? FirebaseFirestore.instance,
+       ),
+       inventoryService = InventoryWorkflowService(
+         firestore: firestore ?? FirebaseFirestore.instance,
+         offlineCache: offlineCache ?? MemoryInventoryOfflineCache(),
+       );
 
   final FirebaseFirestore firestore;
   final FirebaseAuth auth;

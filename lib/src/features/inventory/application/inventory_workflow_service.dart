@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../core/firestore_collections.dart';
+import '../data/inventory_offline_cache.dart';
 import '../data/repositories.dart';
 import '../data/sample_seed_data.dart';
 import '../domain/models.dart';
@@ -62,6 +63,95 @@ class BranchOperationalStats {
   int get consultedOutOfStockCount => outOfStockConsultations.length;
 }
 
+enum SyncStatusSeverity { healthy, warning, critical, unknown }
+
+class SyncBranchStatus {
+  const SyncBranchStatus({
+    required this.branch,
+    required this.latestLog,
+    required this.lastSyncAt,
+    required this.age,
+    required this.severity,
+    required this.summary,
+    required this.detail,
+  });
+
+  final Branch branch;
+  final SyncLog? latestLog;
+  final DateTime? lastSyncAt;
+  final Duration? age;
+  final SyncStatusSeverity severity;
+  final String summary;
+  final String detail;
+
+  bool get isHealthy => severity == SyncStatusSeverity.healthy;
+  bool get isWarning => severity == SyncStatusSeverity.warning;
+  bool get isCritical => severity == SyncStatusSeverity.critical;
+}
+
+class SyncApiStatus {
+  const SyncApiStatus({
+    required this.severity,
+    required this.summary,
+    required this.detail,
+    required this.latestLog,
+    required this.averageResponseTime,
+    required this.lastUpdatedAt,
+  });
+
+  final SyncStatusSeverity severity;
+  final String summary;
+  final String detail;
+  final SyncLog? latestLog;
+  final Duration averageResponseTime;
+  final DateTime? lastUpdatedAt;
+
+  bool get isHealthy => severity == SyncStatusSeverity.healthy;
+  bool get isWarning => severity == SyncStatusSeverity.warning;
+  bool get isCritical => severity == SyncStatusSeverity.critical;
+}
+
+class SyncStatusOverview {
+  const SyncStatusOverview({
+    required this.generatedAt,
+    required this.apiStatus,
+    required this.branches,
+    required this.warnings,
+  });
+
+  final DateTime generatedAt;
+  final SyncApiStatus apiStatus;
+  final List<SyncBranchStatus> branches;
+  final List<String> warnings;
+
+  List<SyncBranchStatus> get healthyBranches => branches
+      .where((item) => item.severity == SyncStatusSeverity.healthy)
+      .toList(growable: false);
+
+  List<SyncBranchStatus> get warningBranches => branches
+      .where((item) => item.severity == SyncStatusSeverity.warning)
+      .toList(growable: false);
+
+  List<SyncBranchStatus> get criticalBranches => branches
+      .where((item) => item.severity == SyncStatusSeverity.critical)
+      .toList(growable: false);
+
+  bool get hasWarnings =>
+      warnings.isNotEmpty ||
+      !apiStatus.isHealthy ||
+      warningBranches.isNotEmpty ||
+      criticalBranches.isNotEmpty;
+
+  SyncBranchStatus? statusForBranch(String branchId) {
+    for (final branch in branches) {
+      if (branch.branch.id == branchId) {
+        return branch;
+      }
+    }
+    return null;
+  }
+}
+
 class ProductSearchResult {
   const ProductSearchResult({
     required this.product,
@@ -76,16 +166,62 @@ class ProductSearchResult {
   bool get isOutOfStock => inventory == null || inventory!.availableStock <= 0;
 }
 
+class ProductSearchData {
+  const ProductSearchData({required this.results, required this.isFromCache});
+
+  final List<ProductSearchResult> results;
+  final bool isFromCache;
+
+  ProductSearchData copyWith({bool? isFromCache}) {
+    return ProductSearchData(
+      results: results,
+      isFromCache: isFromCache ?? this.isFromCache,
+    );
+  }
+}
+
 class ProductSearchFilterOptions {
   const ProductSearchFilterOptions({
     required this.categories,
     required this.brands,
     required this.branches,
+    required this.isFromCache,
   });
 
   final List<Category> categories;
   final List<String> brands;
   final List<Branch> branches;
+  final bool isFromCache;
+
+  ProductSearchFilterOptions copyWith({bool? isFromCache}) {
+    return ProductSearchFilterOptions(
+      categories: categories,
+      brands: brands,
+      branches: branches,
+      isFromCache: isFromCache ?? this.isFromCache,
+    );
+  }
+}
+
+enum InventoryRefreshDataType {
+  dashboard,
+  searchResults,
+  searchFilters,
+  productDetail,
+  stockByBranch,
+  branchDirectory,
+  transferCatalog,
+  reservationCatalog,
+}
+
+class InventoryRefreshPolicy {
+  const InventoryRefreshPolicy({
+    required this.ttl,
+    required this.autoRefreshInterval,
+  });
+
+  final Duration ttl;
+  final Duration autoRefreshInterval;
 }
 
 class TransferRequestCatalogItem {
@@ -200,6 +336,86 @@ class ApprovalQueueData {
   int get totalPending => pendingReservations.length + pendingTransfers.length;
 
   bool get hasItems => totalPending > 0;
+}
+
+enum RequestTrackingType { reservation, transfer }
+
+enum RequestTrackingStatus {
+  pending('Pendiente'),
+  approved('Aprobada'),
+  rejected('Rechazada'),
+  inTransit('En transito'),
+  received('Recibida'),
+  completed('Completada'),
+  cancelled('Cancelada'),
+  expired('Vencida');
+
+  const RequestTrackingStatus(this.label);
+
+  final String label;
+}
+
+class RequestStatusHistoryEntry {
+  const RequestStatusHistoryEntry({
+    required this.status,
+    required this.title,
+    required this.detail,
+    required this.occurredAt,
+  });
+
+  final RequestTrackingStatus status;
+  final String title;
+  final String detail;
+  final DateTime occurredAt;
+}
+
+class RequestTrackingItem {
+  const RequestTrackingItem({
+    required this.id,
+    required this.type,
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.quantity,
+    required this.status,
+    required this.requestedAt,
+    required this.updatedAt,
+    required this.primaryBranchName,
+    required this.secondaryBranchName,
+    required this.requesterLabel,
+    required this.customerLabel,
+    required this.reasonLabel,
+    required this.reviewComment,
+    required this.history,
+  });
+
+  final String id;
+  final RequestTrackingType type;
+  final String productId;
+  final String productName;
+  final String sku;
+  final int quantity;
+  final RequestTrackingStatus status;
+  final DateTime requestedAt;
+  final DateTime updatedAt;
+  final String primaryBranchName;
+  final String secondaryBranchName;
+  final String requesterLabel;
+  final String customerLabel;
+  final String reasonLabel;
+  final String reviewComment;
+  final List<RequestStatusHistoryEntry> history;
+
+  String get statusLabel => status.label;
+
+  String get typeLabel => switch (type) {
+    RequestTrackingType.reservation => 'Reserva',
+    RequestTrackingType.transfer => 'Traslado',
+  };
+
+  DateTime get lastStatusAt => history.last.occurredAt;
+
+  bool get hasReviewComment => reviewComment.trim().isNotEmpty;
 }
 
 enum InventoryDataReliabilityLevel { green, yellow, red }
@@ -365,12 +581,21 @@ class ProductDetailData {
   }
 }
 
+class _CachedLoad<T> {
+  const _CachedLoad({required this.data, required this.isFromCache});
+
+  final T data;
+  final bool isFromCache;
+}
+
 class InventoryWorkflowService {
   InventoryWorkflowService({
     required FirebaseFirestore firestore,
     DateTime Function()? clock,
+    InventoryOfflineCache? offlineCache,
   }) : _firestore = firestore,
        _clock = clock ?? DateTime.now,
+       _offlineCache = offlineCache ?? MemoryInventoryOfflineCache(),
        users = UserRepository(firestore),
        catalog = CatalogRepository(firestore),
        inventories = InventoryRepository(firestore),
@@ -380,6 +605,7 @@ class InventoryWorkflowService {
 
   final FirebaseFirestore _firestore;
   final DateTime Function() _clock;
+  final InventoryOfflineCache _offlineCache;
 
   final UserRepository users;
   final CatalogRepository catalog;
@@ -387,16 +613,67 @@ class InventoryWorkflowService {
   final ReservationRepository reservations;
   final TransferRepository transfers;
   final SystemRepository system;
+  final Map<String, DateTime> _refreshRegistry = <String, DateTime>{};
+  final Map<String, ProductSearchData> _productSearchCache =
+      <String, ProductSearchData>{};
   final Map<String, ProductDetailData> _productDetailCache =
       <String, ProductDetailData>{};
   final Map<String, List<ProductBranchStockEntry>> _productStockByBranchCache =
       <String, List<ProductBranchStockEntry>>{};
   final Map<String, BranchDirectoryData> _branchDirectoryCache =
       <String, BranchDirectoryData>{};
+  final Map<String, List<TransferRequestCatalogItem>> _transferCatalogCache =
+      <String, List<TransferRequestCatalogItem>>{};
+  final Map<String, List<ReservationRequestCatalogItem>>
+  _reservationCatalogCache = <String, List<ReservationRequestCatalogItem>>{};
+  ProductSearchFilterOptions? _searchFilterOptionsCache;
   List<Branch>? _branchCatalogCache;
+  List<Category>? _categoryCatalogCache;
+  List<Product>? _productCatalogCache;
+  bool _branchCatalogFromOfflineCache = false;
+  bool _categoryCatalogFromOfflineCache = false;
+  bool _productCatalogFromOfflineCache = false;
 
   static const Duration _greenDataThreshold = Duration(minutes: 15);
   static const Duration _yellowDataThreshold = Duration(minutes: 30);
+  static const Duration _redDataThreshold = Duration(minutes: 60);
+  static const Duration _syncStatusTick = Duration(minutes: 1);
+  static const int _syncStatusLogLimit = 180;
+  static const Map<InventoryRefreshDataType, InventoryRefreshPolicy>
+  _refreshPolicies = <InventoryRefreshDataType, InventoryRefreshPolicy>{
+    InventoryRefreshDataType.dashboard: InventoryRefreshPolicy(
+      ttl: Duration(seconds: 45),
+      autoRefreshInterval: Duration(seconds: 60),
+    ),
+    InventoryRefreshDataType.searchResults: InventoryRefreshPolicy(
+      ttl: Duration(minutes: 2),
+      autoRefreshInterval: Duration(minutes: 2),
+    ),
+    InventoryRefreshDataType.searchFilters: InventoryRefreshPolicy(
+      ttl: Duration(minutes: 10),
+      autoRefreshInterval: Duration(minutes: 10),
+    ),
+    InventoryRefreshDataType.productDetail: InventoryRefreshPolicy(
+      ttl: Duration(minutes: 2),
+      autoRefreshInterval: Duration(minutes: 2),
+    ),
+    InventoryRefreshDataType.stockByBranch: InventoryRefreshPolicy(
+      ttl: Duration(minutes: 2),
+      autoRefreshInterval: Duration(minutes: 2),
+    ),
+    InventoryRefreshDataType.branchDirectory: InventoryRefreshPolicy(
+      ttl: Duration(minutes: 3),
+      autoRefreshInterval: Duration(minutes: 3),
+    ),
+    InventoryRefreshDataType.transferCatalog: InventoryRefreshPolicy(
+      ttl: Duration(minutes: 2),
+      autoRefreshInterval: Duration(minutes: 2),
+    ),
+    InventoryRefreshDataType.reservationCatalog: InventoryRefreshPolicy(
+      ttl: Duration(minutes: 2),
+      autoRefreshInterval: Duration(minutes: 2),
+    ),
+  };
 
   CollectionReference<Map<String, dynamic>> get _inventoriesCollection =>
       _firestore.collection(FirestoreCollections.inventories);
@@ -409,11 +686,55 @@ class InventoryWorkflowService {
   CollectionReference<Map<String, dynamic>> get _auditLogsCollection =>
       _firestore.collection(FirestoreCollections.auditLogs);
 
+  String _refreshRegistryKey(InventoryRefreshDataType type, String scope) =>
+      '${type.name}|$scope';
+
+  InventoryRefreshPolicy refreshPolicyFor(InventoryRefreshDataType type) =>
+      _refreshPolicies[type]!;
+
+  bool shouldRefreshData({
+    required InventoryRefreshDataType type,
+    required String scope,
+  }) {
+    final lastRefreshAt = _refreshRegistry[_refreshRegistryKey(type, scope)];
+    if (lastRefreshAt == null) {
+      return true;
+    }
+    final ttl = refreshPolicyFor(type).ttl;
+    return _clock().difference(lastRefreshAt) >= ttl;
+  }
+
+  DateTime? lastRefreshAt({
+    required InventoryRefreshDataType type,
+    required String scope,
+  }) {
+    return _refreshRegistry[_refreshRegistryKey(type, scope)];
+  }
+
+  void markRefreshCompleted({
+    required InventoryRefreshDataType type,
+    required String scope,
+  }) {
+    _refreshRegistry[_refreshRegistryKey(type, scope)] = _clock();
+  }
+
   void _invalidateProductCaches([String? productId]) {
+    _refreshRegistry.clear();
+    _productSearchCache.clear();
     if (productId == null || productId.isEmpty) {
       _productDetailCache.clear();
       _productStockByBranchCache.clear();
       _branchDirectoryCache.clear();
+      _transferCatalogCache.clear();
+      _reservationCatalogCache.clear();
+      _searchFilterOptionsCache = null;
+      _productCatalogCache = null;
+      _categoryCatalogCache = null;
+      _branchCatalogCache = null;
+      _productCatalogFromOfflineCache = false;
+      _categoryCatalogFromOfflineCache = false;
+      _branchCatalogFromOfflineCache = false;
+      _runBackgroundTask(_offlineCache.clearAll);
       return;
     }
 
@@ -422,24 +743,270 @@ class InventoryWorkflowService {
       (key, _) => key.endsWith('_$productId'),
     );
     _branchDirectoryCache.removeWhere((key, _) => key.endsWith('_$productId'));
+    _runBackgroundTask(() => _offlineCache.clearProductScopedCaches(productId));
   }
 
   void _invalidateBranchCatalogCache() {
+    _refreshRegistry.clear();
     _branchCatalogCache = null;
+    _branchCatalogFromOfflineCache = false;
     _branchDirectoryCache.clear();
+    _searchFilterOptionsCache = null;
+    _runBackgroundTask(_offlineCache.clearBranchCatalogCaches);
   }
 
-  Future<List<Branch>> _fetchBranchCatalog({bool forceRefresh = false}) async {
+  void _invalidateSearchOptionsCache() {
+    _searchFilterOptionsCache = null;
+    _productSearchCache.clear();
+  }
+
+  void _runBackgroundTask(Future<void> Function() action) {
+    unawaited(() async {
+      try {
+        await action();
+      } catch (_) {}
+    }());
+  }
+
+  Future<_CachedLoad<List<Branch>>> _fetchBranchCatalog({
+    bool forceRefresh = false,
+  }) async {
     if (!forceRefresh) {
       final cached = _branchCatalogCache;
       if (cached != null) {
-        return cached;
+        return _CachedLoad(
+          data: cached,
+          isFromCache: _branchCatalogFromOfflineCache,
+        );
       }
     }
 
-    final branches = List<Branch>.unmodifiable(await catalog.fetchBranches());
-    _branchCatalogCache = branches;
-    return branches;
+    try {
+      final branches = List<Branch>.unmodifiable(await catalog.fetchBranches());
+      _branchCatalogCache = branches;
+      _branchCatalogFromOfflineCache = false;
+      await _offlineCache.cacheBranches(branches);
+      return _CachedLoad(data: branches, isFromCache: false);
+    } catch (error) {
+      final cached = _offlineCache.getBranches();
+      if (cached != null) {
+        final branches = List<Branch>.unmodifiable(cached);
+        _branchCatalogCache = branches;
+        _branchCatalogFromOfflineCache = true;
+        return _CachedLoad(data: branches, isFromCache: true);
+      }
+      rethrow;
+    }
+  }
+
+  Future<_CachedLoad<List<Category>>> _fetchCategoryCatalog({
+    bool forceRefresh = false,
+  }) async {
+    if (!forceRefresh) {
+      final cached = _categoryCatalogCache;
+      if (cached != null) {
+        return _CachedLoad(
+          data: cached,
+          isFromCache: _categoryCatalogFromOfflineCache,
+        );
+      }
+    }
+
+    try {
+      final categories = List<Category>.unmodifiable(
+        await catalog.fetchCategories(),
+      );
+      _categoryCatalogCache = categories;
+      _categoryCatalogFromOfflineCache = false;
+      await _offlineCache.cacheCategories(categories);
+      return _CachedLoad(data: categories, isFromCache: false);
+    } catch (error) {
+      final cached = _offlineCache.getCategories();
+      if (cached != null) {
+        final categories = List<Category>.unmodifiable(cached);
+        _categoryCatalogCache = categories;
+        _categoryCatalogFromOfflineCache = true;
+        return _CachedLoad(data: categories, isFromCache: true);
+      }
+      rethrow;
+    }
+  }
+
+  Future<_CachedLoad<List<Product>>> _fetchProductCatalog({
+    bool forceRefresh = false,
+  }) async {
+    if (!forceRefresh) {
+      final cached = _productCatalogCache;
+      if (cached != null) {
+        return _CachedLoad(
+          data: cached,
+          isFromCache: _productCatalogFromOfflineCache,
+        );
+      }
+    }
+
+    try {
+      final products = List<Product>.unmodifiable(
+        await catalog.fetchProducts(),
+      );
+      _productCatalogCache = products;
+      _productCatalogFromOfflineCache = false;
+      await _offlineCache.cacheProducts(products);
+      return _CachedLoad(data: products, isFromCache: false);
+    } catch (error) {
+      final cached = _offlineCache.getProducts();
+      if (cached != null) {
+        final products = List<Product>.unmodifiable(cached);
+        _productCatalogCache = products;
+        _productCatalogFromOfflineCache = true;
+        return _CachedLoad(data: products, isFromCache: true);
+      }
+      rethrow;
+    }
+  }
+
+  Future<_CachedLoad<Branch?>> _fetchBranchById(
+    String branchId, {
+    bool forceRefresh = false,
+  }) async {
+    try {
+      final branch = await catalog.fetchBranch(branchId);
+      if (branch != null) {
+        await _offlineCache.cacheBranch(branch);
+      }
+      return _CachedLoad(data: branch, isFromCache: false);
+    } catch (error) {
+      final cachedCatalog = await _fetchBranchCatalog(
+        forceRefresh: forceRefresh,
+      );
+      final branch = cachedCatalog.data.cast<Branch?>().firstWhere(
+        (item) => item?.id == branchId,
+        orElse: () => null,
+      );
+      if (branch != null) {
+        return _CachedLoad(
+          data: branch,
+          isFromCache: cachedCatalog.isFromCache,
+        );
+      }
+      rethrow;
+    }
+  }
+
+  Future<_CachedLoad<Product?>> _fetchProductById(
+    String productId, {
+    bool forceRefresh = false,
+  }) async {
+    try {
+      final product = await catalog.fetchProduct(productId);
+      if (product != null) {
+        await _offlineCache.cacheProduct(product);
+      }
+      return _CachedLoad(data: product, isFromCache: false);
+    } catch (error) {
+      final cachedCatalog = await _fetchProductCatalog(
+        forceRefresh: forceRefresh,
+      );
+      final product = cachedCatalog.data.cast<Product?>().firstWhere(
+        (item) => item?.id == productId,
+        orElse: () => null,
+      );
+      if (product != null) {
+        return _CachedLoad(
+          data: product,
+          isFromCache: cachedCatalog.isFromCache,
+        );
+      }
+      rethrow;
+    }
+  }
+
+  Future<_CachedLoad<Category?>> _fetchCategoryById(
+    String categoryId, {
+    bool forceRefresh = false,
+  }) async {
+    try {
+      final category = await catalog.fetchCategory(categoryId);
+      if (category != null) {
+        await _offlineCache.cacheCategory(category);
+      }
+      return _CachedLoad(data: category, isFromCache: false);
+    } catch (error) {
+      final cachedCatalog = await _fetchCategoryCatalog(
+        forceRefresh: forceRefresh,
+      );
+      final category = cachedCatalog.data.cast<Category?>().firstWhere(
+        (item) => item?.id == categoryId,
+        orElse: () => null,
+      );
+      if (category != null) {
+        return _CachedLoad(
+          data: category,
+          isFromCache: cachedCatalog.isFromCache,
+        );
+      }
+      rethrow;
+    }
+  }
+
+  Future<_CachedLoad<List<InventoryItem>>> _fetchBranchInventory(
+    String branchId,
+  ) async {
+    try {
+      final items = List<InventoryItem>.unmodifiable(
+        await inventories.fetchBranchInventory(branchId),
+      );
+      await _offlineCache.cacheBranchInventory(branchId, items);
+      return _CachedLoad(data: items, isFromCache: false);
+    } catch (error) {
+      final cached = _offlineCache.getBranchInventory(branchId);
+      if (cached != null) {
+        return _CachedLoad(
+          data: List<InventoryItem>.unmodifiable(cached),
+          isFromCache: true,
+        );
+      }
+      rethrow;
+    }
+  }
+
+  Future<_CachedLoad<List<InventoryItem>>> _fetchProductInventory(
+    String productId,
+  ) async {
+    try {
+      final items = List<InventoryItem>.unmodifiable(
+        await inventories.fetchProductInventory(productId),
+      );
+      await _offlineCache.cacheProductInventory(productId, items);
+      return _CachedLoad(data: items, isFromCache: false);
+    } catch (error) {
+      final cached = _offlineCache.getProductInventory(productId);
+      if (cached != null) {
+        return _CachedLoad(
+          data: List<InventoryItem>.unmodifiable(cached),
+          isFromCache: true,
+        );
+      }
+      rethrow;
+    }
+  }
+
+  Future<_CachedLoad<InventoryItem?>> _fetchInventoryItem(
+    String branchId,
+    String productId,
+  ) async {
+    try {
+      final inventory = await inventories.fetchInventory(branchId, productId);
+      if (inventory != null) {
+        await _offlineCache.cacheInventoryItem(inventory);
+      }
+      return _CachedLoad(data: inventory, isFromCache: false);
+    } catch (error) {
+      return _CachedLoad(
+        data: _offlineCache.getInventory(branchId, productId),
+        isFromCache: true,
+      );
+    }
   }
 
   DateTime? _resolveInventoryTimestamp(
@@ -868,11 +1435,185 @@ class InventoryWorkflowService {
     return branch;
   }
 
-  Future<List<ProductSearchResult>> searchProducts({
+  String _buildSearchCacheKey({
+    required String branchId,
+    required String normalizedQuery,
+    required ProductSearchFilters filters,
+  }) {
+    return [
+      branchId,
+      normalizedQuery,
+      filters.categoryId ?? '-',
+      filters.brand?.trim().toLowerCase() ?? '-',
+      filters.branchId ?? '-',
+      filters.availability.name,
+      filters.minStock?.toString() ?? '-',
+      filters.maxStock?.toString() ?? '-',
+    ].join('|');
+  }
+
+  String detailRefreshScope({
+    required String branchId,
+    required String productId,
+  }) => '${branchId}_$productId';
+
+  String searchResultsRefreshScope({
+    required String branchId,
+    required String query,
+    ProductSearchFilters filters = const ProductSearchFilters(),
+  }) {
+    final normalizedFilters = _normalizeSearchFilters(filters);
+    final effectiveBranchId = normalizedFilters.branchId ?? branchId;
+    return _buildSearchCacheKey(
+      branchId: effectiveBranchId,
+      normalizedQuery: _normalizeSearchQuery(query),
+      filters: normalizedFilters,
+    );
+  }
+
+  String stockByBranchRefreshScope({
+    required AppUser actorUser,
+    required String productId,
+  }) => '${actorUser.id}_$productId';
+
+  String branchDirectoryRefreshScope({
+    required AppUser actorUser,
+    String? productId,
+  }) =>
+      '${actorUser.id}_${productId?.trim().isNotEmpty == true ? productId!.trim() : 'catalog'}';
+
+  String searchFiltersRefreshScope({required AppUser actorUser}) =>
+      actorUser.id;
+
+  String transferCatalogRefreshScope({required AppUser actorUser}) =>
+      actorUser.branchId;
+
+  String reservationCatalogRefreshScope({required AppUser actorUser}) =>
+      actorUser.branchId;
+
+  String dashboardRefreshScope({required AppUser actorUser}) =>
+      '${actorUser.role.name}|${actorUser.branchId}';
+
+  List<ProductSearchResult> _buildSearchResults({
+    required List<Product> products,
+    required List<InventoryItem> branchInventory,
+    required String normalizedQuery,
+    required ProductSearchFilters filters,
+  }) {
+    final inventoryByProductId = {
+      for (final item in branchInventory) item.productId: item,
+    };
+
+    return products
+        .where((product) => product.isActive)
+        .map((product) {
+          final inventory = inventoryByProductId[product.id];
+          if (!_matchesProductFilters(product, inventory, filters)) {
+            return null;
+          }
+
+          final score = normalizedQuery.isEmpty
+              ? 1
+              : _productMatchScore(product, normalizedQuery);
+          if (score == 0) {
+            return null;
+          }
+
+          return ProductSearchResult(
+            product: product,
+            inventory: inventory,
+            relevanceScore: score,
+          );
+        })
+        .whereType<ProductSearchResult>()
+        .toList(growable: false)
+      ..sort((left, right) {
+        final relevanceComparison = right.relevanceScore.compareTo(
+          left.relevanceScore,
+        );
+        if (relevanceComparison != 0) {
+          return relevanceComparison;
+        }
+
+        final leftStock = left.inventory?.availableStock ?? 0;
+        final rightStock = right.inventory?.availableStock ?? 0;
+        final stockComparison = rightStock.compareTo(leftStock);
+        if (stockComparison != 0) {
+          return stockComparison;
+        }
+
+        return left.product.name.compareTo(right.product.name);
+      });
+  }
+
+  ProductSearchData _materializeSearchCache(
+    List<CachedSearchResultRecord> records,
+  ) {
+    final results = List<ProductSearchResult>.unmodifiable(
+      records
+          .map(
+            (record) => ProductSearchResult(
+              product: record.product,
+              inventory: record.inventory,
+              relevanceScore: record.relevanceScore,
+            ),
+          )
+          .toList(growable: false),
+    );
+    return ProductSearchData(results: results, isFromCache: true);
+  }
+
+  Future<ProductSearchData> _loadSearchProducts({
+    required AppUser actorUser,
+    required String effectiveBranchId,
+    required String normalizedQuery,
+    required ProductSearchFilters filters,
+    required String searchCacheKey,
+  }) async {
+    final products = await _fetchProductCatalog();
+    final branchInventory = await _fetchBranchInventory(effectiveBranchId);
+    final results = List<ProductSearchResult>.unmodifiable(
+      _buildSearchResults(
+        products: products.data,
+        branchInventory: branchInventory.data,
+        normalizedQuery: normalizedQuery,
+        filters: filters,
+      ),
+    );
+    final isFromCache = products.isFromCache || branchInventory.isFromCache;
+    final cacheRecords = results
+        .map(
+          (result) => CachedSearchResultRecord(
+            product: result.product,
+            inventory: result.inventory,
+            relevanceScore: result.relevanceScore,
+          ),
+        )
+        .toList(growable: false);
+
+    await _offlineCache.cacheSearchResults(searchCacheKey, cacheRecords);
+    await _offlineCache.cacheRecentProducts(
+      actorUser.id,
+      results.take(8).map((result) => result.product),
+    );
+    markRefreshCompleted(
+      type: InventoryRefreshDataType.searchResults,
+      scope: searchCacheKey,
+    );
+    final data = ProductSearchData(results: results, isFromCache: isFromCache);
+    _productSearchCache[searchCacheKey] = ProductSearchData(
+      results: results,
+      isFromCache: false,
+    );
+    return data;
+  }
+
+  Future<ProductSearchData> searchProducts({
     required AppUser actorUser,
     required String branchId,
     required String query,
     ProductSearchFilters filters = const ProductSearchFilters(),
+    bool forceRefresh = false,
   }) async {
     _ensurePermission(actorUser, AppPermission.viewOwnInventory);
     final normalizedFilters = _normalizeSearchFilters(filters);
@@ -881,64 +1622,56 @@ class InventoryWorkflowService {
 
     final normalizedQuery = _normalizeSearchQuery(query);
     if (normalizedQuery.isEmpty && normalizedFilters.isEmpty) {
-      return const <ProductSearchResult>[];
+      return const ProductSearchData(
+        results: <ProductSearchResult>[],
+        isFromCache: false,
+      );
     }
 
-    final products = await catalog.fetchProducts();
-    final branchInventory = await inventories.fetchBranchInventory(
-      effectiveBranchId,
+    final searchCacheKey = _buildSearchCacheKey(
+      branchId: effectiveBranchId,
+      normalizedQuery: normalizedQuery,
+      filters: normalizedFilters,
     );
-    final inventoryByProductId = {
-      for (final item in branchInventory) item.productId: item,
-    };
+    final cached = _productSearchCache[searchCacheKey];
+    if (!forceRefresh && cached != null) {
+      if (shouldRefreshData(
+        type: InventoryRefreshDataType.searchResults,
+        scope: searchCacheKey,
+      )) {
+        _runBackgroundTask(
+          () => _loadSearchProducts(
+            actorUser: actorUser,
+            effectiveBranchId: effectiveBranchId,
+            normalizedQuery: normalizedQuery,
+            filters: normalizedFilters,
+            searchCacheKey: searchCacheKey,
+          ).then((_) {}),
+        );
+      }
+      return cached.copyWith(isFromCache: true);
+    }
 
-    final results =
-        products
-            .where((product) => product.isActive)
-            .map((product) {
-              final inventory = inventoryByProductId[product.id];
-              if (!_matchesProductFilters(
-                product,
-                inventory,
-                normalizedFilters,
-              )) {
-                return null;
-              }
-
-              final score = normalizedQuery.isEmpty
-                  ? 1
-                  : _productMatchScore(product, normalizedQuery);
-              if (score == 0) {
-                return null;
-              }
-
-              return ProductSearchResult(
-                product: product,
-                inventory: inventory,
-                relevanceScore: score,
-              );
-            })
-            .whereType<ProductSearchResult>()
-            .toList(growable: false)
-          ..sort((left, right) {
-            final relevanceComparison = right.relevanceScore.compareTo(
-              left.relevanceScore,
-            );
-            if (relevanceComparison != 0) {
-              return relevanceComparison;
-            }
-
-            final leftStock = left.inventory?.availableStock ?? 0;
-            final rightStock = right.inventory?.availableStock ?? 0;
-            final stockComparison = rightStock.compareTo(leftStock);
-            if (stockComparison != 0) {
-              return stockComparison;
-            }
-
-            return left.product.name.compareTo(right.product.name);
-          });
-
-    return results;
+    try {
+      return await _loadSearchProducts(
+        actorUser: actorUser,
+        effectiveBranchId: effectiveBranchId,
+        normalizedQuery: normalizedQuery,
+        filters: normalizedFilters,
+        searchCacheKey: searchCacheKey,
+      );
+    } catch (error) {
+      final cachedRecords = _offlineCache.getSearchResults(searchCacheKey);
+      if (cachedRecords != null) {
+        final searchData = _materializeSearchCache(cachedRecords);
+        _productSearchCache[searchCacheKey] = ProductSearchData(
+          results: searchData.results,
+          isFromCache: false,
+        );
+        return searchData;
+      }
+      rethrow;
+    }
   }
 
   Future<ProductSearchResult?> findProductByBarcode({
@@ -954,8 +1687,8 @@ class InventoryWorkflowService {
       return null;
     }
 
-    final products = await catalog.fetchProducts();
-    final matchedProduct = products.cast<Product?>().firstWhere(
+    final products = await _fetchProductCatalog();
+    final matchedProduct = products.data.cast<Product?>().firstWhere(
       (product) =>
           product != null &&
           product.isActive &&
@@ -967,16 +1700,97 @@ class InventoryWorkflowService {
       return null;
     }
 
-    final inventory = await inventories.fetchInventory(
-      branchId,
-      matchedProduct.id,
-    );
+    final inventory = await _fetchInventoryItem(branchId, matchedProduct.id);
 
     return ProductSearchResult(
       product: matchedProduct,
-      inventory: inventory,
+      inventory: inventory.data,
       relevanceScore: 999,
     );
+  }
+
+  List<ProductBranchStockEntry> _buildStockByBranchEntries({
+    required List<Branch> branches,
+    required List<InventoryItem> productInventories,
+  }) {
+    final inventoryByBranchId = {
+      for (final item in productInventories.where((item) => item.isActive))
+        item.branchId: item,
+    };
+
+    return branches
+        .where((branch) => branch.isActive)
+        .map((branch) {
+          final inventory = inventoryByBranchId[branch.id];
+          final lastUpdatedAt = _resolveInventoryTimestamp(inventory, branch);
+          final reliability = _buildInventoryReliability(
+            inventory: inventory,
+            branch: branch,
+          );
+
+          return ProductBranchStockEntry(
+            branch: branch,
+            inventory: inventory,
+            lastUpdatedAt: lastUpdatedAt,
+            reliability: reliability,
+          );
+        })
+        .toList(growable: false)
+      ..sort((left, right) {
+        final availability = right.availableStock.compareTo(
+          left.availableStock,
+        );
+        if (availability != 0) {
+          return availability;
+        }
+
+        final inTransit = right.inTransitStock.compareTo(left.inTransitStock);
+        if (inTransit != 0) {
+          return inTransit;
+        }
+
+        return left.branch.name.compareTo(right.branch.name);
+      });
+  }
+
+  ProductBranchStockEntry _materializeStockEntry(
+    CachedBranchStockRecord record,
+  ) {
+    final lastUpdatedAt = _resolveInventoryTimestamp(
+      record.inventory,
+      record.branch,
+    );
+    final reliability = _buildInventoryReliability(
+      inventory: record.inventory,
+      branch: record.branch,
+    );
+    return ProductBranchStockEntry(
+      branch: record.branch,
+      inventory: record.inventory,
+      lastUpdatedAt: lastUpdatedAt,
+      reliability: reliability,
+    );
+  }
+
+  List<ProductBranchStockEntry> _materializeStockByBranch(
+    List<CachedBranchStockRecord> records,
+  ) {
+    return records.map(_materializeStockEntry).toList(growable: false)..sort((
+      left,
+      right,
+    ) {
+      final availability = right.availableStock.compareTo(left.availableStock);
+      if (availability != 0) {
+        return availability;
+      }
+
+      final inTransit = right.inTransitStock.compareTo(left.inTransitStock);
+      if (inTransit != 0) {
+        return inTransit;
+      }
+
+      return left.branch.name.compareTo(right.branch.name);
+    });
   }
 
   Future<ProductDetailData> fetchProductDetail({
@@ -988,56 +1802,145 @@ class InventoryWorkflowService {
     _ensurePermission(actorUser, AppPermission.viewOwnInventory);
     _ensureBranchAccess(actorUser, branchId);
 
-    final cacheKey = '${branchId}_$productId';
+    final cacheKey = detailRefreshScope(
+      branchId: branchId,
+      productId: productId,
+    );
     if (!forceRefresh) {
       final cached = _productDetailCache[cacheKey];
       if (cached != null) {
+        if (shouldRefreshData(
+          type: InventoryRefreshDataType.productDetail,
+          scope: cacheKey,
+        )) {
+          _runBackgroundTask(
+            () => fetchProductDetail(
+              actorUser: actorUser,
+              branchId: branchId,
+              productId: productId,
+              forceRefresh: true,
+            ).then((_) {}),
+          );
+        }
         return cached.copyWith(isFromCache: true);
       }
     }
 
-    final product = await catalog.fetchProduct(productId);
-    if (product == null || !product.isActive) {
-      throw const InventoryException(
-        'No se encontro el producto solicitado en el catalogo.',
+    try {
+      final product = await _fetchProductById(
+        productId,
+        forceRefresh: forceRefresh,
       );
+      final resolvedProduct = product.data;
+      if (resolvedProduct == null || !resolvedProduct.isActive) {
+        throw const InventoryException(
+          'No se encontro el producto solicitado en el catalogo.',
+        );
+      }
+
+      final branch = await _fetchBranchById(
+        branchId,
+        forceRefresh: forceRefresh,
+      );
+      final inventory = await _fetchInventoryItem(branchId, resolvedProduct.id);
+      final category = resolvedProduct.categoryId.isEmpty
+          ? const _CachedLoad<Category?>(data: null, isFromCache: false)
+          : await _fetchCategoryById(
+              resolvedProduct.categoryId,
+              forceRefresh: forceRefresh,
+            );
+      final stockByBranch = await fetchProductStockByBranch(
+        actorUser: actorUser,
+        productId: resolvedProduct.id,
+        forceRefresh: forceRefresh,
+      );
+      final branchSuggestions = _buildBranchSuggestions(
+        currentBranch: branch.data,
+        currentBranchId: branchId,
+        stockByBranch: stockByBranch,
+      );
+      final reliability = _buildInventoryReliability(
+        inventory: inventory.data,
+        branch: branch.data,
+      );
+      final isFromCache =
+          product.isFromCache ||
+          branch.isFromCache ||
+          inventory.isFromCache ||
+          category.isFromCache;
+
+      final detail = ProductDetailData(
+        product: resolvedProduct,
+        inventory: inventory.data,
+        category: category.data,
+        branch: branch.data,
+        stockByBranch: stockByBranch,
+        branchSuggestions: branchSuggestions,
+        recommendedSuggestion: branchSuggestions.isEmpty
+            ? null
+            : branchSuggestions.first,
+        reliability: reliability,
+        isFromCache: isFromCache,
+      );
+      _productDetailCache[cacheKey] = detail.copyWith(isFromCache: false);
+      await _offlineCache.cacheProductDetail(
+        cacheKey,
+        CachedProductDetailRecord(
+          product: resolvedProduct,
+          inventory: inventory.data,
+          category: category.data,
+          branch: branch.data,
+          stockByBranch: stockByBranch
+              .map(
+                (entry) => CachedBranchStockRecord(
+                  branch: entry.branch,
+                  inventory: entry.inventory,
+                ),
+              )
+              .toList(growable: false),
+        ),
+      );
+      await _offlineCache.cacheRecentProducts(actorUser.id, <Product>[
+        resolvedProduct,
+      ]);
+      markRefreshCompleted(
+        type: InventoryRefreshDataType.productDetail,
+        scope: cacheKey,
+      );
+      return detail;
+    } catch (error) {
+      final cachedDetail = _offlineCache.getProductDetail(cacheKey);
+      if (cachedDetail != null) {
+        final stockByBranch = _materializeStockByBranch(
+          cachedDetail.stockByBranch,
+        );
+        final branchSuggestions = _buildBranchSuggestions(
+          currentBranch: cachedDetail.branch,
+          currentBranchId: branchId,
+          stockByBranch: stockByBranch,
+        );
+        final reliability = _buildInventoryReliability(
+          inventory: cachedDetail.inventory,
+          branch: cachedDetail.branch,
+        );
+        final detail = ProductDetailData(
+          product: cachedDetail.product,
+          inventory: cachedDetail.inventory,
+          category: cachedDetail.category,
+          branch: cachedDetail.branch,
+          stockByBranch: stockByBranch,
+          branchSuggestions: branchSuggestions,
+          recommendedSuggestion: branchSuggestions.isEmpty
+              ? null
+              : branchSuggestions.first,
+          reliability: reliability,
+          isFromCache: true,
+        );
+        _productDetailCache[cacheKey] = detail.copyWith(isFromCache: false);
+        return detail;
+      }
+      rethrow;
     }
-
-    final branch = await catalog.fetchBranch(branchId);
-    final inventory = await inventories.fetchInventory(branchId, product.id);
-    final category = product.categoryId.isEmpty
-        ? null
-        : await catalog.fetchCategory(product.categoryId);
-    final stockByBranch = await fetchProductStockByBranch(
-      actorUser: actorUser,
-      productId: product.id,
-      forceRefresh: forceRefresh,
-    );
-    final branchSuggestions = _buildBranchSuggestions(
-      currentBranch: branch,
-      currentBranchId: branchId,
-      stockByBranch: stockByBranch,
-    );
-    final reliability = _buildInventoryReliability(
-      inventory: inventory,
-      branch: branch,
-    );
-
-    final detail = ProductDetailData(
-      product: product,
-      inventory: inventory,
-      category: category,
-      branch: branch,
-      stockByBranch: stockByBranch,
-      branchSuggestions: branchSuggestions,
-      recommendedSuggestion: branchSuggestions.isEmpty
-          ? null
-          : branchSuggestions.first,
-      reliability: reliability,
-      isFromCache: false,
-    );
-    _productDetailCache[cacheKey] = detail;
-    return detail;
   }
 
   Future<List<ProductBranchStockEntry>> fetchProductStockByBranch({
@@ -1047,75 +1950,77 @@ class InventoryWorkflowService {
   }) async {
     _ensurePermission(actorUser, AppPermission.viewStockByBranch);
 
-    final cacheKey = '${actorUser.id}_$productId';
+    final cacheKey = stockByBranchRefreshScope(
+      actorUser: actorUser,
+      productId: productId,
+    );
     if (!forceRefresh) {
       final cached = _productStockByBranchCache[cacheKey];
       if (cached != null) {
+        if (shouldRefreshData(
+          type: InventoryRefreshDataType.stockByBranch,
+          scope: cacheKey,
+        )) {
+          _runBackgroundTask(
+            () => fetchProductStockByBranch(
+              actorUser: actorUser,
+              productId: productId,
+              forceRefresh: true,
+            ).then((_) {}),
+          );
+        }
         return cached;
       }
     }
 
-    final product = await catalog.fetchProduct(productId);
-    if (product == null || !product.isActive) {
-      throw const InventoryException(
-        'No se encontro el producto solicitado en el catalogo.',
+    try {
+      final product = await _fetchProductById(
+        productId,
+        forceRefresh: forceRefresh,
       );
+      if (product.data == null || !product.data!.isActive) {
+        throw const InventoryException(
+          'No se encontro el producto solicitado en el catalogo.',
+        );
+      }
+
+      final branches = await _fetchBranchCatalog(forceRefresh: forceRefresh);
+      final productInventories = await _fetchProductInventory(productId);
+      final stockByBranch = _buildStockByBranchEntries(
+        branches: branches.data,
+        productInventories: productInventories.data,
+      );
+      final immutableStockByBranch = List<ProductBranchStockEntry>.unmodifiable(
+        stockByBranch,
+      );
+      _productStockByBranchCache[cacheKey] = immutableStockByBranch;
+      await _offlineCache.cacheStockByBranch(
+        cacheKey,
+        immutableStockByBranch
+            .map(
+              (entry) => CachedBranchStockRecord(
+                branch: entry.branch,
+                inventory: entry.inventory,
+              ),
+            )
+            .toList(growable: false),
+      );
+      markRefreshCompleted(
+        type: InventoryRefreshDataType.stockByBranch,
+        scope: cacheKey,
+      );
+      return immutableStockByBranch;
+    } catch (error) {
+      final cachedStock = _offlineCache.getStockByBranch(cacheKey);
+      if (cachedStock != null) {
+        final stockByBranch = List<ProductBranchStockEntry>.unmodifiable(
+          _materializeStockByBranch(cachedStock),
+        );
+        _productStockByBranchCache[cacheKey] = stockByBranch;
+        return stockByBranch;
+      }
+      rethrow;
     }
-
-    final branches = await _fetchBranchCatalog(forceRefresh: forceRefresh);
-    final productInventories = await inventories.fetchProductInventory(
-      productId,
-    );
-    final inventoryByBranchId = {
-      for (final item in productInventories.where((item) => item.isActive))
-        item.branchId: item,
-    };
-
-    final stockByBranch =
-        branches
-            .where((branch) => branch.isActive)
-            .map((branch) {
-              final inventory = inventoryByBranchId[branch.id];
-              final lastUpdatedAt = _resolveInventoryTimestamp(
-                inventory,
-                branch,
-              );
-              final reliability = _buildInventoryReliability(
-                inventory: inventory,
-                branch: branch,
-              );
-
-              return ProductBranchStockEntry(
-                branch: branch,
-                inventory: inventory,
-                lastUpdatedAt: lastUpdatedAt,
-                reliability: reliability,
-              );
-            })
-            .toList(growable: false)
-          ..sort((left, right) {
-            final availability = right.availableStock.compareTo(
-              left.availableStock,
-            );
-            if (availability != 0) {
-              return availability;
-            }
-
-            final inTransit = right.inTransitStock.compareTo(
-              left.inTransitStock,
-            );
-            if (inTransit != 0) {
-              return inTransit;
-            }
-
-            return left.branch.name.compareTo(right.branch.name);
-          });
-
-    final immutableStockByBranch = List<ProductBranchStockEntry>.unmodifiable(
-      stockByBranch,
-    );
-    _productStockByBranchCache[cacheKey] = immutableStockByBranch;
-    return immutableStockByBranch;
   }
 
   Future<BranchDirectoryData> fetchBranchDirectory({
@@ -1126,102 +2031,194 @@ class InventoryWorkflowService {
     _ensurePermission(actorUser, AppPermission.viewOwnInventory);
 
     final normalizedProductId = productId?.trim();
-    final cacheKey = '${actorUser.id}_${normalizedProductId ?? 'catalog'}';
+    final cacheKey = branchDirectoryRefreshScope(
+      actorUser: actorUser,
+      productId: normalizedProductId,
+    );
     if (!forceRefresh) {
       final cached = _branchDirectoryCache[cacheKey];
       if (cached != null) {
+        if (shouldRefreshData(
+          type: InventoryRefreshDataType.branchDirectory,
+          scope: cacheKey,
+        )) {
+          _runBackgroundTask(
+            () => fetchBranchDirectory(
+              actorUser: actorUser,
+              productId: productId,
+              forceRefresh: true,
+            ).then((_) {}),
+          );
+        }
         return cached.copyWith(isFromCache: true);
       }
     }
 
-    final branches = await _fetchBranchCatalog(forceRefresh: forceRefresh);
-    final currentBranch = branches.cast<Branch?>().firstWhere(
-      (branch) => branch?.id == actorUser.branchId,
-      orElse: () => null,
-    );
+    try {
+      final branches = await _fetchBranchCatalog(forceRefresh: forceRefresh);
+      final currentBranch = branches.data.cast<Branch?>().firstWhere(
+        (branch) => branch?.id == actorUser.branchId,
+        orElse: () => null,
+      );
 
-    Product? selectedProduct;
-    Map<String, ProductBranchStockEntry> stockByBranchId =
-        const <String, ProductBranchStockEntry>{};
+      Product? selectedProduct;
+      bool selectedProductFromCache = false;
+      Map<String, ProductBranchStockEntry> stockByBranchId =
+          const <String, ProductBranchStockEntry>{};
 
-    if (normalizedProductId != null && normalizedProductId.isNotEmpty) {
-      selectedProduct = await catalog.fetchProduct(normalizedProductId);
-      if (selectedProduct == null || !selectedProduct.isActive) {
-        throw const InventoryException(
-          'No se encontro el producto solicitado en el catalogo.',
+      if (normalizedProductId != null && normalizedProductId.isNotEmpty) {
+        final product = await _fetchProductById(
+          normalizedProductId,
+          forceRefresh: forceRefresh,
         );
+        selectedProduct = product.data;
+        selectedProductFromCache = product.isFromCache;
+        if (selectedProduct == null || !selectedProduct.isActive) {
+          throw const InventoryException(
+            'No se encontro el producto solicitado en el catalogo.',
+          );
+        }
+
+        final stockByBranch = await fetchProductStockByBranch(
+          actorUser: actorUser,
+          productId: normalizedProductId,
+          forceRefresh: forceRefresh,
+        );
+        stockByBranchId = {
+          for (final entry in stockByBranch) entry.branch.id: entry,
+        };
       }
 
-      final stockByBranch = await fetchProductStockByBranch(
-        actorUser: actorUser,
-        productId: normalizedProductId,
-        forceRefresh: forceRefresh,
-      );
-      stockByBranchId = {
-        for (final entry in stockByBranch) entry.branch.id: entry,
-      };
-    }
-
-    final entries =
-        branches
-            .where((branch) => branch.isActive)
-            .map(
-              (branch) => BranchDirectoryEntry(
-                branch: branch,
-                distanceKm: currentBranch == null
-                    ? 0
-                    : _distanceInKm(currentBranch.location, branch.location),
-                stockEntry: stockByBranchId[branch.id],
-              ),
-            )
-            .toList(growable: false)
-          ..sort((left, right) {
-            if (selectedProduct != null) {
-              final availability = right.availableStock.compareTo(
-                left.availableStock,
-              );
-              if (availability != 0) {
-                return availability;
+      final entries =
+          branches.data
+              .where((branch) => branch.isActive)
+              .map(
+                (branch) => BranchDirectoryEntry(
+                  branch: branch,
+                  distanceKm: currentBranch == null
+                      ? 0
+                      : _distanceInKm(currentBranch.location, branch.location),
+                  stockEntry: stockByBranchId[branch.id],
+                ),
+              )
+              .toList(growable: false)
+            ..sort((left, right) {
+              if (selectedProduct != null) {
+                final availability = right.availableStock.compareTo(
+                  left.availableStock,
+                );
+                if (availability != 0) {
+                  return availability;
+                }
               }
-            }
 
-            final distance = left.distanceKm.compareTo(right.distanceKm);
-            if (distance != 0) {
-              return distance;
-            }
+              final distance = left.distanceKm.compareTo(right.distanceKm);
+              if (distance != 0) {
+                return distance;
+              }
 
-            return left.branch.name.compareTo(right.branch.name);
-          });
+              return left.branch.name.compareTo(right.branch.name);
+            });
 
-    final directory = BranchDirectoryData(
-      entries: List<BranchDirectoryEntry>.unmodifiable(entries),
-      selectedProduct: selectedProduct,
-      currentBranch: currentBranch,
-      isFromCache: false,
-    );
-    _branchDirectoryCache[cacheKey] = directory;
-    return directory;
+      final directory = BranchDirectoryData(
+        entries: List<BranchDirectoryEntry>.unmodifiable(entries),
+        selectedProduct: selectedProduct,
+        currentBranch: currentBranch,
+        isFromCache: branches.isFromCache || selectedProductFromCache,
+      );
+      _branchDirectoryCache[cacheKey] = directory.copyWith(isFromCache: false);
+      await _offlineCache.cacheBranchDirectory(
+        cacheKey,
+        CachedBranchDirectoryRecord(
+          entries: entries
+              .map(
+                (entry) => CachedBranchDirectoryEntryRecord(
+                  branch: entry.branch,
+                  distanceKm: entry.distanceKm,
+                  stockEntry: entry.stockEntry == null
+                      ? null
+                      : CachedBranchStockRecord(
+                          branch: entry.stockEntry!.branch,
+                          inventory: entry.stockEntry!.inventory,
+                        ),
+                ),
+              )
+              .toList(growable: false),
+          selectedProduct: selectedProduct,
+          currentBranch: currentBranch,
+        ),
+      );
+      markRefreshCompleted(
+        type: InventoryRefreshDataType.branchDirectory,
+        scope: cacheKey,
+      );
+      return directory;
+    } catch (error) {
+      final cachedDirectory = _offlineCache.getBranchDirectory(cacheKey);
+      if (cachedDirectory != null) {
+        final directory = BranchDirectoryData(
+          entries: List<BranchDirectoryEntry>.unmodifiable(
+            cachedDirectory.entries
+                .map(
+                  (entry) => BranchDirectoryEntry(
+                    branch: entry.branch,
+                    distanceKm: entry.distanceKm,
+                    stockEntry: entry.stockEntry == null
+                        ? null
+                        : _materializeStockEntry(entry.stockEntry!),
+                  ),
+                )
+                .toList(growable: false),
+          ),
+          selectedProduct: cachedDirectory.selectedProduct,
+          currentBranch: cachedDirectory.currentBranch,
+          isFromCache: true,
+        );
+        _branchDirectoryCache[cacheKey] = directory.copyWith(
+          isFromCache: false,
+        );
+        return directory;
+      }
+      rethrow;
+    }
   }
 
   Future<ProductSearchFilterOptions> fetchSearchFilterOptions({
     required AppUser actorUser,
+    bool forceRefresh = false,
   }) async {
     _ensurePermission(actorUser, AppPermission.viewOwnInventory);
+    final refreshScope = searchFiltersRefreshScope(actorUser: actorUser);
+    final cached = _searchFilterOptionsCache;
+    if (!forceRefresh && cached != null) {
+      if (shouldRefreshData(
+        type: InventoryRefreshDataType.searchFilters,
+        scope: refreshScope,
+      )) {
+        _runBackgroundTask(
+          () => fetchSearchFilterOptions(
+            actorUser: actorUser,
+            forceRefresh: true,
+          ).then((_) {}),
+        );
+      }
+      return cached.copyWith(isFromCache: true);
+    }
 
-    final branches = await catalog.fetchBranches();
-    final categories = await catalog.fetchCategories();
-    final products = await catalog.fetchProducts();
+    final branches = await _fetchBranchCatalog(forceRefresh: forceRefresh);
+    final categories = await _fetchCategoryCatalog(forceRefresh: forceRefresh);
+    final products = await _fetchProductCatalog(forceRefresh: forceRefresh);
 
-    final visibleBranches = branches
+    final visibleBranches = branches.data
         .where(
           (branch) => branch.isActive && actorUser.canAccessBranch(branch.id),
         )
         .toList(growable: false);
-    final visibleCategories = categories
+    final visibleCategories = categories.data
         .where((category) => category.isActive)
         .toList(growable: false);
     final brandLabels = <String, String>{};
-    for (final product in products) {
+    for (final product in products.data) {
       if (!product.isActive) {
         continue;
       }
@@ -1232,30 +2229,61 @@ class InventoryWorkflowService {
       brandLabels.putIfAbsent(brand.toLowerCase(), () => brand);
     }
     final brands = brandLabels.values.toList(growable: false)..sort();
-
-    return ProductSearchFilterOptions(
+    final options = ProductSearchFilterOptions(
       categories: visibleCategories,
       brands: brands,
       branches: visibleBranches,
+      isFromCache:
+          branches.isFromCache ||
+          categories.isFromCache ||
+          products.isFromCache,
     );
+    _searchFilterOptionsCache = options.copyWith(isFromCache: false);
+    markRefreshCompleted(
+      type: InventoryRefreshDataType.searchFilters,
+      scope: refreshScope,
+    );
+    return options;
+  }
+
+  List<Product> fetchRecentCachedProducts({required AppUser actorUser}) {
+    _ensurePermission(actorUser, AppPermission.viewOwnInventory);
+    return _offlineCache.getRecentProducts(actorUser.id);
   }
 
   Future<List<TransferRequestCatalogItem>> fetchTransferRequestCatalog({
     required AppUser actorUser,
+    bool forceRefresh = false,
   }) async {
     _ensurePermission(actorUser, AppPermission.requestTransfer);
+    final refreshScope = transferCatalogRefreshScope(actorUser: actorUser);
+    if (!forceRefresh) {
+      final cached = _transferCatalogCache[refreshScope];
+      if (cached != null) {
+        if (shouldRefreshData(
+          type: InventoryRefreshDataType.transferCatalog,
+          scope: refreshScope,
+        )) {
+          _runBackgroundTask(
+            () => fetchTransferRequestCatalog(
+              actorUser: actorUser,
+              forceRefresh: true,
+            ).then((_) {}),
+          );
+        }
+        return List<TransferRequestCatalogItem>.unmodifiable(cached);
+      }
+    }
 
-    final products = await catalog.fetchProducts();
-    final branchInventory = await inventories.fetchBranchInventory(
-      actorUser.branchId,
-    );
+    final products = await _fetchProductCatalog(forceRefresh: forceRefresh);
+    final branchInventory = await _fetchBranchInventory(actorUser.branchId);
     final inventoryByProductId = {
-      for (final item in branchInventory.where((item) => item.isActive))
+      for (final item in branchInventory.data.where((item) => item.isActive))
         item.productId: item,
     };
 
     final items =
-        products
+        products.data
             .where((product) => product.isActive)
             .map(
               (product) => TransferRequestCatalogItem(
@@ -1282,25 +2310,48 @@ class InventoryWorkflowService {
             return left.product.name.compareTo(right.product.name);
           });
 
-    return List<TransferRequestCatalogItem>.unmodifiable(items);
+    final immutableItems = List<TransferRequestCatalogItem>.unmodifiable(items);
+    _transferCatalogCache[refreshScope] = immutableItems;
+    markRefreshCompleted(
+      type: InventoryRefreshDataType.transferCatalog,
+      scope: refreshScope,
+    );
+    return immutableItems;
   }
 
   Future<List<ReservationRequestCatalogItem>> fetchReservationRequestCatalog({
     required AppUser actorUser,
+    bool forceRefresh = false,
   }) async {
     _ensurePermission(actorUser, AppPermission.createReservation);
+    final refreshScope = reservationCatalogRefreshScope(actorUser: actorUser);
+    if (!forceRefresh) {
+      final cached = _reservationCatalogCache[refreshScope];
+      if (cached != null) {
+        if (shouldRefreshData(
+          type: InventoryRefreshDataType.reservationCatalog,
+          scope: refreshScope,
+        )) {
+          _runBackgroundTask(
+            () => fetchReservationRequestCatalog(
+              actorUser: actorUser,
+              forceRefresh: true,
+            ).then((_) {}),
+          );
+        }
+        return List<ReservationRequestCatalogItem>.unmodifiable(cached);
+      }
+    }
 
-    final products = await catalog.fetchProducts();
-    final branchInventory = await inventories.fetchBranchInventory(
-      actorUser.branchId,
-    );
+    final products = await _fetchProductCatalog(forceRefresh: forceRefresh);
+    final branchInventory = await _fetchBranchInventory(actorUser.branchId);
     final inventoryByProductId = {
-      for (final item in branchInventory.where((item) => item.isActive))
+      for (final item in branchInventory.data.where((item) => item.isActive))
         item.productId: item,
     };
 
     final items =
-        products
+        products.data
             .where((product) => product.isActive)
             .map(
               (product) => ReservationRequestCatalogItem(
@@ -1327,7 +2378,15 @@ class InventoryWorkflowService {
             return left.product.name.compareTo(right.product.name);
           });
 
-    return List<ReservationRequestCatalogItem>.unmodifiable(items);
+    final immutableItems = List<ReservationRequestCatalogItem>.unmodifiable(
+      items,
+    );
+    _reservationCatalogCache[refreshScope] = immutableItems;
+    markRefreshCompleted(
+      type: InventoryRefreshDataType.reservationCatalog,
+      scope: refreshScope,
+    );
+    return immutableItems;
   }
 
   Future<TransferTraceabilityData> fetchTransferTraceability({
@@ -1648,6 +2707,392 @@ class InventoryWorkflowService {
   Future<int> markAllNotificationsAsRead({required AppUser actorUser}) async {
     _ensurePermission(actorUser, AppPermission.viewNotifications);
     return system.markAllNotificationsAsRead(actorUser.id);
+  }
+
+  Future<SyncStatusOverview> fetchSyncStatusOverview({
+    required AppUser actorUser,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.viewSyncStatus);
+
+    final branches = await catalog.fetchBranches();
+    final syncLogs = await system.fetchRecentSyncLogs(
+      limit: _syncStatusLogLimit,
+    );
+
+    return _buildSyncStatusOverview(
+      branches: branches,
+      syncLogs: syncLogs,
+      currentBranchId: actorUser.branchId,
+    );
+  }
+
+  Stream<SyncStatusOverview> watchSyncStatus({required AppUser actorUser}) {
+    _ensurePermission(actorUser, AppPermission.viewSyncStatus);
+
+    final controller = StreamController<SyncStatusOverview>();
+    var branchesState = const <Branch>[];
+    var syncLogsState = const <SyncLog>[];
+    var branchesReady = false;
+    var syncLogsReady = false;
+    var subscriptions = <StreamSubscription<Object?>>[];
+    Timer? ticker;
+
+    void emit() {
+      if (controller.isClosed || !branchesReady || !syncLogsReady) {
+        return;
+      }
+
+      controller.add(
+        _buildSyncStatusOverview(
+          branches: branchesState,
+          syncLogs: syncLogsState,
+          currentBranchId: actorUser.branchId,
+        ),
+      );
+    }
+
+    controller.onListen = () {
+      if (subscriptions.isNotEmpty) {
+        return;
+      }
+
+      subscriptions = <StreamSubscription<Object?>>[
+        catalog.watchBranches().listen((items) {
+          branchesState = items;
+          branchesReady = true;
+          emit();
+        }, onError: controller.addError),
+        system.watchRecentSyncLogs(limit: _syncStatusLogLimit).listen((items) {
+          syncLogsState = items;
+          syncLogsReady = true;
+          emit();
+        }, onError: controller.addError),
+      ];
+      ticker = Timer.periodic(_syncStatusTick, (_) => emit());
+    };
+
+    controller.onCancel = () async {
+      ticker?.cancel();
+      ticker = null;
+      final currentSubscriptions = subscriptions;
+      subscriptions = <StreamSubscription<Object?>>[];
+      for (final subscription in currentSubscriptions) {
+        await subscription.cancel();
+      }
+    };
+
+    return controller.stream;
+  }
+
+  Stream<List<RequestTrackingItem>> watchRequestTracking({
+    required AppUser actorUser,
+  }) {
+    _ensurePermission(actorUser, AppPermission.viewRequestTracking);
+
+    final reservationStream = actorUser.role == UserRole.admin
+        ? reservations.watchReservations()
+        : actorUser.role == UserRole.supervisor
+        ? reservations.watchReservationsForBranchTracking(actorUser.branchId)
+        : reservations.watchReservationsByUser(actorUser.id);
+    final transferStream = actorUser.role == UserRole.admin
+        ? transfers.watchTransfers()
+        : transfers.watchTransfersForBranch(actorUser.branchId);
+
+    final controller = StreamController<List<RequestTrackingItem>>();
+    var reservationsState = const <Reservation>[];
+    var transfersState = const <TransferRequest>[];
+    var reservationsReady = false;
+    var transfersReady = false;
+    var subscriptions = <StreamSubscription<Object?>>[];
+
+    void emit() {
+      if (controller.isClosed || !reservationsReady || !transfersReady) {
+        return;
+      }
+
+      final items = <RequestTrackingItem>[
+        ...reservationsState
+            .where((item) => _canTrackReservation(actorUser, item))
+            .map(_buildReservationTrackingItem),
+        ...transfersState
+            .where((item) => _canTrackTransfer(actorUser, item))
+            .map(_buildTransferTrackingItem),
+      ]..sort((left, right) => right.lastStatusAt.compareTo(left.lastStatusAt));
+
+      controller.add(List<RequestTrackingItem>.unmodifiable(items));
+    }
+
+    controller.onListen = () {
+      if (subscriptions.isNotEmpty) {
+        return;
+      }
+
+      subscriptions = <StreamSubscription<Object?>>[
+        reservationStream.listen((items) {
+          reservationsState = items;
+          reservationsReady = true;
+          emit();
+        }, onError: controller.addError),
+        transferStream.listen((items) {
+          transfersState = items;
+          transfersReady = true;
+          emit();
+        }, onError: controller.addError),
+      ];
+    };
+
+    controller.onCancel = () async {
+      final currentSubscriptions = subscriptions;
+      subscriptions = <StreamSubscription<Object?>>[];
+      for (final subscription in currentSubscriptions) {
+        await subscription.cancel();
+      }
+    };
+
+    return controller.stream;
+  }
+
+  bool _canTrackReservation(AppUser actorUser, Reservation reservation) {
+    if (actorUser.role == UserRole.admin) {
+      return true;
+    }
+    if (actorUser.role == UserRole.supervisor) {
+      return reservation.branchId == actorUser.branchId ||
+          reservation.requestingBranchId == actorUser.branchId ||
+          reservation.reservedBy == actorUser.id;
+    }
+    return reservation.reservedBy == actorUser.id;
+  }
+
+  bool _canTrackTransfer(AppUser actorUser, TransferRequest transfer) {
+    if (actorUser.role == UserRole.admin) {
+      return true;
+    }
+    if (actorUser.role == UserRole.supervisor) {
+      return transfer.fromBranchId == actorUser.branchId ||
+          transfer.toBranchId == actorUser.branchId ||
+          transfer.requestedBy == actorUser.id;
+    }
+    return transfer.requestedBy == actorUser.id;
+  }
+
+  RequestTrackingItem _buildReservationTrackingItem(Reservation reservation) {
+    final requestingBranch = reservation.requestingBranchName.isNotEmpty
+        ? reservation.requestingBranchName
+        : reservation.requestingBranchId;
+
+    return RequestTrackingItem(
+      id: reservation.id,
+      type: RequestTrackingType.reservation,
+      productId: reservation.productId,
+      productName: reservation.productName,
+      sku: reservation.sku,
+      quantity: reservation.quantity,
+      status: _mapReservationTrackingStatus(reservation.status),
+      requestedAt: reservation.createdAt,
+      updatedAt: reservation.updatedAt,
+      primaryBranchName: reservation.branchName,
+      secondaryBranchName: requestingBranch,
+      requesterLabel: reservation.requestedByName.isNotEmpty
+          ? reservation.requestedByName
+          : reservation.reservedBy,
+      customerLabel: reservation.customerName,
+      reasonLabel: requestingBranch.isEmpty
+          ? 'Solicitud de reserva'
+          : 'Solicita desde $requestingBranch',
+      reviewComment: reservation.reviewComment,
+      history: List<RequestStatusHistoryEntry>.unmodifiable(
+        _buildReservationHistory(reservation),
+      ),
+    );
+  }
+
+  RequestTrackingItem _buildTransferTrackingItem(TransferRequest transfer) {
+    return RequestTrackingItem(
+      id: transfer.id,
+      type: RequestTrackingType.transfer,
+      productId: transfer.productId,
+      productName: transfer.productName,
+      sku: transfer.sku,
+      quantity: transfer.quantity,
+      status: _mapTransferTrackingStatus(transfer.status),
+      requestedAt: transfer.requestedAt,
+      updatedAt: transfer.updatedAt,
+      primaryBranchName: transfer.fromBranchName,
+      secondaryBranchName: transfer.toBranchName,
+      requesterLabel: transfer.requestedByName.isNotEmpty
+          ? transfer.requestedByName
+          : transfer.requestedBy,
+      customerLabel: '',
+      reasonLabel: transfer.reason,
+      reviewComment: transfer.reviewComment,
+      history: List<RequestStatusHistoryEntry>.unmodifiable(
+        _buildTransferHistory(transfer),
+      ),
+    );
+  }
+
+  RequestTrackingStatus _mapReservationTrackingStatus(
+    ReservationStatus status,
+  ) {
+    return switch (status) {
+      ReservationStatus.pending => RequestTrackingStatus.pending,
+      ReservationStatus.active => RequestTrackingStatus.approved,
+      ReservationStatus.rejected => RequestTrackingStatus.rejected,
+      ReservationStatus.completed => RequestTrackingStatus.completed,
+      ReservationStatus.cancelled => RequestTrackingStatus.cancelled,
+      ReservationStatus.expired => RequestTrackingStatus.expired,
+    };
+  }
+
+  RequestTrackingStatus _mapTransferTrackingStatus(TransferStatus status) {
+    return switch (status) {
+      TransferStatus.pending => RequestTrackingStatus.pending,
+      TransferStatus.approved => RequestTrackingStatus.approved,
+      TransferStatus.rejected => RequestTrackingStatus.rejected,
+      TransferStatus.inTransit => RequestTrackingStatus.inTransit,
+      TransferStatus.received => RequestTrackingStatus.received,
+      TransferStatus.cancelled => RequestTrackingStatus.cancelled,
+    };
+  }
+
+  List<RequestStatusHistoryEntry> _buildReservationHistory(
+    Reservation reservation,
+  ) {
+    final history = <RequestStatusHistoryEntry>[
+      RequestStatusHistoryEntry(
+        status: RequestTrackingStatus.pending,
+        title: 'Solicitud creada',
+        detail:
+            '${reservation.quantity} unidad(es) para ${reservation.customerName} en ${reservation.branchName}.',
+        occurredAt: reservation.createdAt,
+      ),
+    ];
+
+    if (reservation.approvedAt != null) {
+      history.add(
+        RequestStatusHistoryEntry(
+          status: RequestTrackingStatus.approved,
+          title: 'Solicitud aprobada',
+          detail: reservation.reviewComment.trim().isEmpty
+              ? 'La reserva fue aprobada para comprometer stock real.'
+              : reservation.reviewComment,
+          occurredAt: reservation.approvedAt!,
+        ),
+      );
+    }
+
+    if (reservation.rejectedAt != null) {
+      history.add(
+        RequestStatusHistoryEntry(
+          status: RequestTrackingStatus.rejected,
+          title: 'Solicitud rechazada',
+          detail: reservation.reviewComment.trim().isEmpty
+              ? 'La solicitud fue rechazada por la sucursal destino.'
+              : reservation.reviewComment,
+          occurredAt: reservation.rejectedAt!,
+        ),
+      );
+    }
+
+    if (reservation.status == ReservationStatus.completed) {
+      history.add(
+        RequestStatusHistoryEntry(
+          status: RequestTrackingStatus.completed,
+          title: 'Reserva completada',
+          detail: 'El compromiso quedo cerrado despues de la entrega.',
+          occurredAt: reservation.updatedAt,
+        ),
+      );
+    } else if (reservation.status == ReservationStatus.cancelled) {
+      history.add(
+        RequestStatusHistoryEntry(
+          status: RequestTrackingStatus.cancelled,
+          title: 'Reserva cancelada',
+          detail: 'La reserva fue cancelada y el stock se libero.',
+          occurredAt: reservation.updatedAt,
+        ),
+      );
+    } else if (reservation.status == ReservationStatus.expired) {
+      history.add(
+        RequestStatusHistoryEntry(
+          status: RequestTrackingStatus.expired,
+          title: 'Reserva vencida',
+          detail:
+              'La solicitud expiro sin concretarse dentro del tiempo limite.',
+          occurredAt: reservation.updatedAt,
+        ),
+      );
+    }
+
+    history.sort((left, right) => left.occurredAt.compareTo(right.occurredAt));
+    return history;
+  }
+
+  List<RequestStatusHistoryEntry> _buildTransferHistory(
+    TransferRequest transfer,
+  ) {
+    final history = <RequestStatusHistoryEntry>[
+      RequestStatusHistoryEntry(
+        status: RequestTrackingStatus.pending,
+        title: 'Solicitud creada',
+        detail:
+            '${transfer.fromBranchName} -> ${transfer.toBranchName} | ${transfer.quantity} unidad(es).',
+        occurredAt: transfer.requestedAt,
+      ),
+    ];
+
+    if (transfer.approvedAt != null) {
+      history.add(
+        RequestStatusHistoryEntry(
+          status: RequestTrackingStatus.approved,
+          title: 'Solicitud aprobada',
+          detail: transfer.reviewComment.trim().isEmpty
+              ? 'El traslado quedo listo para despacho.'
+              : transfer.reviewComment,
+          occurredAt: transfer.approvedAt!,
+        ),
+      );
+    }
+
+    if (transfer.rejectedAt != null) {
+      history.add(
+        RequestStatusHistoryEntry(
+          status: RequestTrackingStatus.rejected,
+          title: 'Solicitud rechazada',
+          detail: transfer.reviewComment.trim().isEmpty
+              ? 'La sucursal origen rechazo la solicitud.'
+              : transfer.reviewComment,
+          occurredAt: transfer.rejectedAt!,
+        ),
+      );
+    }
+
+    if (transfer.shippedAt != null) {
+      history.add(
+        RequestStatusHistoryEntry(
+          status: RequestTrackingStatus.inTransit,
+          title: 'Traslado en transito',
+          detail:
+              'La mercancia fue despachada desde ${transfer.fromBranchName}.',
+          occurredAt: transfer.shippedAt!,
+        ),
+      );
+    }
+
+    if (transfer.receivedAt != null) {
+      history.add(
+        RequestStatusHistoryEntry(
+          status: RequestTrackingStatus.received,
+          title: 'Traslado recibido',
+          detail: 'La sucursal ${transfer.toBranchName} confirmo la recepcion.',
+          occurredAt: transfer.receivedAt!,
+        ),
+      );
+    }
+
+    history.sort((left, right) => left.occurredAt.compareTo(right.occurredAt));
+    return history;
   }
 
   Stream<BranchOperationalStats> watchOperationalStats({
@@ -2685,6 +4130,303 @@ class InventoryWorkflowService {
       );
     }
     return compact;
+  }
+
+  SyncStatusOverview _buildSyncStatusOverview({
+    required List<Branch> branches,
+    required List<SyncLog> syncLogs,
+    required String currentBranchId,
+  }) {
+    final orderedLogs = List<SyncLog>.from(syncLogs)
+      ..sort((left, right) => right.createdAt.compareTo(left.createdAt));
+    final latestLogByBranch = <String, SyncLog>{};
+    for (final log in orderedLogs) {
+      latestLogByBranch.putIfAbsent(log.branchId, () => log);
+    }
+
+    final branchStatuses =
+        branches
+            .map(
+              (branch) => _buildBranchSyncStatus(
+                branch: branch,
+                latestLog: latestLogByBranch[branch.id],
+              ),
+            )
+            .toList(growable: false)
+          ..sort(
+            (left, right) => _compareBranchSyncStatus(
+              left,
+              right,
+              currentBranchId: currentBranchId,
+            ),
+          );
+
+    final apiStatus = _buildSyncApiStatus(
+      syncLogs: orderedLogs,
+      branchStatuses: branchStatuses,
+    );
+
+    return SyncStatusOverview(
+      generatedAt: _clock(),
+      apiStatus: apiStatus,
+      branches: List<SyncBranchStatus>.unmodifiable(branchStatuses),
+      warnings: List<String>.unmodifiable(
+        _buildSyncWarnings(
+          apiStatus: apiStatus,
+          branchStatuses: branchStatuses,
+        ),
+      ),
+    );
+  }
+
+  SyncBranchStatus _buildBranchSyncStatus({
+    required Branch branch,
+    required SyncLog? latestLog,
+  }) {
+    final lastSyncAt = latestLog?.createdAt ?? branch.lastSyncAt;
+    final age = lastSyncAt == null ? null : _clock().difference(lastSyncAt);
+    final normalizedStatus = latestLog?.status.trim().toLowerCase() ?? '';
+
+    if (latestLog != null && _isSyncFailureStatus(normalizedStatus)) {
+      return SyncBranchStatus(
+        branch: branch,
+        latestLog: latestLog,
+        lastSyncAt: lastSyncAt,
+        age: age,
+        severity: SyncStatusSeverity.critical,
+        summary: 'Con fallo',
+        detail: latestLog.message.trim().isEmpty
+            ? 'La ultima sincronizacion reporto un error y requiere revision.'
+            : latestLog.message.trim(),
+      );
+    }
+
+    if (latestLog != null && _isSyncRunningStatus(normalizedStatus)) {
+      return SyncBranchStatus(
+        branch: branch,
+        latestLog: latestLog,
+        lastSyncAt: lastSyncAt,
+        age: age,
+        severity: SyncStatusSeverity.warning,
+        summary: 'En proceso',
+        detail: 'Hay una sincronizacion en curso para esta sucursal.',
+      );
+    }
+
+    if (lastSyncAt == null) {
+      return SyncBranchStatus(
+        branch: branch,
+        latestLog: latestLog,
+        lastSyncAt: null,
+        age: null,
+        severity: SyncStatusSeverity.critical,
+        summary: 'Sin registro',
+        detail: 'No existe una ultima sincronizacion registrada.',
+      );
+    }
+
+    if (age! <= _greenDataThreshold) {
+      return SyncBranchStatus(
+        branch: branch,
+        latestLog: latestLog,
+        lastSyncAt: lastSyncAt,
+        age: age,
+        severity: SyncStatusSeverity.healthy,
+        summary: 'Al dia',
+        detail: 'Los datos de esta sucursal se ven consistentes y recientes.',
+      );
+    }
+
+    if (age <= _yellowDataThreshold) {
+      return SyncBranchStatus(
+        branch: branch,
+        latestLog: latestLog,
+        lastSyncAt: lastSyncAt,
+        age: age,
+        severity: SyncStatusSeverity.warning,
+        summary: 'Con retraso',
+        detail: 'La sucursal sigue operativa, pero conviene validar el dato.',
+      );
+    }
+
+    return SyncBranchStatus(
+      branch: branch,
+      latestLog: latestLog,
+      lastSyncAt: lastSyncAt,
+      age: age,
+      severity: SyncStatusSeverity.critical,
+      summary: age <= _redDataThreshold ? 'Desactualizada' : 'Muy atrasada',
+      detail: age <= _redDataThreshold
+          ? 'La sincronizacion ya supero el umbral recomendado.'
+          : 'La sucursal lleva demasiado tiempo sin sincronizar.',
+    );
+  }
+
+  SyncApiStatus _buildSyncApiStatus({
+    required List<SyncLog> syncLogs,
+    required List<SyncBranchStatus> branchStatuses,
+  }) {
+    final latestLog = syncLogs.isEmpty ? null : syncLogs.first;
+    final averageResponseTime = _averageApiResponseTime(
+      syncLogs.take(12).toList(growable: false),
+    );
+    final criticalBranches = branchStatuses.where((item) => item.isCritical);
+    final warningBranches = branchStatuses.where((item) => item.isWarning);
+
+    if (latestLog == null) {
+      return const SyncApiStatus(
+        severity: SyncStatusSeverity.unknown,
+        summary: 'Sin señal',
+        detail: 'Todavia no hay eventos de sincronizacion para evaluar la API.',
+        latestLog: null,
+        averageResponseTime: Duration.zero,
+        lastUpdatedAt: null,
+      );
+    }
+
+    final latestAge = _clock().difference(latestLog.createdAt);
+    final normalizedStatus = latestLog.status.trim().toLowerCase();
+
+    if (_isSyncFailureStatus(normalizedStatus)) {
+      return SyncApiStatus(
+        severity: SyncStatusSeverity.critical,
+        summary: 'Con fallas',
+        detail: latestLog.message.trim().isEmpty
+            ? 'El ultimo evento de sincronizacion reporto error.'
+            : latestLog.message.trim(),
+        latestLog: latestLog,
+        averageResponseTime: averageResponseTime,
+        lastUpdatedAt: latestLog.createdAt,
+      );
+    }
+
+    if (latestAge > _redDataThreshold) {
+      return SyncApiStatus(
+        severity: SyncStatusSeverity.critical,
+        summary: 'Sin respuesta reciente',
+        detail:
+            'No hay actividad de sincronizacion dentro del umbral esperado.',
+        latestLog: latestLog,
+        averageResponseTime: averageResponseTime,
+        lastUpdatedAt: latestLog.createdAt,
+      );
+    }
+
+    if (criticalBranches.isNotEmpty ||
+        warningBranches.isNotEmpty ||
+        averageResponseTime > const Duration(seconds: 15)) {
+      return SyncApiStatus(
+        severity: SyncStatusSeverity.warning,
+        summary: 'Con alertas',
+        detail: averageResponseTime > const Duration(seconds: 15)
+            ? 'La API responde, pero con latencia superior a la esperada.'
+            : 'Se detectaron sucursales con retraso o incidencias de sincronizacion.',
+        latestLog: latestLog,
+        averageResponseTime: averageResponseTime,
+        lastUpdatedAt: latestLog.createdAt,
+      );
+    }
+
+    return SyncApiStatus(
+      severity: SyncStatusSeverity.healthy,
+      summary: 'Operativa',
+      detail: 'La sincronizacion responde dentro de los parametros esperados.',
+      latestLog: latestLog,
+      averageResponseTime: averageResponseTime,
+      lastUpdatedAt: latestLog.createdAt,
+    );
+  }
+
+  List<String> _buildSyncWarnings({
+    required SyncApiStatus apiStatus,
+    required List<SyncBranchStatus> branchStatuses,
+  }) {
+    final warnings = <String>[];
+    final criticalBranches = branchStatuses
+        .where((item) => item.isCritical)
+        .toList(growable: false);
+    final warningBranches = branchStatuses
+        .where((item) => item.isWarning)
+        .toList(growable: false);
+    final missingSync = branchStatuses
+        .where((item) => item.lastSyncAt == null)
+        .length;
+
+    if (!apiStatus.isHealthy) {
+      warnings.add(apiStatus.detail);
+    }
+    if (criticalBranches.isNotEmpty) {
+      warnings.add(
+        '${criticalBranches.length} sucursal(es) con fallo o desactualizacion critica.',
+      );
+    }
+    if (warningBranches.isNotEmpty) {
+      warnings.add(
+        '${warningBranches.length} sucursal(es) con retraso moderado que conviene revisar.',
+      );
+    }
+    if (missingSync > 0) {
+      warnings.add(
+        '$missingSync sucursal(es) no tienen registro de ultima sincronizacion.',
+      );
+    }
+
+    return warnings;
+  }
+
+  int _compareBranchSyncStatus(
+    SyncBranchStatus left,
+    SyncBranchStatus right, {
+    required String currentBranchId,
+  }) {
+    final severityComparison = _syncSeverityPriority(
+      right.severity,
+    ).compareTo(_syncSeverityPriority(left.severity));
+    if (severityComparison != 0) {
+      return severityComparison;
+    }
+
+    final leftIsCurrent = left.branch.id == currentBranchId;
+    final rightIsCurrent = right.branch.id == currentBranchId;
+    if (leftIsCurrent != rightIsCurrent) {
+      return leftIsCurrent ? -1 : 1;
+    }
+
+    final rightSync = right.lastSyncAt;
+    final leftSync = left.lastSyncAt;
+    if (leftSync != null && rightSync != null) {
+      final recency = rightSync.compareTo(leftSync);
+      if (recency != 0) {
+        return recency;
+      }
+    } else if (leftSync != null || rightSync != null) {
+      return leftSync == null ? 1 : -1;
+    }
+
+    return left.branch.name.compareTo(right.branch.name);
+  }
+
+  int _syncSeverityPriority(SyncStatusSeverity value) {
+    return switch (value) {
+      SyncStatusSeverity.critical => 3,
+      SyncStatusSeverity.warning => 2,
+      SyncStatusSeverity.healthy => 1,
+      SyncStatusSeverity.unknown => 0,
+    };
+  }
+
+  bool _isSyncFailureStatus(String value) {
+    return switch (value) {
+      'failed' || 'error' || 'timeout' => true,
+      _ => false,
+    };
+  }
+
+  bool _isSyncRunningStatus(String value) {
+    return switch (value) {
+      'running' || 'in_progress' || 'pending' => true,
+      _ => false,
+    };
   }
 
   BranchOperationalStats _buildOperationalStats({

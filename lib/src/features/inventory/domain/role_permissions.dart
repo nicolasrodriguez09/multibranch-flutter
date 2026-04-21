@@ -3,6 +3,8 @@ import 'models.dart';
 enum AppPermission {
   viewOwnInventory('Ver inventario de sucursal'),
   viewNotifications('Ver notificaciones personales'),
+  viewRequestTracking('Consultar estado de solicitudes'),
+  viewSyncStatus('Ver estado de sincronizacion'),
   viewStockByBranch('Ver stock por sucursal'),
   viewLowStock('Ver alertas de stock bajo'),
   viewBranchReservations('Ver reservas activas de la sucursal'),
@@ -31,6 +33,8 @@ enum AppPermission {
 enum AppModule {
   inventory('Inventario', AppPermission.viewOwnInventory),
   notifications('Notificaciones', AppPermission.viewNotifications),
+  requestTracking('Seguimiento', AppPermission.viewRequestTracking),
+  syncStatus('Sincronizacion', AppPermission.viewSyncStatus),
   lowStock('Stock bajo', AppPermission.viewLowStock),
   reservations('Reservas', AppPermission.viewBranchReservations),
   transfers('Traslados', AppPermission.viewBranchTransfers),
@@ -59,6 +63,8 @@ extension UserRolePermissions on UserRole {
   bool can(AppPermission permission) => switch (this) {
     UserRole.seller => switch (permission) {
       AppPermission.viewNotifications ||
+      AppPermission.viewRequestTracking ||
+      AppPermission.viewSyncStatus ||
       AppPermission.viewOwnInventory ||
       AppPermission.viewStockByBranch ||
       AppPermission.viewLowStock ||
@@ -70,6 +76,8 @@ extension UserRolePermissions on UserRole {
     },
     UserRole.supervisor => switch (permission) {
       AppPermission.viewNotifications ||
+      AppPermission.viewRequestTracking ||
+      AppPermission.viewSyncStatus ||
       AppPermission.viewOwnInventory ||
       AppPermission.viewStockByBranch ||
       AppPermission.viewLowStock ||

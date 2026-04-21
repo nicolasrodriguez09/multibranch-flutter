@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../core/app_theme.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
+import 'auto_refresh_state_mixin.dart';
 import 'barcode_scanner_page.dart';
 import 'product_detail_page.dart';
 
@@ -22,7 +23,8 @@ class ProductSearchPage extends StatefulWidget {
   State<ProductSearchPage> createState() => _ProductSearchPageState();
 }
 
-class _ProductSearchPageState extends State<ProductSearchPage> {
+class _ProductSearchPageState extends State<ProductSearchPage>
+    with AutoRefreshStateMixin {
   static const _debounceDuration = Duration(milliseconds: 350);
   static const _pageSize = 20;
 
@@ -38,15 +40,30 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
   ProductSearchFilters _filters = const ProductSearchFilters();
   int _visibleCount = 0;
   bool _isLoading = false;
+  bool _isBackgroundRefreshing = false;
   bool _isLoadingFilterOptions = true;
+  bool _isUsingCachedResults = false;
+  bool _isUsingCachedFilterOptions = false;
   Object? _error;
   Object? _filterOptionsError;
   String _activeQuery = '';
   String _lastSavedQuery = '';
   int _requestVersion = 0;
+  List<Product> _recentCachedProducts = const <Product>[];
 
   bool get _hasSearchCriteria =>
       _activeQuery.isNotEmpty || !_filters.isEmpty || _isLoading;
+
+  String get _searchRefreshScope => widget.service.searchResultsRefreshScope(
+    branchId: widget.currentUser.branchId,
+    query: _activeQuery,
+    filters: _filters,
+  );
+
+  @override
+  Duration get autoRefreshInterval => widget.service
+      .refreshPolicyFor(InventoryRefreshDataType.searchResults)
+      .autoRefreshInterval;
 
   @override
   void initState() {
@@ -59,7 +76,9 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
     );
     _queryController.addListener(_onQueryChanged);
     _scrollController.addListener(_onScroll);
+    _loadRecentCachedProducts();
     unawaited(_loadFilterOptions());
+    configureAutoRefresh();
   }
 
   @override
@@ -88,7 +107,7 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
     }
   }
 
-  Future<void> _loadFilterOptions() async {
+  Future<void> _loadFilterOptions({bool forceRefresh = false}) async {
     if (mounted) {
       setState(() {
         _isLoadingFilterOptions = true;
@@ -99,6 +118,7 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
     try {
       final options = await widget.service.fetchSearchFilterOptions(
         actorUser: widget.currentUser,
+        forceRefresh: forceRefresh,
       );
       if (!mounted) {
         return;
@@ -106,6 +126,7 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
       setState(() {
         _filterOptions = options;
         _isLoadingFilterOptions = false;
+        _isUsingCachedFilterOptions = options.isFromCache;
         _filterOptionsError = null;
       });
     } catch (error) {
@@ -127,7 +148,11 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
     return _filterOptions != null;
   }
 
-  Future<void> _runSearch({String? forcedQuery}) async {
+  Future<void> _runSearch({
+    String? forcedQuery,
+    bool preserveResults = false,
+    bool forceRefresh = false,
+  }) async {
     final query = (forcedQuery ?? _queryController.text).trim();
     final requestVersion = ++_requestVersion;
 
@@ -140,6 +165,8 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
         _allResults = const <ProductSearchResult>[];
         _visibleCount = 0;
         _isLoading = false;
+        _isBackgroundRefreshing = false;
+        _isUsingCachedResults = false;
         _error = null;
       });
       return;
@@ -147,10 +174,13 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
 
     setState(() {
       _activeQuery = query;
-      _isLoading = true;
+      _isLoading = !preserveResults;
+      _isBackgroundRefreshing = preserveResults;
       _error = null;
-      _allResults = const <ProductSearchResult>[];
-      _visibleCount = 0;
+      if (!preserveResults) {
+        _allResults = const <ProductSearchResult>[];
+        _visibleCount = 0;
+      }
     });
 
     try {
@@ -159,6 +189,7 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
         branchId: widget.currentUser.branchId,
         query: query,
         filters: _filters,
+        forceRefresh: forceRefresh,
       );
 
       if (!mounted || requestVersion != _requestVersion) {
@@ -166,11 +197,16 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
       }
 
       setState(() {
-        _allResults = results;
-        _visibleCount = results.length > _pageSize ? _pageSize : results.length;
+        _allResults = results.results;
+        _visibleCount = results.results.length > _pageSize
+            ? _pageSize
+            : results.results.length;
         _isLoading = false;
+        _isBackgroundRefreshing = false;
+        _isUsingCachedResults = results.isFromCache;
         _error = null;
       });
+      _loadRecentCachedProducts();
 
       final normalizedQuery = query.toLowerCase();
       if (query.isNotEmpty && _lastSavedQuery != normalizedQuery) {
@@ -190,9 +226,58 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
         _allResults = const <ProductSearchResult>[];
         _visibleCount = 0;
         _isLoading = false;
+        _isBackgroundRefreshing = false;
+        _isUsingCachedResults = false;
         _error = error;
       });
     }
+  }
+
+  void _loadRecentCachedProducts() {
+    final recentProducts = widget.service.fetchRecentCachedProducts(
+      actorUser: widget.currentUser,
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _recentCachedProducts = recentProducts;
+    });
+  }
+
+  @override
+  Future<void> onAutoRefresh(
+    AutoRefreshReason reason, {
+    required bool force,
+  }) async {
+    if (_activeQuery.isNotEmpty || !_filters.isEmpty) {
+      if (!force &&
+          !widget.service.shouldRefreshData(
+            type: InventoryRefreshDataType.searchResults,
+            scope: _searchRefreshScope,
+          )) {
+        return;
+      }
+      await _runSearch(
+        forcedQuery: _queryController.text,
+        preserveResults: _allResults.isNotEmpty,
+        forceRefresh: force,
+      );
+      return;
+    }
+
+    if (!force &&
+        !widget.service.shouldRefreshData(
+          type: InventoryRefreshDataType.searchFilters,
+          scope: widget.service.searchFiltersRefreshScope(
+            actorUser: widget.currentUser,
+          ),
+        )) {
+      return;
+    }
+
+    await _loadFilterOptions(forceRefresh: force);
+    _loadRecentCachedProducts();
   }
 
   Future<void> _openFilters() async {
@@ -377,13 +462,30 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Buscar productos')),
+      appBar: AppBar(
+        title: const Text('Buscar productos'),
+        actions: [
+          IconButton(
+            tooltip: 'Actualizar datos',
+            onPressed: (_isLoading || _isBackgroundRefreshing)
+                ? null
+                : () => unawaited(triggerPullToRefresh()),
+            icon: Icon(
+              (_isLoading || _isBackgroundRefreshing)
+                  ? Icons.hourglass_top_rounded
+                  : Icons.refresh_rounded,
+            ),
+          ),
+        ],
+      ),
       body: Container(
         color: const Color(0xFF08172D),
         child: SafeArea(
           top: false,
           child: Column(
             children: [
+              if (_isBackgroundRefreshing)
+                const LinearProgressIndicator(minHeight: 3),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
                 child: Row(
@@ -420,8 +522,21 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
                   visibleCount: _visibleCount,
                   totalCount: _allResults.length,
                   filters: _filters,
+                  isUsingCache: _isUsingCachedResults,
                 ),
               ),
+              if (_isUsingCachedResults ||
+                  (!_hasSearchCriteria && _isUsingCachedFilterOptions)) ...[
+                const SizedBox(height: 10),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: _CacheNoticeCard(
+                    message: _isUsingCachedResults
+                        ? 'Estas viendo resultados desde cache local. La app seguira intentando refrescar la informacion en segundo plano.'
+                        : 'Las opciones de catalogo se cargaron desde cache local para que puedas seguir filtrando y consultando.',
+                  ),
+                ),
+              ],
               if (!_filters.isEmpty) ...[
                 const SizedBox(height: 10),
                 Padding(
@@ -456,24 +571,47 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
             builder: (context, searchSnapshot) {
               final searches =
                   searchSnapshot.data ?? const <SearchHistoryEntry>[];
-              return ListView(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
-                children: [
-                  const _SearchHintCard(),
-                  const SizedBox(height: 16),
-                  _SavedFiltersCard(
-                    items: savedFilters,
-                    onTap: _applySavedFilter,
-                    isLoadingOptions: _isLoadingFilterOptions,
-                  ),
-                  const SizedBox(height: 16),
-                  _RecentSearchesCard(
-                    items: searches,
-                    onTap: (query) {
-                      unawaited(_applyRecentSearch(query));
-                    },
-                  ),
-                ],
+              return RefreshIndicator(
+                onRefresh: triggerPullToRefresh,
+                color: AppPalette.amber,
+                backgroundColor: AppPalette.storm,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
+                  children: [
+                    const _SearchHintCard(),
+                    const SizedBox(height: 16),
+                    _SavedFiltersCard(
+                      items: savedFilters,
+                      onTap: _applySavedFilter,
+                      isLoadingOptions: _isLoadingFilterOptions,
+                    ),
+                    if (_recentCachedProducts.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      _RecentCachedProductsCard(
+                        items: _recentCachedProducts,
+                        onTap: (product) {
+                          unawaited(
+                            _openProductDetail(
+                              ProductSearchResult(
+                                product: product,
+                                inventory: null,
+                                relevanceScore: 1,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    _RecentSearchesCard(
+                      items: searches,
+                      onTap: (query) {
+                        unawaited(_applyRecentSearch(query));
+                      },
+                    ),
+                  ],
+                ),
               );
             },
           );
@@ -486,58 +624,87 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
     }
 
     if (_error != null) {
-      return _SearchFeedbackCard(
-        title: 'No se pudo completar la busqueda',
-        message: 'Intenta nuevamente. $_error',
-        actionLabel: 'Reintentar',
-        onPressed: () => _runSearch(),
+      return RefreshIndicator(
+        onRefresh: triggerPullToRefresh,
+        color: AppPalette.amber,
+        backgroundColor: AppPalette.storm,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
+          children: [
+            _SearchFeedbackCard(
+              title: 'No se pudo completar la busqueda',
+              message: 'Intenta nuevamente. $_error',
+              actionLabel: 'Reintentar',
+              onPressed: () => _runSearch(forceRefresh: true),
+            ),
+          ],
+        ),
       );
     }
 
     if (_allResults.isEmpty) {
-      return _SearchFeedbackCard(
-        title: 'Sin resultados',
-        message: _activeQuery.isEmpty
-            ? 'No hay productos para los filtros aplicados en la sucursal seleccionada.'
-            : 'No se encontraron productos para "$_activeQuery" con los filtros actuales.',
+      return RefreshIndicator(
+        onRefresh: triggerPullToRefresh,
+        color: AppPalette.amber,
+        backgroundColor: AppPalette.storm,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
+          children: [
+            _SearchFeedbackCard(
+              title: 'Sin resultados',
+              message: _activeQuery.isEmpty
+                  ? 'No hay productos para los filtros aplicados en la sucursal seleccionada.'
+                  : 'No se encontraron productos para "$_activeQuery" con los filtros actuales.',
+            ),
+          ],
+        ),
       );
     }
 
     final visibleResults = _visibleResults;
-    return ListView.separated(
-      controller: _scrollController,
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
-      cacheExtent: 900,
-      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      itemCount: visibleResults.length + 1,
-      separatorBuilder: (_, _) => const SizedBox(height: 12),
-      itemBuilder: (context, index) {
-        if (index == visibleResults.length) {
-          if (_visibleCount >= _allResults.length) {
-            return const SizedBox(height: 8);
-          }
+    return RefreshIndicator(
+      onRefresh: triggerPullToRefresh,
+      color: AppPalette.amber,
+      backgroundColor: AppPalette.storm,
+      child: ListView.separated(
+        controller: _scrollController,
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
+        cacheExtent: 900,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        itemCount: visibleResults.length + 1,
+        separatorBuilder: (_, _) => const SizedBox(height: 12),
+        itemBuilder: (context, index) {
+          if (index == visibleResults.length) {
+            if (_visibleCount >= _allResults.length) {
+              return const SizedBox(height: 8);
+            }
 
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: OutlinedButton(
-                onPressed: _loadMore,
-                child: Text(
-                  'Cargar mas (${_allResults.length - _visibleCount} restantes)',
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: OutlinedButton(
+                  onPressed: _loadMore,
+                  child: Text(
+                    'Cargar mas (${_allResults.length - _visibleCount} restantes)',
+                  ),
                 ),
               ),
-            ),
-          );
-        }
+            );
+          }
 
-        return _SearchResultCard(
-          result: visibleResults[index],
-          categoryName: _categoryName(visibleResults[index].product.categoryId),
-          onTap: () {
-            unawaited(_openProductDetail(visibleResults[index]));
-          },
-        );
-      },
+          return _SearchResultCard(
+            result: visibleResults[index],
+            categoryName: _categoryName(
+              visibleResults[index].product.categoryId,
+            ),
+            onTap: () {
+              unawaited(_openProductDetail(visibleResults[index]));
+            },
+          );
+        },
+      ),
     );
   }
 }
@@ -666,12 +833,14 @@ class _SearchSummary extends StatelessWidget {
     required this.visibleCount,
     required this.totalCount,
     required this.filters,
+    required this.isUsingCache,
   });
 
   final String activeQuery;
   final int visibleCount;
   final int totalCount;
   final ProductSearchFilters filters;
+  final bool isUsingCache;
 
   @override
   Widget build(BuildContext context) {
@@ -683,11 +852,71 @@ class _SearchSummary extends StatelessWidget {
 
     return Align(
       alignment: Alignment.centerLeft,
-      child: Text(
-        message,
-        style: Theme.of(
-          context,
-        ).textTheme.bodySmall?.copyWith(color: Colors.white70),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              message,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: Colors.white70),
+            ),
+          ),
+          if (isUsingCache)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0x1AFFB84D),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: const Color(0x33FFB84D)),
+              ),
+              child: Text(
+                'CACHE LOCAL',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: AppPalette.amber,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.8,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CacheNoticeCard extends StatelessWidget {
+  const _CacheNoticeCard({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF102540),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0x33FFB84D)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(top: 2),
+            child: Icon(Icons.offline_bolt_rounded, color: AppPalette.amber),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: Colors.white),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -973,6 +1202,68 @@ class _RecentSearchesCard extends StatelessWidget {
                   )
                   .toList(growable: false),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecentCachedProductsCard extends StatelessWidget {
+  const _RecentCachedProductsCard({required this.items, required this.onTap});
+
+  final List<Product> items;
+  final ValueChanged<Product> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0xFF102540),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0x26FFFFFF)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Productos recientes en cache',
+            style: Theme.of(
+              context,
+            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Abre rapidamente los productos que ya consultaste aunque la conexion falle.',
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: items
+                .map(
+                  (product) => ActionChip(
+                    onPressed: () => onTap(product),
+                    avatar: const Icon(
+                      Icons.inventory_2_rounded,
+                      size: 18,
+                      color: Colors.white70,
+                    ),
+                    label: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 220),
+                      child: Text(
+                        product.name,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                )
+                .toList(growable: false),
+          ),
         ],
       ),
     );

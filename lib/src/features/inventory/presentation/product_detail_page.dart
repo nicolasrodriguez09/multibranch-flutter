@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../core/app_theme.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
+import 'auto_refresh_state_mixin.dart';
 import 'branch_directory_page.dart';
 
 class ProductDetailPage extends StatefulWidget {
@@ -23,16 +26,31 @@ class ProductDetailPage extends StatefulWidget {
   State<ProductDetailPage> createState() => _ProductDetailPageState();
 }
 
-class _ProductDetailPageState extends State<ProductDetailPage> {
-  late Future<ProductDetailData> _detailFuture;
+class _ProductDetailPageState extends State<ProductDetailPage>
+    with AutoRefreshStateMixin {
+  ProductDetailData? _detail;
+  Object? _loadError;
+  bool _isInitialLoading = true;
+  bool _isRefreshing = false;
 
   String get _effectiveBranchId =>
       widget.branchId ?? widget.currentUser.branchId;
 
+  String get _refreshScope => widget.service.detailRefreshScope(
+    branchId: _effectiveBranchId,
+    productId: widget.productId,
+  );
+
+  @override
+  Duration get autoRefreshInterval => widget.service
+      .refreshPolicyFor(InventoryRefreshDataType.productDetail)
+      .autoRefreshInterval;
+
   @override
   void initState() {
     super.initState();
-    _detailFuture = _loadDetail();
+    unawaited(_refreshDetail(forceRefresh: false));
+    configureAutoRefresh();
   }
 
   Future<ProductDetailData> _loadDetail({bool forceRefresh = false}) {
@@ -44,10 +62,70 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
     );
   }
 
-  void _retry() {
+  Future<void> _refreshDetail({
+    required bool forceRefresh,
+    bool showFeedback = false,
+  }) async {
+    if (_isRefreshing) {
+      return;
+    }
+    if (!forceRefresh &&
+        _detail != null &&
+        !widget.service.shouldRefreshData(
+          type: InventoryRefreshDataType.productDetail,
+          scope: _refreshScope,
+        )) {
+      return;
+    }
+
     setState(() {
-      _detailFuture = _loadDetail(forceRefresh: true);
+      if (_detail == null) {
+        _isInitialLoading = true;
+      } else {
+        _isRefreshing = true;
+      }
+      _loadError = null;
     });
+
+    try {
+      final detail = await _loadDetail(forceRefresh: forceRefresh);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _detail = detail;
+        _loadError = null;
+        _isInitialLoading = false;
+        _isRefreshing = false;
+      });
+      if (showFeedback) {
+        _showStatusMessage('Detalle actualizado correctamente.');
+      }
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        if (_detail == null) {
+          _loadError = error;
+        }
+        _isInitialLoading = false;
+        _isRefreshing = false;
+      });
+      if (showFeedback) {
+        _showStatusMessage('No se pudo actualizar el detalle: $error');
+      }
+    }
+  }
+
+  void _showStatusMessage(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _retry() {
+    return _refreshDetail(forceRefresh: true, showFeedback: true);
   }
 
   Future<void> _openBranchDirectory() async {
@@ -63,7 +141,40 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
   }
 
   @override
+  Future<void> onAutoRefresh(AutoRefreshReason reason, {required bool force}) {
+    return _refreshDetail(forceRefresh: force, showFeedback: false);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    Widget body;
+    if (_isInitialLoading && _detail == null) {
+      body = const _ProductDetailLoadingState();
+    } else if (_loadError != null && _detail == null) {
+      body = _ProductDetailErrorState(
+        message: 'No se pudo cargar el detalle. $_loadError',
+        onRetry: _retry,
+      );
+    } else {
+      body = Stack(
+        children: [
+          RefreshIndicator(
+            onRefresh: triggerPullToRefresh,
+            color: AppPalette.amber,
+            backgroundColor: AppPalette.storm,
+            child: _ProductDetailContent(detail: _detail!),
+          ),
+          if (_isRefreshing)
+            const Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: LinearProgressIndicator(minHeight: 3),
+            ),
+        ],
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Detalle del producto'),
@@ -75,34 +186,18 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
           ),
           IconButton(
             tooltip: 'Actualizar detalle',
-            onPressed: _retry,
-            icon: const Icon(Icons.refresh_rounded),
+            onPressed: _isRefreshing ? null : _retry,
+            icon: Icon(
+              _isRefreshing
+                  ? Icons.hourglass_top_rounded
+                  : Icons.refresh_rounded,
+            ),
           ),
         ],
       ),
       body: Container(
         color: const Color(0xFF08172D),
-        child: SafeArea(
-          top: false,
-          child: FutureBuilder<ProductDetailData>(
-            future: _detailFuture,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState != ConnectionState.done) {
-                return const _ProductDetailLoadingState();
-              }
-
-              if (snapshot.hasError) {
-                return _ProductDetailErrorState(
-                  message: 'No se pudo cargar el detalle. ${snapshot.error}',
-                  onRetry: _retry,
-                );
-              }
-
-              final detail = snapshot.requireData;
-              return _ProductDetailContent(detail: detail);
-            },
-          ),
-        ),
+        child: SafeArea(top: false, child: body),
       ),
     );
   }

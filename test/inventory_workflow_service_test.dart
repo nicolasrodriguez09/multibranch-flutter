@@ -1,7 +1,9 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:flutter_multibranch_proyect/src/features/inventory/application/inventory_workflow_service.dart';
+import 'package:flutter_multibranch_proyect/src/features/inventory/data/inventory_offline_cache.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/data/sample_seed_data.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/domain/models.dart';
 
@@ -118,6 +120,42 @@ void main() {
   );
 
   test(
+    'sync status overview consolidates api health and branch issues',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final admin = sampleData.users.first;
+
+      await service.system.addSyncLog(
+        SyncLog(
+          id: 'sync_failed_branch_north',
+          branchId: DemoIds.branchNorth,
+          branchName: 'Sucursal Norte',
+          type: 'inventory',
+          status: 'failed',
+          recordsProcessed: 0,
+          startedAt: now.subtract(const Duration(minutes: 7)),
+          finishedAt: now.subtract(const Duration(minutes: 5)),
+          message: 'Timeout con API central.',
+          createdAt: now.subtract(const Duration(minutes: 5)),
+        ),
+      );
+
+      final overview = await service.fetchSyncStatusOverview(actorUser: admin);
+      final northStatus = overview.statusForBranch(DemoIds.branchNorth);
+
+      expect(overview.apiStatus.severity, SyncStatusSeverity.critical);
+      expect(overview.apiStatus.summary, 'Con fallas');
+      expect(northStatus, isNotNull);
+      expect(northStatus!.severity, SyncStatusSeverity.critical);
+      expect(northStatus.summary, 'Con fallo');
+      expect(
+        overview.warnings.any((item) => item.contains('sucursal(es)')),
+        isTrue,
+      );
+    },
+  );
+
+  test(
     'product search returns ranked results and persists recent searches',
     () async {
       await service.seedMasterData(actorUser: sampleData.users.first);
@@ -136,17 +174,18 @@ void main() {
         query: 'samsung a55',
       );
 
-      expect(logitechResults, isNotEmpty);
-      expect(logitechResults.first.product.id, DemoIds.mouseProduct);
+      expect(logitechResults.results, isNotEmpty);
+      expect(logitechResults.isFromCache, isFalse);
+      expect(logitechResults.results.first.product.id, DemoIds.mouseProduct);
       expect(
-        logitechResults.any(
+        logitechResults.results.any(
           (item) => item.product.id == DemoIds.headsetProduct,
         ),
         isTrue,
       );
-      expect(samsungResults, isNotEmpty);
-      expect(samsungResults.first.product.id, DemoIds.phoneProduct);
-      expect(samsungResults.first.isOutOfStock, isTrue);
+      expect(samsungResults.results, isNotEmpty);
+      expect(samsungResults.results.first.product.id, DemoIds.phoneProduct);
+      expect(samsungResults.results.first.isOutOfStock, isTrue);
 
       await service.saveRecentSearch(actorUser: seller, query: 'Logitech');
       await service.saveRecentSearch(actorUser: seller, query: 'logitech');
@@ -194,9 +233,9 @@ void main() {
       expect(options.brands, containsAll(<String>['Logitech', 'Samsung']));
       expect(options.branches, hasLength(1));
       expect(options.branches.first.id, DemoIds.branchCenter);
-      expect(results, hasLength(1));
-      expect(results.first.product.id, DemoIds.monitorProduct);
-      expect(results.first.inventory!.availableStock, 3);
+      expect(results.results, hasLength(1));
+      expect(results.results.first.product.id, DemoIds.monitorProduct);
+      expect(results.results.first.inventory!.availableStock, 3);
 
       await service.saveSearchFilter(
         actorUser: seller,
@@ -218,6 +257,131 @@ void main() {
       expect(savedFilters.first.label, 'Samsung con stock bajo');
       expect(savedFilters.first.isFavorite, isTrue);
       expect(savedFilters.first.usageCount, 2);
+    },
+  );
+
+  test('refresh policies respect ttl windows by data type', () {
+    final scope = service.detailRefreshScope(
+      branchId: DemoIds.branchCenter,
+      productId: DemoIds.monitorProduct,
+    );
+
+    expect(
+      service.shouldRefreshData(
+        type: InventoryRefreshDataType.productDetail,
+        scope: scope,
+      ),
+      isTrue,
+    );
+
+    service.markRefreshCompleted(
+      type: InventoryRefreshDataType.productDetail,
+      scope: scope,
+    );
+
+    expect(
+      service.shouldRefreshData(
+        type: InventoryRefreshDataType.productDetail,
+        scope: scope,
+      ),
+      isFalse,
+    );
+
+    now = now.add(
+      service.refreshPolicyFor(InventoryRefreshDataType.productDetail).ttl,
+    );
+
+    expect(
+      service.shouldRefreshData(
+        type: InventoryRefreshDataType.productDetail,
+        scope: scope,
+      ),
+      isTrue,
+    );
+  });
+
+  test(
+    'offline cache keeps search, detail, filters and directory available when firestore fails',
+    () async {
+      final offlineCache = MemoryInventoryOfflineCache();
+      final onlineService = InventoryWorkflowService(
+        firestore: firestore,
+        clock: () => now,
+        offlineCache: offlineCache,
+      );
+      await onlineService.seedMasterData(actorUser: sampleData.users.first);
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      await onlineService.searchProducts(
+        actorUser: seller,
+        branchId: DemoIds.branchCenter,
+        query: 'monitor',
+      );
+      await onlineService.fetchProductDetail(
+        actorUser: seller,
+        branchId: DemoIds.branchCenter,
+        productId: DemoIds.monitorProduct,
+      );
+      await onlineService.fetchBranchDirectory(
+        actorUser: seller,
+        productId: DemoIds.monitorProduct,
+      );
+      await onlineService.fetchSearchFilterOptions(actorUser: seller);
+
+      final offlineService = InventoryWorkflowService(
+        firestore: ThrowingFirebaseFirestore(),
+        clock: () => now,
+        offlineCache: offlineCache,
+      );
+
+      final offlineSearch = await offlineService.searchProducts(
+        actorUser: seller,
+        branchId: DemoIds.branchCenter,
+        query: 'samsung',
+      );
+      final offlineDetail = await offlineService.fetchProductDetail(
+        actorUser: seller,
+        branchId: DemoIds.branchCenter,
+        productId: DemoIds.monitorProduct,
+      );
+      final offlineDirectory = await offlineService.fetchBranchDirectory(
+        actorUser: seller,
+        productId: DemoIds.monitorProduct,
+      );
+      final offlineFilters = await offlineService.fetchSearchFilterOptions(
+        actorUser: seller,
+      );
+      final offlineBarcode = await offlineService.findProductByBarcode(
+        actorUser: seller,
+        branchId: DemoIds.branchCenter,
+        barcode: sampleData.products
+            .firstWhere((product) => product.id == DemoIds.monitorProduct)
+            .barcode,
+      );
+
+      expect(offlineSearch.isFromCache, isTrue);
+      expect(
+        offlineSearch.results.any(
+          (result) => result.product.id == DemoIds.monitorProduct,
+        ),
+        isTrue,
+      );
+      expect(offlineDetail.isFromCache, isTrue);
+      expect(offlineDetail.product.id, DemoIds.monitorProduct);
+      expect(offlineDirectory.isFromCache, isTrue);
+      expect(offlineDirectory.selectedProduct?.id, DemoIds.monitorProduct);
+      expect(offlineFilters.isFromCache, isTrue);
+      expect(offlineFilters.brands, contains('Samsung'));
+      expect(offlineBarcode, isNotNull);
+      expect(offlineBarcode!.product.id, DemoIds.monitorProduct);
+      expect(
+        offlineService
+            .fetchRecentCachedProducts(actorUser: seller)
+            .any((product) => product.id == DemoIds.monitorProduct),
+        isTrue,
+      );
     },
   );
 
@@ -432,9 +596,6 @@ void main() {
       await service.seedMasterData(actorUser: sampleData.users.first);
       final admin = sampleData.users.firstWhere(
         (user) => user.id == DemoIds.adminUser,
-      );
-      final supervisor = sampleData.users.firstWhere(
-        (user) => user.id == DemoIds.secondBranchSeller,
       );
       final seller = sampleData.users.firstWhere(
         (user) => user.id == DemoIds.branchSeller,
@@ -946,6 +1107,108 @@ void main() {
   );
 
   test(
+    'request tracking groups reservations and transfers with status history',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final supervisor = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.secondBranchSeller,
+      );
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      final reservation = await service.createReservation(
+        actorUser: seller,
+        branchId: DemoIds.branchNorth,
+        productId: DemoIds.phoneProduct,
+        customerName: 'Cliente Seguimiento',
+        customerPhone: '3001112233',
+        quantity: 1,
+        expiresIn: const Duration(hours: 24),
+      );
+      await service.approveReservation(
+        actorUser: supervisor,
+        reservationId: reservation.id,
+        reviewComment: 'Validada para retiro controlado.',
+      );
+
+      final transfer = await service.requestTransfer(
+        actorUser: seller,
+        productId: DemoIds.laptopProduct,
+        fromBranchId: DemoIds.branchNorth,
+        toBranchId: DemoIds.branchCenter,
+        quantity: 1,
+        reason: 'Seguimiento comercial',
+      );
+      await service.approveTransfer(
+        actorUser: supervisor,
+        transferId: transfer.id,
+      );
+      await service.markTransferInTransit(
+        actorUser: supervisor,
+        transferId: transfer.id,
+      );
+
+      final tracking = await service
+          .watchRequestTracking(actorUser: seller)
+          .first;
+      final reservationItem = tracking.firstWhere(
+        (item) => item.id == reservation.id,
+      );
+      final transferItem = tracking.firstWhere(
+        (item) => item.id == transfer.id,
+      );
+
+      expect(reservationItem.status, RequestTrackingStatus.approved);
+      expect(
+        reservationItem.history.map((entry) => entry.title).toList(),
+        containsAll(<String>['Solicitud creada', 'Solicitud aprobada']),
+      );
+      expect(transferItem.status, RequestTrackingStatus.inTransit);
+      expect(
+        transferItem.history.map((entry) => entry.title).toList(),
+        containsAll(<String>[
+          'Solicitud creada',
+          'Solicitud aprobada',
+          'Traslado en transito',
+        ]),
+      );
+    },
+  );
+
+  test(
+    'supervisor tracking includes reservations requested from own branch',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final supervisor = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.secondBranchSeller,
+      );
+
+      final reservation = await service.createReservation(
+        actorUser: supervisor,
+        branchId: DemoIds.branchCenter,
+        productId: DemoIds.laptopProduct,
+        customerName: 'Cliente Supervisor',
+        customerPhone: '3009990000',
+        quantity: 1,
+        expiresIn: const Duration(hours: 24),
+      );
+
+      final tracking = await service
+          .watchRequestTracking(actorUser: supervisor)
+          .first;
+      final reservationItem = tracking.cast<RequestTrackingItem?>().firstWhere(
+        (item) => item?.id == reservation.id,
+        orElse: () => null,
+      );
+
+      expect(reservationItem, isNotNull);
+      expect(reservationItem!.secondaryBranchName, contains('Sucursal Norte'));
+      expect(reservationItem.status, RequestTrackingStatus.pending);
+    },
+  );
+
+  test(
     'seller cannot initialize the master data or approve transfers',
     () async {
       final seller = sampleData.users.firstWhere(
@@ -1016,4 +1279,11 @@ void main() {
       ),
     );
   });
+}
+
+class ThrowingFirebaseFirestore extends FakeFirebaseFirestore {
+  @override
+  CollectionReference<Map<String, dynamic>> collection(String path) {
+    throw StateError('Firestore no disponible para pruebas offline.');
+  }
 }

@@ -14,6 +14,8 @@ void main() {
     'permission matrix matches seller, supervisor and admin capabilities',
     () {
       expect(UserRole.seller.can(AppPermission.viewNotifications), isTrue);
+      expect(UserRole.seller.can(AppPermission.viewRequestTracking), isTrue);
+      expect(UserRole.seller.can(AppPermission.viewSyncStatus), isTrue);
       expect(UserRole.seller.can(AppPermission.viewOwnInventory), isTrue);
       expect(UserRole.seller.can(AppPermission.approveTransfer), isFalse);
       expect(UserRole.seller.can(AppPermission.approveReservation), isFalse);
@@ -25,12 +27,19 @@ void main() {
       expect(UserRole.supervisor.can(AppPermission.approveReservation), isTrue);
       expect(UserRole.supervisor.can(AppPermission.viewNotifications), isTrue);
       expect(
+        UserRole.supervisor.can(AppPermission.viewRequestTracking),
+        isTrue,
+      );
+      expect(UserRole.supervisor.can(AppPermission.viewSyncStatus), isTrue);
+      expect(
         UserRole.supervisor.can(AppPermission.viewOperationalMetrics),
         isTrue,
       );
       expect(UserRole.supervisor.can(AppPermission.manageEmployees), isFalse);
       expect(UserRole.admin.can(AppPermission.manageEmployees), isTrue);
       expect(UserRole.admin.can(AppPermission.viewNotifications), isTrue);
+      expect(UserRole.admin.can(AppPermission.viewRequestTracking), isTrue);
+      expect(UserRole.admin.can(AppPermission.viewSyncStatus), isTrue);
       expect(UserRole.admin.can(AppPermission.seedMasterData), isTrue);
     },
   );

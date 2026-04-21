@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../core/firestore_collections.dart';
@@ -290,6 +292,70 @@ class ReservationRepository {
         );
   }
 
+  Stream<List<Reservation>> watchReservationsForBranchTracking(
+    String branchId,
+  ) {
+    final controller = StreamController<List<Reservation>>();
+    var ownedReservations = const <Reservation>[];
+    var requestedReservations = const <Reservation>[];
+    var ownedReady = false;
+    var requestedReady = false;
+    var subscriptions = <StreamSubscription<Object?>>[];
+
+    void emit() {
+      if (controller.isClosed || !ownedReady || !requestedReady) {
+        return;
+      }
+
+      final merged =
+          <String, Reservation>{
+              for (final item in ownedReservations) item.id: item,
+              for (final item in requestedReservations) item.id: item,
+            }.values.toList(growable: false)
+            ..sort((left, right) => right.createdAt.compareTo(left.createdAt));
+
+      controller.add(List<Reservation>.unmodifiable(merged));
+    }
+
+    controller.onListen = () {
+      if (subscriptions.isNotEmpty) {
+        return;
+      }
+
+      subscriptions = <StreamSubscription<Object?>>[
+        _collection.where('branchId', isEqualTo: branchId).snapshots().listen((
+          snapshot,
+        ) {
+          ownedReservations = snapshot.docs
+              .map((doc) => Reservation.fromFirestore(doc.id, doc.data()))
+              .toList(growable: false);
+          ownedReady = true;
+          emit();
+        }, onError: controller.addError),
+        _collection
+            .where('requestingBranchId', isEqualTo: branchId)
+            .snapshots()
+            .listen((snapshot) {
+              requestedReservations = snapshot.docs
+                  .map((doc) => Reservation.fromFirestore(doc.id, doc.data()))
+                  .toList(growable: false);
+              requestedReady = true;
+              emit();
+            }, onError: controller.addError),
+      ];
+    };
+
+    controller.onCancel = () async {
+      final currentSubscriptions = subscriptions;
+      subscriptions = <StreamSubscription<Object?>>[];
+      for (final subscription in currentSubscriptions) {
+        await subscription.cancel();
+      }
+    };
+
+    return controller.stream;
+  }
+
   Stream<List<Reservation>> watchActiveReservations(String branchId) {
     return _collection
         .where('branchId', isEqualTo: branchId)
@@ -357,6 +423,72 @@ class TransferRepository {
               .map((doc) => TransferRequest.fromFirestore(doc.id, doc.data()))
               .toList(),
         );
+  }
+
+  Stream<List<TransferRequest>> watchTransfersForBranch(String branchId) {
+    final controller = StreamController<List<TransferRequest>>();
+    var outgoing = const <TransferRequest>[];
+    var incoming = const <TransferRequest>[];
+    var outgoingReady = false;
+    var incomingReady = false;
+    var subscriptions = <StreamSubscription<Object?>>[];
+
+    void emit() {
+      if (controller.isClosed || !outgoingReady || !incomingReady) {
+        return;
+      }
+
+      final merged =
+          <String, TransferRequest>{
+            for (final item in outgoing) item.id: item,
+            for (final item in incoming) item.id: item,
+          }.values.toList(growable: false)..sort(
+            (left, right) => right.requestedAt.compareTo(left.requestedAt),
+          );
+
+      controller.add(List<TransferRequest>.unmodifiable(merged));
+    }
+
+    controller.onListen = () {
+      if (subscriptions.isNotEmpty) {
+        return;
+      }
+
+      subscriptions = <StreamSubscription<Object?>>[
+        _collection
+            .where('fromBranchId', isEqualTo: branchId)
+            .snapshots()
+            .listen((snapshot) {
+              outgoing = snapshot.docs
+                  .map(
+                    (doc) => TransferRequest.fromFirestore(doc.id, doc.data()),
+                  )
+                  .toList(growable: false);
+              outgoingReady = true;
+              emit();
+            }, onError: controller.addError),
+        _collection.where('toBranchId', isEqualTo: branchId).snapshots().listen(
+          (snapshot) {
+            incoming = snapshot.docs
+                .map((doc) => TransferRequest.fromFirestore(doc.id, doc.data()))
+                .toList(growable: false);
+            incomingReady = true;
+            emit();
+          },
+          onError: controller.addError,
+        ),
+      ];
+    };
+
+    controller.onCancel = () async {
+      final currentSubscriptions = subscriptions;
+      subscriptions = <StreamSubscription<Object?>>[];
+      for (final subscription in currentSubscriptions) {
+        await subscription.cancel();
+      }
+    };
+
+    return controller.stream;
   }
 
   Stream<List<TransferRequest>> watchPendingTransfers() {
@@ -474,6 +606,17 @@ class SystemRepository {
               .map((doc) => SyncLog.fromFirestore(doc.id, doc.data()))
               .toList(),
         );
+  }
+
+  Future<List<SyncLog>> fetchRecentSyncLogs({int limit = 24}) async {
+    final snapshot = await _syncLogs
+        .orderBy('createdAt', descending: true)
+        .limit(limit)
+        .get();
+
+    return snapshot.docs
+        .map((doc) => SyncLog.fromFirestore(doc.id, doc.data()))
+        .toList(growable: false);
   }
 
   Stream<List<SyncLog>> watchBranchSyncLogs(String branchId, {int limit = 6}) {
