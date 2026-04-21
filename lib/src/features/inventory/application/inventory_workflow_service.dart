@@ -2787,7 +2787,7 @@ class InventoryWorkflowService {
         : await inventories.fetchBranchInventory(actorUser.branchId);
     final products = await catalog.fetchProducts();
     final categories = await catalog.fetchCategories();
-    final readStates = await system.fetchStockAlertReadStates(actorUser.id);
+    final readStates = await _fetchStockAlertReadStatesSafe(actorUser.id);
 
     return _buildStockAlertFeedData(
       inventoryItems: inventoryItems,
@@ -2854,11 +2854,20 @@ class InventoryWorkflowService {
           categoriesReady = true;
           emit();
         }, onError: controller.addError),
-        system.watchStockAlertReadStates(actorUser.id).listen((items) {
-          readStatesState = items;
-          readStatesReady = true;
-          emit();
-        }, onError: controller.addError),
+        system
+            .watchStockAlertReadStates(actorUser.id)
+            .listen(
+              (items) {
+                readStatesState = items;
+                readStatesReady = true;
+                emit();
+              },
+              onError: (_) {
+                readStatesState = const <StockAlertReadState>[];
+                readStatesReady = true;
+                emit();
+              },
+            ),
       ];
     };
 
@@ -2871,6 +2880,16 @@ class InventoryWorkflowService {
     };
 
     return controller.stream;
+  }
+
+  Future<List<StockAlertReadState>> _fetchStockAlertReadStatesSafe(
+    String userId,
+  ) async {
+    try {
+      return await system.fetchStockAlertReadStates(userId);
+    } catch (_) {
+      return const <StockAlertReadState>[];
+    }
   }
 
   Future<void> markStockAlertAsRead({
