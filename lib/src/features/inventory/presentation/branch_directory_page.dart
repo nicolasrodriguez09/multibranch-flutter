@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../core/app_theme.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
+import 'auto_refresh_state_mixin.dart';
 import 'branch_location_resolver.dart';
 
 enum _BranchAvailabilityFilter { all, withStock, withoutStock }
@@ -36,10 +37,12 @@ class BranchDirectoryPage extends StatefulWidget {
   State<BranchDirectoryPage> createState() => _BranchDirectoryPageState();
 }
 
-class _BranchDirectoryPageState extends State<BranchDirectoryPage> {
-  late Future<BranchDirectoryData> _directoryFuture;
+class _BranchDirectoryPageState extends State<BranchDirectoryPage>
+    with AutoRefreshStateMixin {
   late final TextEditingController _searchController;
   late final BranchLocationResolver _locationResolver;
+  BranchDirectoryData? _directoryData;
+  Object? _loadError;
   String? _selectedCity;
   _BranchAvailabilityFilter _availabilityFilter = _BranchAvailabilityFilter.all;
   late _BranchSortMode _sortMode;
@@ -47,7 +50,19 @@ class _BranchDirectoryPageState extends State<BranchDirectoryPage> {
   BranchLocationAccessStatus? _locationStatus;
   String _locationMessage =
       'Resolviendo tu ubicacion actual para ordenar las sucursales.';
+  bool _isInitialLoading = true;
+  bool _isRefreshing = false;
   bool _isResolvingLocation = false;
+
+  String get _refreshScope => widget.service.branchDirectoryRefreshScope(
+    actorUser: widget.currentUser,
+    productId: widget.selectedProductId,
+  );
+
+  @override
+  Duration get autoRefreshInterval => widget.service
+      .refreshPolicyFor(InventoryRefreshDataType.branchDirectory)
+      .autoRefreshInterval;
 
   @override
   void initState() {
@@ -61,8 +76,9 @@ class _BranchDirectoryPageState extends State<BranchDirectoryPage> {
       ..addListener(() {
         setState(() {});
       });
-    _directoryFuture = _loadDirectory();
+    unawaited(_refreshDirectory(forceRefresh: false));
     unawaited(_resolveDeviceLocation());
+    configureAutoRefresh();
   }
 
   @override
@@ -79,11 +95,71 @@ class _BranchDirectoryPageState extends State<BranchDirectoryPage> {
     );
   }
 
-  void _refresh() {
+  Future<void> _refreshDirectory({
+    required bool forceRefresh,
+    bool showFeedback = false,
+  }) async {
+    if (_isRefreshing) {
+      return;
+    }
+    if (!forceRefresh &&
+        _directoryData != null &&
+        !widget.service.shouldRefreshData(
+          type: InventoryRefreshDataType.branchDirectory,
+          scope: _refreshScope,
+        )) {
+      return;
+    }
+
     setState(() {
-      _directoryFuture = _loadDirectory(forceRefresh: true);
+      if (_directoryData == null) {
+        _isInitialLoading = true;
+      } else {
+        _isRefreshing = true;
+      }
+      _loadError = null;
     });
-    unawaited(_resolveDeviceLocation());
+
+    try {
+      final directory = await _loadDirectory(forceRefresh: forceRefresh);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _directoryData = directory;
+        _loadError = null;
+        _isInitialLoading = false;
+        _isRefreshing = false;
+      });
+      if (showFeedback) {
+        _showStatusMessage('Directorio actualizado correctamente.');
+      }
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        if (_directoryData == null) {
+          _loadError = error;
+        }
+        _isInitialLoading = false;
+        _isRefreshing = false;
+      });
+      if (showFeedback) {
+        _showStatusMessage('No se pudo actualizar el directorio: $error');
+      }
+    }
+  }
+
+  Future<void> _refresh() async {
+    await _refreshDirectory(forceRefresh: true, showFeedback: true);
+    await _resolveDeviceLocation();
+  }
+
+  void _showStatusMessage(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _resolveDeviceLocation() async {
@@ -108,6 +184,18 @@ class _BranchDirectoryPageState extends State<BranchDirectoryPage> {
       _locationStatus = result.status;
       _locationMessage = result.message;
     });
+  }
+
+  @override
+  Future<void> onAutoRefresh(
+    AutoRefreshReason reason, {
+    required bool force,
+  }) async {
+    await _refreshDirectory(forceRefresh: force, showFeedback: false);
+    if (reason == AutoRefreshReason.appResumed ||
+        reason == AutoRefreshReason.pullToRefresh) {
+      await _resolveDeviceLocation();
+    }
   }
 
   Future<void> _openLocationSettings() async {
@@ -231,98 +319,110 @@ class _BranchDirectoryPageState extends State<BranchDirectoryPage> {
 
   @override
   Widget build(BuildContext context) {
+    Widget content;
+    if (_isInitialLoading && _directoryData == null) {
+      content = const Center(child: CircularProgressIndicator());
+    } else if (_loadError != null && _directoryData == null) {
+      content = _BranchDirectoryErrorState(
+        message: 'No se pudo cargar el catalogo de sucursales. $_loadError',
+        onRetry: _refresh,
+      );
+    } else {
+      final data = _directoryData!;
+      final filteredEntries = _sortEntries(
+        _applyFilters(data),
+        data.selectedProduct,
+      );
+
+      content = Stack(
+        children: [
+          RefreshIndicator(
+            onRefresh: triggerPullToRefresh,
+            color: AppPalette.amber,
+            backgroundColor: AppPalette.storm,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+              children: [
+                _BranchDirectoryHeader(
+                  data: data,
+                  distanceReferenceLabel: _distanceReferenceLabel(data),
+                  isUsingDeviceLocation: _deviceLocation != null,
+                ),
+                const SizedBox(height: 16),
+                _BranchDirectoryFilters(
+                  searchController: _searchController,
+                  selectedCity: _selectedCity,
+                  cities: data.cities,
+                  selectedProduct: data.selectedProduct,
+                  availabilityFilter: _availabilityFilter,
+                  sortMode: _sortMode,
+                  isResolvingLocation: _isResolvingLocation,
+                  locationStatus: _locationStatus,
+                  locationMessage: _locationMessage,
+                  onLocationAction: _handleLocationAction,
+                  onSelectCity: (value) {
+                    setState(() {
+                      _selectedCity = value;
+                    });
+                  },
+                  onSelectAvailability: (value) {
+                    setState(() {
+                      _availabilityFilter = value;
+                    });
+                  },
+                  onSelectSort: (value) {
+                    setState(() {
+                      _sortMode = value;
+                    });
+                  },
+                ),
+                const SizedBox(height: 16),
+                if (filteredEntries.isEmpty)
+                  const _BranchDirectoryEmptyState()
+                else
+                  ...filteredEntries.map(
+                    (entry) => Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: _BranchCard(
+                        resolvedEntry: entry,
+                        currentBranchId: data.currentBranch?.id,
+                        selectedProduct: data.selectedProduct,
+                        distanceReferenceLabel: _distanceReferenceLabel(data),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (_isRefreshing)
+            const Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: LinearProgressIndicator(minHeight: 3),
+            ),
+        ],
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Sucursales'),
         actions: [
           IconButton(
             tooltip: 'Actualizar sucursales',
-            onPressed: _refresh,
-            icon: const Icon(Icons.refresh_rounded),
+            onPressed: _isRefreshing ? null : _refresh,
+            icon: Icon(
+              _isRefreshing
+                  ? Icons.hourglass_top_rounded
+                  : Icons.refresh_rounded,
+            ),
           ),
         ],
       ),
       body: Container(
         color: const Color(0xFF08172D),
-        child: SafeArea(
-          top: false,
-          child: FutureBuilder<BranchDirectoryData>(
-            future: _directoryFuture,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState != ConnectionState.done) {
-                return const Center(child: CircularProgressIndicator());
-              }
-
-              if (snapshot.hasError) {
-                return _BranchDirectoryErrorState(
-                  message:
-                      'No se pudo cargar el catalogo de sucursales. ${snapshot.error}',
-                  onRetry: _refresh,
-                );
-              }
-
-              final data = snapshot.requireData;
-              final filteredEntries = _sortEntries(
-                _applyFilters(data),
-                data.selectedProduct,
-              );
-
-              return ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
-                children: [
-                  _BranchDirectoryHeader(
-                    data: data,
-                    distanceReferenceLabel: _distanceReferenceLabel(data),
-                    isUsingDeviceLocation: _deviceLocation != null,
-                  ),
-                  const SizedBox(height: 16),
-                  _BranchDirectoryFilters(
-                    searchController: _searchController,
-                    selectedCity: _selectedCity,
-                    cities: data.cities,
-                    selectedProduct: data.selectedProduct,
-                    availabilityFilter: _availabilityFilter,
-                    sortMode: _sortMode,
-                    isResolvingLocation: _isResolvingLocation,
-                    locationStatus: _locationStatus,
-                    locationMessage: _locationMessage,
-                    onLocationAction: _handleLocationAction,
-                    onSelectCity: (value) {
-                      setState(() {
-                        _selectedCity = value;
-                      });
-                    },
-                    onSelectAvailability: (value) {
-                      setState(() {
-                        _availabilityFilter = value;
-                      });
-                    },
-                    onSelectSort: (value) {
-                      setState(() {
-                        _sortMode = value;
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  if (filteredEntries.isEmpty)
-                    const _BranchDirectoryEmptyState()
-                  else
-                    ...filteredEntries.map(
-                      (entry) => Padding(
-                        padding: const EdgeInsets.only(bottom: 14),
-                        child: _BranchCard(
-                          resolvedEntry: entry,
-                          currentBranchId: data.currentBranch?.id,
-                          selectedProduct: data.selectedProduct,
-                          distanceReferenceLabel: _distanceReferenceLabel(data),
-                        ),
-                      ),
-                    ),
-                ],
-              );
-            },
-          ),
-        ),
+        child: SafeArea(top: false, child: content),
       ),
     );
   }
@@ -384,7 +484,8 @@ class _BranchDirectoryHeader extends StatelessWidget {
                   label:
                       '${data.selectedProduct!.name} | SKU ${data.selectedProduct!.sku}',
                 ),
-              if (data.isFromCache) const _InfoPill(label: 'Catalogo en cache'),
+              if (data.isFromCache)
+                const _InfoPill(label: 'Datos desde cache local'),
             ],
           ),
         ],

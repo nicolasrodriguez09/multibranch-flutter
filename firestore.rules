@@ -57,6 +57,7 @@ service cloud.firestore {
     function canReadReservation(data) {
       return isAdmin()
         || canReadBranch(data.branchId)
+        || (data.requestingBranchId is string && hasSameBranch(data.requestingBranchId))
         || (signedIn() && data.reservedBy == request.auth.uid);
     }
 
@@ -249,7 +250,7 @@ service cloud.firestore {
     }
 
     match /sync_logs/{syncId} {
-      allow read: if isAdmin() || canReadBranch(resource.data.branchId);
+      allow read: if hasUserProfile();
       allow write: if isAdmin();
     }
 

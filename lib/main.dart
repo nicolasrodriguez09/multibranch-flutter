@@ -4,6 +4,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
 import 'src/app.dart';
+import 'src/features/inventory/data/inventory_offline_cache.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,12 +24,18 @@ class _BootstrapAppState extends State<BootstrapApp> {
   @override
   void initState() {
     super.initState();
-    _initialization = Firebase.initializeApp().timeout(
+    _initialization = _bootstrapApplication();
+  }
+
+  Future<FirebaseApp> _bootstrapApplication() async {
+    final app = await Firebase.initializeApp().timeout(
       const Duration(seconds: 20),
       onTimeout: () => throw TimeoutException(
         'Firebase no respondio durante el arranque. Revisa la configuracion y la conexion del emulador.',
       ),
     );
+    await InventoryOfflineCache.initializeHiveShared();
+    return app;
   }
 
   @override
@@ -55,7 +62,7 @@ class _BootstrapAppState extends State<BootstrapApp> {
           );
         }
 
-        return MyApp();
+        return MyApp(offlineCache: InventoryOfflineCache.shared);
       },
     );
   }
@@ -78,10 +85,7 @@ class _BootstrapShell extends StatelessWidget {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 520),
               child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: child,
-                ),
+                child: Padding(padding: const EdgeInsets.all(24), child: child),
               ),
             ),
           ),

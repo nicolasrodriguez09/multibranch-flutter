@@ -9,11 +9,14 @@ import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
 import '../domain/role_permissions.dart';
 import 'approval_requests_page.dart';
+import 'auto_refresh_state_mixin.dart';
 import 'branch_directory_page.dart';
 import 'create_branch_dialog.dart';
 import 'notifications_page.dart';
 import 'product_search_page.dart';
+import 'request_tracking_page.dart';
 import 'reservation_request_page.dart';
+import 'sync_status_page.dart';
 import 'transfer_request_page.dart';
 
 enum _BranchDashboardSection { overview, inventory, workflow, metrics, modules }
@@ -34,28 +37,27 @@ class InventoryDashboardPage extends StatefulWidget {
   State<InventoryDashboardPage> createState() => _InventoryDashboardPageState();
 }
 
-class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
-  static const _autoRefreshInterval = Duration(seconds: 60);
-
+class _InventoryDashboardPageState extends State<InventoryDashboardPage>
+    with AutoRefreshStateMixin {
   bool _isCreating = false;
   bool _isCreatingBranch = false;
   bool _isRefreshing = false;
   _BranchDashboardSection _selectedBranchSection =
       _BranchDashboardSection.overview;
-  Timer? _autoRefreshTimer;
+
+  String get _dashboardRefreshScope =>
+      widget.service.dashboardRefreshScope(actorUser: widget.currentUser);
+
+  @override
+  Duration get autoRefreshInterval => widget.service
+      .refreshPolicyFor(InventoryRefreshDataType.dashboard)
+      .autoRefreshInterval;
 
   @override
   void initState() {
     super.initState();
-    _autoRefreshTimer = Timer.periodic(_autoRefreshInterval, (_) {
-      unawaited(_refreshDashboard(isManual: false));
-    });
-  }
-
-  @override
-  void dispose() {
-    _autoRefreshTimer?.cancel();
-    super.dispose();
+    configureAutoRefresh();
+    unawaited(_refreshDashboard(isManual: false));
   }
 
   void _showStatusMessage(String message) {
@@ -77,7 +79,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
       _showStatusMessage(
         'Base inicial creada. Ya puedes revisar inventarios, solicitudes y sincronizaciones.',
       );
-      await _refreshDashboard(isManual: true);
+      await _refreshDashboard(isManual: true, forceRefresh: true);
     } catch (error) {
       if (!mounted) {
         return;
@@ -125,7 +127,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
         return;
       }
       _showStatusMessage('Sucursal creada correctamente: ${branch.name}.');
-      await _refreshDashboard(isManual: true);
+      await _refreshDashboard(isManual: true, forceRefresh: true);
     } catch (error) {
       if (!mounted) {
         return;
@@ -206,8 +208,18 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
     );
   }
 
-  Future<void> _refreshDashboard({required bool isManual}) async {
+  Future<void> _refreshDashboard({
+    required bool isManual,
+    bool forceRefresh = false,
+  }) async {
     if (_isRefreshing) {
+      return;
+    }
+    if (!forceRefresh &&
+        !widget.service.shouldRefreshData(
+          type: InventoryRefreshDataType.dashboard,
+          scope: _dashboardRefreshScope,
+        )) {
       return;
     }
 
@@ -239,6 +251,10 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
       if (!mounted) {
         return;
       }
+      widget.service.markRefreshCompleted(
+        type: InventoryRefreshDataType.dashboard,
+        scope: _dashboardRefreshScope,
+      );
       if (isManual) {
         _showStatusMessage('Dashboard actualizado correctamente.');
       }
@@ -254,6 +270,11 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
         });
       }
     }
+  }
+
+  @override
+  Future<void> onAutoRefresh(AutoRefreshReason reason, {required bool force}) {
+    return _refreshDashboard(isManual: false, forceRefresh: force);
   }
 
   Future<void> _runDrawerAction(Future<void> Function() action) async {
@@ -280,6 +301,28 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (context) => NotificationInboxPage(
+          service: widget.service,
+          currentUser: widget.currentUser,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openRequestTrackingPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => RequestTrackingPage(
+          service: widget.service,
+          currentUser: widget.currentUser,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openSyncStatusPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => SyncStatusPage(
           service: widget.service,
           currentUser: widget.currentUser,
         ),
@@ -384,9 +427,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
       const SizedBox(height: 18),
       _AdminOperationalHero(
         service: widget.service,
-        onPressed: _isRefreshing
-            ? null
-            : () => _refreshDashboard(isManual: true),
+        onPressed: _openSyncStatusPage,
       ),
       const SizedBox(height: 18),
       const _AdminSectionHeader(title: 'Metricas', actionLabel: 'Ver todas'),
@@ -397,6 +438,12 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
         service: widget.service,
         currentUser: user,
         onOpen: _openNotificationsPage,
+      ),
+      const SizedBox(height: 18),
+      _SyncStatusOverviewPanel(
+        service: widget.service,
+        currentUser: user,
+        onOpen: _openSyncStatusPage,
       ),
       const SizedBox(height: 18),
       _WorkflowActionCard(
@@ -450,9 +497,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
         service: widget.service,
         branchId: user.branchId,
         role: user.role,
-        onPressed: _isRefreshing
-            ? null
-            : () => _refreshDashboard(isManual: true),
+        onPressed: _openSyncStatusPage,
       ),
       const SizedBox(height: 18),
       _AdminSectionHeader(title: summaryTitle),
@@ -467,6 +512,18 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
         service: widget.service,
         currentUser: user,
         onOpen: _openNotificationsPage,
+      ),
+      const SizedBox(height: 18),
+      _RequestTrackingOverviewPanel(
+        service: widget.service,
+        currentUser: user,
+        onOpen: _openRequestTrackingPage,
+      ),
+      const SizedBox(height: 18),
+      _SyncStatusOverviewPanel(
+        service: widget.service,
+        currentUser: user,
+        onOpen: _openSyncStatusPage,
       ),
       if (user.role == UserRole.seller) ...[
         const SizedBox(height: 18),
@@ -576,6 +633,24 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
               accent: AppPalette.amber,
               onPressed: _openApprovalRequestsPage,
             ),
+          _WorkflowActionCard(
+            title: 'Estado de solicitudes',
+            subtitle:
+                'Consulta filtros, historial y cambios de estado para reservas y traslados.',
+            buttonLabel: 'Ver seguimiento',
+            icon: Icons.track_changes_rounded,
+            accent: AppPalette.cyan,
+            onPressed: _openRequestTrackingPage,
+          ),
+          _WorkflowActionCard(
+            title: 'Estado de sincronizacion',
+            subtitle:
+                'Revisa la salud de la API y la ultima sincronizacion de cada sucursal.',
+            buttonLabel: 'Ver estado',
+            icon: Icons.cloud_done_rounded,
+            accent: AppPalette.mint,
+            onPressed: _openSyncStatusPage,
+          ),
           _WorkflowActionCard(
             title: 'Reservar producto',
             subtitle:
@@ -717,6 +792,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
             : () => _runDrawerAction(_openCreateBranchDialog),
         onManageEmployees: () => _runDrawerAction(_openEmployeeManagementPage),
         onOpenNotifications: () => _runDrawerAction(_openNotificationsPage),
+        onOpenSyncStatus: () => _runDrawerAction(_openSyncStatusPage),
         onOpenApprovals: () => _runDrawerAction(_openApprovalRequestsPage),
         onOpenTraceability: () => _runDrawerAction(_openAdminTraceabilityPage),
         onSignOut: widget.authService.signOut,
@@ -808,6 +884,8 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage> {
         onSelectSection: _selectBranchSection,
         onOpenBranches: () => _runDrawerAction(_openBranchDirectoryPage),
         onOpenNotifications: () => _runDrawerAction(_openNotificationsPage),
+        onOpenSyncStatus: () => _runDrawerAction(_openSyncStatusPage),
+        onOpenRequestTracking: () => _runDrawerAction(_openRequestTrackingPage),
         onOpenApprovalRequests:
             user.can(AppPermission.approveTransfer) ||
                 user.can(AppPermission.approveReservation)
@@ -1256,7 +1334,7 @@ class _BranchOperationalHero extends StatelessWidget {
                                       vertical: 12,
                                     ),
                                   ),
-                                  child: const Text('Actualizar dashboard'),
+                                  child: const Text('Ver sincronizacion'),
                                 ),
                               ],
                             ),
@@ -1837,6 +1915,212 @@ class _NotificationsOverviewPanel extends StatelessWidget {
                   onPressed: () => unawaited(onOpen()),
                   icon: const Icon(Icons.open_in_new_rounded),
                   label: const Text('Abrir bandeja'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _RequestTrackingOverviewPanel extends StatelessWidget {
+  const _RequestTrackingOverviewPanel({
+    required this.service,
+    required this.currentUser,
+    required this.onOpen,
+  });
+
+  final InventoryWorkflowService service;
+  final AppUser currentUser;
+  final Future<void> Function() onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<RequestTrackingItem>>(
+      stream: service.watchRequestTracking(actorUser: currentUser),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _DashboardPanel(
+            title: 'Estado de solicitudes',
+            subtitle:
+                'Seguimiento de reservas y traslados con historial reciente.',
+            accent: AppPalette.danger,
+            child: Text(
+              'No fue posible cargar el seguimiento de solicitudes.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+            ),
+          );
+        }
+
+        final items = snapshot.data ?? const <RequestTrackingItem>[];
+        final openCount = items
+            .where(
+              (item) =>
+                  item.status == RequestTrackingStatus.pending ||
+                  item.status == RequestTrackingStatus.approved ||
+                  item.status == RequestTrackingStatus.inTransit,
+            )
+            .length;
+        final recentItems = items
+            .take(3)
+            .map(
+              (item) => _InsightItem(
+                icon: _trackingRequestOverviewIcon(item),
+                iconColor: _trackingRequestOverviewColor(item.status),
+                title: '${item.typeLabel} | ${item.productName}',
+                detail: item.type == RequestTrackingType.transfer
+                    ? '${item.primaryBranchName} -> ${item.secondaryBranchName} | ${item.quantity} unidad(es)'
+                    : '${item.primaryBranchName} | ${item.customerLabel}',
+                meta:
+                    '${item.statusLabel} | ultimo cambio ${_formatRelativeTime(item.lastStatusAt)}',
+              ),
+            )
+            .toList(growable: false);
+
+        return _DashboardPanel(
+          title: 'Estado de solicitudes',
+          subtitle:
+              'Consulta rapida del estado actual y del ultimo movimiento de tus solicitudes.',
+          accent: openCount > 0 ? AppPalette.cyan : AppPalette.blueSoft,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                openCount == 0
+                    ? 'No tienes solicitudes activas en este momento.'
+                    : openCount == 1
+                    ? 'Tienes 1 solicitud abierta para seguimiento.'
+                    : 'Tienes $openCount solicitudes abiertas para seguimiento.',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+              ),
+              const SizedBox(height: 12),
+              _InsightList(
+                items: recentItems,
+                emptyMessage:
+                    'Cuando registres reservas o traslados, apareceran aqui.',
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () => unawaited(onOpen()),
+                  icon: const Icon(Icons.open_in_new_rounded),
+                  label: const Text('Ver seguimiento'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SyncStatusOverviewPanel extends StatelessWidget {
+  const _SyncStatusOverviewPanel({
+    required this.service,
+    required this.currentUser,
+    required this.onOpen,
+  });
+
+  final InventoryWorkflowService service;
+  final AppUser currentUser;
+  final Future<void> Function() onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<SyncStatusOverview>(
+      stream: service.watchSyncStatus(actorUser: currentUser),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _DashboardPanel(
+            title: 'Estado de sincronizacion',
+            subtitle:
+                'Salud de la API y de las sucursales para validar si el dato sigue confiable.',
+            accent: AppPalette.danger,
+            child: Text(
+              'No fue posible cargar el estado de sincronizacion.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+            ),
+          );
+        }
+
+        final data = snapshot.data;
+        if (data == null) {
+          return _DashboardPanel(
+            title: 'Estado de sincronizacion',
+            subtitle:
+                'Salud de la API y de las sucursales para validar si el dato sigue confiable.',
+            accent: AppPalette.cyan,
+            child: const Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final accent = switch (data.apiStatus.severity) {
+          SyncStatusSeverity.healthy => AppPalette.mint,
+          SyncStatusSeverity.warning => AppPalette.amber,
+          SyncStatusSeverity.critical => AppPalette.danger,
+          SyncStatusSeverity.unknown => AppPalette.blueSoft,
+        };
+        final highlightedBranches = [
+          ...data.criticalBranches,
+          ...data.warningBranches.where(
+            (item) => !data.criticalBranches.any(
+              (critical) => critical.branch.id == item.branch.id,
+            ),
+          ),
+        ].take(3);
+        final items = highlightedBranches
+            .map(
+              (item) => _InsightItem(
+                icon: item.isCritical
+                    ? Icons.cloud_off_rounded
+                    : Icons.cloud_sync_rounded,
+                iconColor: item.isCritical
+                    ? AppPalette.danger
+                    : AppPalette.amber,
+                title: '${item.branch.name} | ${item.summary}',
+                detail: item.detail,
+                meta: 'Ultima: ${_formatRelativeTime(item.lastSyncAt)}',
+              ),
+            )
+            .toList(growable: false);
+
+        return _DashboardPanel(
+          title: 'Estado de sincronizacion',
+          subtitle:
+              'Visibilidad rapida para saber si puedes confiar en el dato antes de actuar.',
+          accent: accent,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'API: ${data.apiStatus.summary} | Al dia: ${data.healthyBranches.length}/${data.branches.length} | Alertas: ${data.warningBranches.length + data.criticalBranches.length}',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+              ),
+              const SizedBox(height: 12),
+              _InsightList(
+                items: items,
+                emptyMessage:
+                    'No hay sucursales con retraso o fallos de sincronizacion.',
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () => unawaited(onOpen()),
+                  icon: const Icon(Icons.open_in_new_rounded),
+                  label: const Text('Ver estado'),
                 ),
               ),
             ],
@@ -3738,6 +4022,7 @@ class _AdminDrawer extends StatelessWidget {
     required this.onCreateBranch,
     required this.onManageEmployees,
     required this.onOpenNotifications,
+    required this.onOpenSyncStatus,
     required this.onOpenApprovals,
     required this.onOpenTraceability,
     required this.onSignOut,
@@ -3750,6 +4035,7 @@ class _AdminDrawer extends StatelessWidget {
   final VoidCallback? onCreateBranch;
   final VoidCallback? onManageEmployees;
   final VoidCallback? onOpenNotifications;
+  final VoidCallback? onOpenSyncStatus;
   final VoidCallback? onOpenApprovals;
   final VoidCallback? onOpenTraceability;
   final VoidCallback onSignOut;
@@ -3793,6 +4079,12 @@ class _AdminDrawer extends StatelessWidget {
                         icon: Icons.notifications_none_rounded,
                         title: 'Notificaciones',
                         onTap: onOpenNotifications,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.cloud_done_rounded,
+                        title: 'Estado de sincronizacion',
+                        onTap: onOpenSyncStatus,
                       ),
                       const SizedBox(height: 10),
                       _AdminDrawerTile(
@@ -3892,6 +4184,8 @@ class _BranchDrawer extends StatelessWidget {
     required this.onSelectSection,
     required this.onOpenBranches,
     required this.onOpenNotifications,
+    required this.onOpenSyncStatus,
+    required this.onOpenRequestTracking,
     required this.onOpenApprovalRequests,
     required this.onOpenReservationRequests,
     required this.onOpenTransferRequests,
@@ -3906,6 +4200,8 @@ class _BranchDrawer extends StatelessWidget {
   final Future<void> Function(_BranchDashboardSection section) onSelectSection;
   final VoidCallback onOpenBranches;
   final VoidCallback onOpenNotifications;
+  final VoidCallback onOpenSyncStatus;
+  final VoidCallback onOpenRequestTracking;
   final VoidCallback? onOpenApprovalRequests;
   final VoidCallback onOpenReservationRequests;
   final VoidCallback onOpenTransferRequests;
@@ -3964,6 +4260,18 @@ class _BranchDrawer extends StatelessWidget {
                         icon: Icons.notifications_none_rounded,
                         title: 'Notificaciones',
                         onTap: onOpenNotifications,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.cloud_done_rounded,
+                        title: 'Estado de sincronizacion',
+                        onTap: onOpenSyncStatus,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.track_changes_rounded,
+                        title: 'Estado de solicitudes',
+                        onTap: onOpenRequestTracking,
                       ),
                       if (onOpenApprovalRequests != null) ...[
                         const SizedBox(height: 10),
@@ -4595,6 +4903,45 @@ String _formatNotificationType(String type) {
     'transfer' => 'Traslado',
     'reservation' => 'Reserva',
     _ => 'Sistema',
+  };
+}
+
+Color _trackingRequestOverviewColor(RequestTrackingStatus status) {
+  return switch (status) {
+    RequestTrackingStatus.pending => AppPalette.amber,
+    RequestTrackingStatus.approved => AppPalette.blueSoft,
+    RequestTrackingStatus.rejected => AppPalette.danger,
+    RequestTrackingStatus.inTransit => AppPalette.cyan,
+    RequestTrackingStatus.received => AppPalette.mint,
+    RequestTrackingStatus.completed => AppPalette.mint,
+    RequestTrackingStatus.cancelled => AppPalette.danger,
+    RequestTrackingStatus.expired => AppPalette.amber,
+  };
+}
+
+IconData _trackingRequestOverviewIcon(RequestTrackingItem item) {
+  if (item.type == RequestTrackingType.transfer) {
+    return switch (item.status) {
+      RequestTrackingStatus.pending => Icons.pending_actions_rounded,
+      RequestTrackingStatus.approved => Icons.verified_rounded,
+      RequestTrackingStatus.rejected => Icons.block_rounded,
+      RequestTrackingStatus.inTransit => Icons.local_shipping_rounded,
+      RequestTrackingStatus.received => Icons.inventory_2_rounded,
+      RequestTrackingStatus.completed => Icons.check_circle_rounded,
+      RequestTrackingStatus.cancelled => Icons.cancel_rounded,
+      RequestTrackingStatus.expired => Icons.timer_off_rounded,
+    };
+  }
+
+  return switch (item.status) {
+    RequestTrackingStatus.pending => Icons.bookmark_added_rounded,
+    RequestTrackingStatus.approved => Icons.verified_rounded,
+    RequestTrackingStatus.rejected => Icons.block_rounded,
+    RequestTrackingStatus.inTransit => Icons.sync_alt_rounded,
+    RequestTrackingStatus.received => Icons.check_circle_rounded,
+    RequestTrackingStatus.completed => Icons.check_circle_rounded,
+    RequestTrackingStatus.cancelled => Icons.cancel_rounded,
+    RequestTrackingStatus.expired => Icons.timer_off_rounded,
   };
 }
 

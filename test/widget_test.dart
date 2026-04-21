@@ -13,7 +13,9 @@ import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/
 import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/inventory_dashboard_page.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/notifications_page.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/product_detail_page.dart';
+import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/request_tracking_page.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/reservation_request_page.dart';
+import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/sync_status_page.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/transfer_request_page.dart';
 
 void main() {
@@ -97,6 +99,13 @@ void main() {
       ),
       findsOneWidget,
     );
+    expect(
+      find.descendant(
+        of: find.byType(Drawer),
+        matching: find.widgetWithText(ListTile, 'Estado de sincronizacion'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('Bandeja de aprobaciones'), findsWidgets);
     expect(find.text('Trazabilidad operativa'), findsOneWidget);
     expect(find.text('Agregar sucursal'), findsOneWidget);
@@ -140,6 +149,12 @@ void main() {
 
     await tester.tap(find.byIcon(Icons.menu));
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Trazabilidad operativa'),
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Trazabilidad operativa'));
     await tester.pumpAndSettle();
 
@@ -156,12 +171,12 @@ void main() {
     'admin can open transfer traceability detail from audit activity',
     (WidgetTester tester) async {
       final firestore = FakeFirebaseFirestore();
-      final now = DateTime.utc(2026, 3, 26, 12, 0);
+      var currentTime = DateTime.utc(2026, 3, 26, 12, 0);
       final service = InventoryWorkflowService(
         firestore: firestore,
-        clock: () => now,
+        clock: () => currentTime,
       );
-      final sampleData = SampleSeedData.build(now);
+      final sampleData = SampleSeedData.build(currentTime);
       await service.seedMasterData(actorUser: sampleData.users.first);
       final admin = sampleData.users.firstWhere(
         (user) => user.id == DemoIds.adminUser,
@@ -284,6 +299,20 @@ void main() {
       ),
       findsOneWidget,
     );
+    expect(
+      find.descendant(
+        of: find.byType(Drawer),
+        matching: find.widgetWithText(ListTile, 'Estado de sincronizacion'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byType(Drawer),
+        matching: find.widgetWithText(ListTile, 'Estado de solicitudes'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('Reservar producto'), findsOneWidget);
     await tester.scrollUntilVisible(
       find.descendant(
@@ -308,12 +337,12 @@ void main() {
       });
 
       final firestore = FakeFirebaseFirestore();
-      final now = DateTime.utc(2026, 3, 26, 12, 0);
+      var currentTime = DateTime.utc(2026, 3, 26, 12, 0);
       final service = InventoryWorkflowService(
         firestore: firestore,
-        clock: () => now,
+        clock: () => currentTime,
       );
-      final sampleData = SampleSeedData.build(now);
+      final sampleData = SampleSeedData.build(currentTime);
       await service.seedMasterData(actorUser: sampleData.users.first);
       final seller = sampleData.users.firstWhere(
         (user) => user.id == DemoIds.branchSeller,
@@ -392,12 +421,12 @@ void main() {
       });
 
       final firestore = FakeFirebaseFirestore();
-      final now = DateTime.utc(2026, 3, 26, 12, 0);
+      var currentTime = DateTime.utc(2026, 3, 26, 12, 0);
       final service = InventoryWorkflowService(
         firestore: firestore,
-        clock: () => now,
+        clock: () => currentTime,
       );
-      final sampleData = SampleSeedData.build(now);
+      final sampleData = SampleSeedData.build(currentTime);
       await service.seedMasterData(actorUser: sampleData.users.first);
       final seller = sampleData.users.firstWhere(
         (user) => user.id == DemoIds.branchSeller,
@@ -511,6 +540,141 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Leida'), findsOneWidget);
+    },
+  );
+
+  testWidgets('sync status page shows api health and branches with issues', (
+    WidgetTester tester,
+  ) async {
+    final firestore = FakeFirebaseFirestore();
+    final now = DateTime.utc(2026, 3, 26, 12, 0);
+    final service = InventoryWorkflowService(
+      firestore: firestore,
+      clock: () => now,
+    );
+    final sampleData = SampleSeedData.build(now);
+    await service.seedMasterData(actorUser: sampleData.users.first);
+    final admin = sampleData.users.first;
+
+    await service.system.addSyncLog(
+      SyncLog(
+        id: 'sync_failed_widget',
+        branchId: DemoIds.branchNorth,
+        branchName: 'Sucursal Norte',
+        type: 'inventory',
+        status: 'failed',
+        recordsProcessed: 0,
+        startedAt: now.subtract(const Duration(minutes: 6)),
+        finishedAt: now.subtract(const Duration(minutes: 4)),
+        message: 'Timeout con API central.',
+        createdAt: now.subtract(const Duration(minutes: 4)),
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark(useMaterial3: true),
+        home: SyncStatusPage(service: service, currentUser: admin),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Estado de sincronizacion'), findsOneWidget);
+    expect(find.text('API de sincronizacion'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Ultima sincronizacion por sucursal'),
+      220,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Ultima sincronizacion por sucursal'), findsOneWidget);
+    expect(find.text('Sucursal Norte'), findsWidgets);
+    expect(find.text('Con fallo'), findsWidgets);
+  });
+
+  testWidgets(
+    'request tracking page filters by status and shows status history',
+    (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1080, 2200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final firestore = FakeFirebaseFirestore();
+      var currentTime = DateTime.utc(2026, 3, 26, 12, 0);
+      final service = InventoryWorkflowService(
+        firestore: firestore,
+        clock: () => currentTime,
+      );
+      final sampleData = SampleSeedData.build(currentTime);
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final supervisor = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.secondBranchSeller,
+      );
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      final reservation = await service.createReservation(
+        actorUser: seller,
+        branchId: DemoIds.branchNorth,
+        productId: DemoIds.phoneProduct,
+        customerName: 'Cliente Historial',
+        customerPhone: '3001112233',
+        quantity: 1,
+        expiresIn: const Duration(hours: 24),
+      );
+      await service.approveReservation(
+        actorUser: supervisor,
+        reservationId: reservation.id,
+      );
+
+      currentTime = currentTime.add(const Duration(minutes: 10));
+      final transfer = await service.requestTransfer(
+        actorUser: seller,
+        productId: DemoIds.laptopProduct,
+        fromBranchId: DemoIds.branchNorth,
+        toBranchId: DemoIds.branchCenter,
+        quantity: 1,
+        reason: 'Seguimiento en pantalla',
+      );
+      await service.approveTransfer(
+        actorUser: supervisor,
+        transferId: transfer.id,
+      );
+      await service.markTransferInTransit(
+        actorUser: supervisor,
+        transferId: transfer.id,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(useMaterial3: true),
+          home: RequestTrackingPage(service: service, currentUser: seller),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Estado de solicitudes'), findsOneWidget);
+      expect(
+        find.textContaining('resultado(s) con los filtros actuales.'),
+        findsOneWidget,
+      );
+
+      final inTransitFilter = find.widgetWithText(ChoiceChip, 'En transito');
+      await tester.ensureVisible(inTransitFilter);
+      await tester.tap(inTransitFilter);
+      await tester.pumpAndSettle();
+      expect(tester.widget<ChoiceChip>(inTransitFilter).selected, isTrue);
+
+      await tester.tap(find.byType(ExpansionTile).first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Historial de cambios'), findsOneWidget);
+      expect(find.text('Traslado en transito'), findsOneWidget);
+      expect(find.text('Solicitud aprobada'), findsOneWidget);
     },
   );
 
@@ -960,6 +1124,20 @@ void main() {
         find.descendant(
           of: find.byType(Drawer),
           matching: find.widgetWithText(ListTile, 'Notificaciones'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(Drawer),
+          matching: find.widgetWithText(ListTile, 'Estado de sincronizacion'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(Drawer),
+          matching: find.widgetWithText(ListTile, 'Estado de solicitudes'),
         ),
         findsOneWidget,
       );
