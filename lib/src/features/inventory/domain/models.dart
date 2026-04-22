@@ -214,6 +214,7 @@ class Category {
     required this.id,
     required this.name,
     required this.description,
+    required this.lowStockThreshold,
     required this.isActive,
     required this.createdAt,
     required this.updatedAt,
@@ -222,6 +223,7 @@ class Category {
   final String id;
   final String name;
   final String description;
+  final int? lowStockThreshold;
   final bool isActive;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -229,6 +231,7 @@ class Category {
   Map<String, dynamic> toFirestore() => {
     'name': name,
     'description': description,
+    'lowStockThreshold': lowStockThreshold,
     'isActive': isActive,
     'createdAt': writeDateTime(createdAt),
     'updatedAt': writeDateTime(updatedAt),
@@ -239,6 +242,9 @@ class Category {
       id: id,
       name: readString(data, 'name'),
       description: readString(data, 'description'),
+      lowStockThreshold: data.containsKey('lowStockThreshold')
+          ? readInt(data, 'lowStockThreshold')
+          : null,
       isActive: readBool(data, 'isActive'),
       createdAt:
           readDateTime(data, 'createdAt') ??
@@ -882,6 +888,54 @@ class AppNotification {
       isRead: readBool(data, 'isRead'),
       createdAt:
           readDateTime(data, 'createdAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+    );
+  }
+}
+
+class StockAlertReadState {
+  const StockAlertReadState({
+    required this.id,
+    required this.userId,
+    required this.alertId,
+    required this.branchId,
+    required this.productId,
+    required this.alertUpdatedAt,
+    required this.readAt,
+  });
+
+  final String id;
+  final String userId;
+  final String alertId;
+  final String branchId;
+  final String productId;
+  final DateTime alertUpdatedAt;
+  final DateTime readAt;
+
+  Map<String, dynamic> toFirestore() => {
+    'userId': userId,
+    'alertId': alertId,
+    'branchId': branchId,
+    'productId': productId,
+    'alertUpdatedAt': writeDateTime(alertUpdatedAt),
+    'readAt': writeDateTime(readAt),
+  };
+
+  factory StockAlertReadState.fromFirestore(
+    String id,
+    Map<String, dynamic> data,
+  ) {
+    return StockAlertReadState(
+      id: id,
+      userId: readString(data, 'userId'),
+      alertId: readString(data, 'alertId'),
+      branchId: readString(data, 'branchId'),
+      productId: readString(data, 'productId'),
+      alertUpdatedAt:
+          readDateTime(data, 'alertUpdatedAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      readAt:
+          readDateTime(data, 'readAt') ??
           DateTime.fromMillisecondsSinceEpoch(0),
     );
   }

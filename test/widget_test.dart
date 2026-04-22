@@ -16,6 +16,7 @@ import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/
 import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/request_tracking_page.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/reservation_request_page.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/sync_status_page.dart';
+import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/stock_alerts_page.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/presentation/transfer_request_page.dart';
 
 void main() {
@@ -96,6 +97,13 @@ void main() {
       find.descendant(
         of: find.byType(Drawer),
         matching: find.widgetWithText(ListTile, 'Notificaciones'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byType(Drawer),
+        matching: find.widgetWithText(ListTile, 'Alertas de stock'),
       ),
       findsOneWidget,
     );
@@ -296,6 +304,13 @@ void main() {
       find.descendant(
         of: find.byType(Drawer),
         matching: find.widgetWithText(ListTile, 'Notificaciones'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byType(Drawer),
+        matching: find.widgetWithText(ListTile, 'Alertas de stock'),
       ),
       findsOneWidget,
     );
@@ -581,6 +596,15 @@ void main() {
 
     expect(find.text('Estado de sincronizacion'), findsOneWidget);
     expect(find.text('API de sincronizacion'), findsOneWidget);
+    expect(find.text('Alertas de monitoreo'), findsOneWidget);
+    expect(find.text('Solicitar reintento'), findsWidgets);
+    await tester.scrollUntilVisible(
+      find.text('Reglas de fallo'),
+      180,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Reglas de fallo'), findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('Ultima sincronizacion por sucursal'),
       220,
@@ -590,6 +614,45 @@ void main() {
     expect(find.text('Ultima sincronizacion por sucursal'), findsOneWidget);
     expect(find.text('Sucursal Norte'), findsWidgets);
     expect(find.text('Con fallo'), findsWidgets);
+  });
+
+  testWidgets('stock alerts page shows alerts and supports read actions', (
+    WidgetTester tester,
+  ) async {
+    final firestore = FakeFirebaseFirestore();
+    final now = DateTime.utc(2026, 3, 26, 12, 0);
+    final service = InventoryWorkflowService(
+      firestore: firestore,
+      clock: () => now,
+    );
+    final sampleData = SampleSeedData.build(now);
+    await service.seedMasterData(actorUser: sampleData.users.first);
+    final seller = sampleData.users.firstWhere(
+      (user) => user.id == DemoIds.branchSeller,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark(useMaterial3: true),
+        home: StockAlertsPage(service: service, currentUser: seller),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Alertas de stock'), findsOneWidget);
+    expect(find.text('Sin leer'), findsOneWidget);
+    expect(find.text('Marcar leida'), findsWidgets);
+
+    await tester.scrollUntilVisible(
+      find.text('Marcar leida').first,
+      180,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Marcar leida').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Leida'), findsWidgets);
   });
 
   testWidgets(
@@ -1124,6 +1187,13 @@ void main() {
         find.descendant(
           of: find.byType(Drawer),
           matching: find.widgetWithText(ListTile, 'Notificaciones'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(Drawer),
+          matching: find.widgetWithText(ListTile, 'Alertas de stock'),
         ),
         findsOneWidget,
       );

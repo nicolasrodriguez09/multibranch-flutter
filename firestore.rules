@@ -130,6 +130,13 @@ service cloud.firestore {
         && data.createdAt == existing.createdAt;
     }
 
+    function sameStockAlertReadScope(data, existing) {
+      return data.userId == existing.userId
+        && data.alertId == existing.alertId
+        && data.branchId == existing.branchId
+        && data.productId == existing.productId;
+    }
+
     match /users/{userId} {
       allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
       allow create: if isAdmin();
@@ -252,6 +259,16 @@ service cloud.firestore {
     match /sync_logs/{syncId} {
       allow read: if hasUserProfile();
       allow write: if isAdmin();
+    }
+
+    match /stock_alert_reads/{readId} {
+      allow read: if signedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if hasUserProfile()
+        && request.resource.data.userId == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.userId == request.auth.uid
+        && sameStockAlertReadScope(request.resource.data, resource.data);
+      allow delete: if isAdmin();
     }
 
     match /notifications/{notificationId} {

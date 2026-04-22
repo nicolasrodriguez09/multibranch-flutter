@@ -156,6 +156,178 @@ void main() {
   );
 
   test(
+    'sync monitoring alerts expose stale branches, failure bursts and failure rules',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final admin = sampleData.users.first;
+
+      await service.system.addSyncLog(
+        SyncLog(
+          id: 'sync_failed_burst_1',
+          branchId: DemoIds.branchNorth,
+          branchName: 'Sucursal Norte',
+          type: 'inventory',
+          status: 'failed',
+          recordsProcessed: 0,
+          startedAt: now.subtract(const Duration(minutes: 26)),
+          finishedAt: now.subtract(const Duration(minutes: 24)),
+          message: 'Fallo en lote 1.',
+          createdAt: now.subtract(const Duration(minutes: 24)),
+        ),
+      );
+      await service.system.addSyncLog(
+        SyncLog(
+          id: 'sync_failed_burst_2',
+          branchId: DemoIds.branchNorth,
+          branchName: 'Sucursal Norte',
+          type: 'inventory',
+          status: 'timeout',
+          recordsProcessed: 0,
+          startedAt: now.subtract(const Duration(minutes: 10)),
+          finishedAt: now.subtract(const Duration(minutes: 8)),
+          message: 'Fallo en lote 2.',
+          createdAt: now.subtract(const Duration(minutes: 8)),
+        ),
+      );
+
+      final overview = await service.fetchSyncStatusOverview(actorUser: admin);
+
+      expect(overview.failureRules, isNotEmpty);
+      expect(
+        overview.monitoringAlerts.any(
+          (item) =>
+              item.branchId == DemoIds.branchNorth &&
+              item.kind == SyncMonitoringAlertKind.syncFailure,
+        ),
+        isTrue,
+      );
+      expect(
+        overview.monitoringAlerts.any(
+          (item) =>
+              item.branchId == DemoIds.branchNorth &&
+              item.kind == SyncMonitoringAlertKind.staleData,
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  test('admin can register sync errors as monitoring events', () async {
+    await service.seedMasterData(actorUser: sampleData.users.first);
+    final admin = sampleData.users.first;
+
+    await service.registerSyncError(
+      actorUser: admin,
+      branchId: DemoIds.branchNorth,
+      type: 'inventory',
+      technicalDetail: 'Timeout al consultar el consolidado central.',
+    );
+
+    final syncLogs = await service.system.fetchBranchSyncLogs(
+      DemoIds.branchNorth,
+      limit: 6,
+    );
+
+    expect(syncLogs.first.status, 'failed');
+    expect(syncLogs.first.message, contains('Timeout'));
+  });
+
+  test('admin can request sync retries from monitoring', () async {
+    await service.seedMasterData(actorUser: sampleData.users.first);
+    final admin = sampleData.users.first;
+
+    await service.requestSyncRetry(
+      actorUser: admin,
+      branchId: DemoIds.branchNorth,
+      preferredType: 'inventory',
+      note: 'Reintentar despues de validar conectividad.',
+    );
+
+    final syncLogs = await service.system.fetchBranchSyncLogs(
+      DemoIds.branchNorth,
+      limit: 6,
+    );
+
+    expect(syncLogs.first.status, 'retry_requested');
+    expect(syncLogs.first.message, contains('Reintentar'));
+  });
+
+  test(
+    'stock alerts can be marked as read and reopen after inventory updates',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final admin = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.adminUser,
+      );
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      final initialFeed = await service.fetchLowStockAlerts(actorUser: seller);
+      final initialAlert = initialFeed.alerts.firstWhere(
+        (item) => item.productId == DemoIds.laptopProduct,
+      );
+
+      expect(initialAlert.isRead, isFalse);
+      expect(initialAlert.thresholdSource, StockAlertThresholdSource.product);
+
+      await service.markStockAlertAsRead(
+        actorUser: seller,
+        alert: initialAlert,
+      );
+
+      final readFeed = await service.fetchLowStockAlerts(actorUser: seller);
+      final readAlert = readFeed.alerts.firstWhere(
+        (item) => item.productId == DemoIds.laptopProduct,
+      );
+      expect(readAlert.isRead, isTrue);
+
+      now = now.add(const Duration(minutes: 5));
+      await service.setInventoryStock(
+        actorUser: admin,
+        branchId: DemoIds.branchCenter,
+        productId: DemoIds.laptopProduct,
+        stock: 6,
+        minimumStock: 10,
+      );
+
+      final reopenedFeed = await service.fetchLowStockAlerts(actorUser: seller);
+      final reopenedAlert = reopenedFeed.alerts.firstWhere(
+        (item) => item.productId == DemoIds.laptopProduct,
+      );
+      expect(reopenedAlert.isRead, isFalse);
+    },
+  );
+
+  test('critical stock changes notify supervisors and admins', () async {
+    await service.seedMasterData(actorUser: sampleData.users.first);
+    final supervisor = sampleData.users.firstWhere(
+      (user) => user.id == DemoIds.secondBranchSeller,
+    );
+
+    now = now.add(const Duration(minutes: 3));
+    await service.setInventoryStock(
+      actorUser: supervisor,
+      branchId: DemoIds.branchNorth,
+      productId: DemoIds.printerProduct,
+      stock: 1,
+      minimumStock: 2,
+    );
+
+    final criticalNotifications = await firestore
+        .collection('notifications')
+        .where('type', isEqualTo: 'stock_alert_critical')
+        .get();
+    final recipients = criticalNotifications.docs
+        .map((doc) => doc.data()['userId'] as String)
+        .toSet();
+
+    expect(criticalNotifications.docs, hasLength(2));
+    expect(recipients, contains(DemoIds.adminUser));
+    expect(recipients, contains(DemoIds.secondBranchSeller));
+  });
+
+  test(
     'product search returns ranked results and persists recent searches',
     () async {
       await service.seedMasterData(actorUser: sampleData.users.first);
