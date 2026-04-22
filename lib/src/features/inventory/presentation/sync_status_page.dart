@@ -23,6 +23,9 @@ class SyncStatusPage extends StatefulWidget {
 class _SyncStatusPageState extends State<SyncStatusPage> {
   late final Stream<SyncStatusOverview> _syncStatusStream;
   bool _isRefreshing = false;
+  String? _busyMonitoringAlertId;
+
+  bool get _canManageMonitoring => widget.currentUser.role == UserRole.admin;
 
   @override
   void initState() {
@@ -65,6 +68,200 @@ class _SyncStatusPageState extends State<SyncStatusPage> {
         });
       }
     }
+  }
+
+  Future<void> _runMonitoringAction({
+    required String alertId,
+    required Future<void> Function() action,
+    required String successMessage,
+  }) async {
+    if (_busyMonitoringAlertId != null) {
+      return;
+    }
+
+    setState(() {
+      _busyMonitoringAlertId = alertId;
+    });
+
+    try {
+      await action();
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(successMessage)));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No fue posible ejecutar la accion: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busyMonitoringAlertId = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _openTechnicalDetail(SyncMonitoringAlert alert) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(alert.title),
+          content: SingleChildScrollView(
+            child: SelectableText(alert.technicalDetail),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cerrar'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _registerSyncError(SyncMonitoringAlert alert) async {
+    final typeController = TextEditingController(
+      text: alert.latestLog?.type ?? 'inventory',
+    );
+    final detailController = TextEditingController(
+      text: alert.latestLog?.message ?? alert.summary,
+    );
+
+    final input = await showDialog<_SyncAdminActionInput>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Registrar evento de error'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: typeController,
+                  decoration: const InputDecoration(
+                    labelText: 'Tipo de sincronizacion',
+                    hintText: 'inventory',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: detailController,
+                  minLines: 3,
+                  maxLines: 6,
+                  decoration: const InputDecoration(
+                    labelText: 'Detalle tecnico',
+                    hintText: 'Timeout, error de esquema, API no responde...',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(context).pop(
+                  _SyncAdminActionInput(
+                    type: typeController.text,
+                    note: detailController.text,
+                  ),
+                );
+              },
+              child: const Text('Registrar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    typeController.dispose();
+    detailController.dispose();
+
+    if (input == null) {
+      return;
+    }
+
+    await _runMonitoringAction(
+      alertId: alert.id,
+      action: () => widget.service.registerSyncError(
+        actorUser: widget.currentUser,
+        branchId: alert.branchId,
+        type: input.type,
+        technicalDetail: input.note,
+      ),
+      successMessage: 'Evento de error registrado en monitoreo.',
+    );
+  }
+
+  Future<void> _requestSyncRetry(SyncMonitoringAlert alert) async {
+    final noteController = TextEditingController(text: alert.summary);
+
+    final input = await showDialog<_SyncAdminActionInput>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Solicitar reintento'),
+          content: SizedBox(
+            width: 420,
+            child: TextField(
+              controller: noteController,
+              minLines: 2,
+              maxLines: 5,
+              decoration: const InputDecoration(
+                labelText: 'Nota de seguimiento',
+                hintText: 'Deja contexto para el reintento si aplica.',
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(context).pop(
+                  _SyncAdminActionInput(
+                    type: alert.latestLog?.type ?? 'inventory',
+                    note: noteController.text,
+                  ),
+                );
+              },
+              child: const Text('Solicitar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    noteController.dispose();
+
+    if (input == null) {
+      return;
+    }
+
+    await _runMonitoringAction(
+      alertId: alert.id,
+      action: () => widget.service.requestSyncRetry(
+        actorUser: widget.currentUser,
+        branchId: alert.branchId,
+        preferredType: input.type,
+        note: input.note,
+      ),
+      successMessage: 'Reintento registrado para la sucursal.',
+    );
   }
 
   @override
@@ -135,6 +332,18 @@ class _SyncStatusPageState extends State<SyncStatusPage> {
                       currentUser: widget.currentUser,
                       currentBranchStatus: currentBranchStatus,
                     ),
+                    if (_canManageMonitoring) ...[
+                      const SizedBox(height: 16),
+                      _MonitoringAlertsCard(
+                        alerts: data.monitoringAlerts,
+                        busyAlertId: _busyMonitoringAlertId,
+                        onOpenTechnicalDetail: _openTechnicalDetail,
+                        onRegisterSyncError: _registerSyncError,
+                        onRequestRetry: _requestSyncRetry,
+                      ),
+                      const SizedBox(height: 16),
+                      _FailureRulesCard(rules: data.failureRules),
+                    ],
                     if (data.warnings.isNotEmpty) ...[
                       const SizedBox(height: 16),
                       _WarningsCard(warnings: data.warnings),
@@ -168,6 +377,13 @@ class _SyncStatusPageState extends State<SyncStatusPage> {
       ),
     );
   }
+}
+
+class _SyncAdminActionInput {
+  const _SyncAdminActionInput({required this.type, required this.note});
+
+  final String type;
+  final String note;
 }
 
 class _LoadingState extends StatelessWidget {
@@ -387,6 +603,321 @@ class _StatusHero extends StatelessWidget {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _MonitoringAlertsCard extends StatelessWidget {
+  const _MonitoringAlertsCard({
+    required this.alerts,
+    required this.busyAlertId,
+    required this.onOpenTechnicalDetail,
+    required this.onRegisterSyncError,
+    required this.onRequestRetry,
+  });
+
+  final List<SyncMonitoringAlert> alerts;
+  final String? busyAlertId;
+  final Future<void> Function(SyncMonitoringAlert alert) onOpenTechnicalDetail;
+  final Future<void> Function(SyncMonitoringAlert alert) onRegisterSyncError;
+  final Future<void> Function(SyncMonitoringAlert alert) onRequestRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final criticalCount = alerts.where((item) => item.isCritical).length;
+    final retryCount = alerts
+        .where((item) => item.kind == SyncMonitoringAlertKind.retryRequested)
+        .length;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        gradient: LinearGradient(
+          colors: [
+            const Color(0x26FF7A59),
+            const Color(0x1A3B2338),
+            const Color(0x14141C2E),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(color: AppPalette.panelBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: AppPalette.danger.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.monitor_heart_rounded,
+                  color: AppPalette.danger,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Alertas de monitoreo',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Vista exclusiva de administracion para anticipar fallos de sincronizacion.',
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _MetricBadge(label: 'Activas', value: '${alerts.length}'),
+              _MetricBadge(label: 'Criticas', value: '$criticalCount'),
+              _MetricBadge(label: 'Reintentos', value: '$retryCount'),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (alerts.isEmpty)
+            Text(
+              'No hay alertas de monitoreo activas en este momento.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+            )
+          else
+            ...alerts.map(
+              (alert) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _MonitoringAlertTile(
+                  alert: alert,
+                  isBusy: busyAlertId == alert.id,
+                  onOpenTechnicalDetail: onOpenTechnicalDetail,
+                  onRegisterSyncError: onRegisterSyncError,
+                  onRequestRetry: onRequestRetry,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MonitoringAlertTile extends StatelessWidget {
+  const _MonitoringAlertTile({
+    required this.alert,
+    required this.isBusy,
+    required this.onOpenTechnicalDetail,
+    required this.onRegisterSyncError,
+    required this.onRequestRetry,
+  });
+
+  final SyncMonitoringAlert alert;
+  final bool isBusy;
+  final Future<void> Function(SyncMonitoringAlert alert) onOpenTechnicalDetail;
+  final Future<void> Function(SyncMonitoringAlert alert) onRegisterSyncError;
+  final Future<void> Function(SyncMonitoringAlert alert) onRequestRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = _severityColor(alert.severity);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: Colors.white.withValues(alpha: 0.05),
+        border: Border.all(color: accent.withValues(alpha: 0.28)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(_severityIcon(alert.severity), color: accent),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      alert.title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      alert.branchName,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.copyWith(color: Colors.white60),
+                    ),
+                  ],
+                ),
+              ),
+              _SeverityBadge(
+                label: _monitoringKindLabel(alert),
+                severity: alert.severity,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            alert.summary,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _MetaChip(
+                icon: Icons.schedule_rounded,
+                label: 'Detectada: ${_formatDateTime(alert.triggeredAt)}',
+              ),
+              if (alert.latestLog != null)
+                _MetaChip(
+                  icon: Icons.sync_alt_rounded,
+                  label:
+                      '${_formatSyncType(alert.latestLog!.type)} | ${_formatRawSyncStatus(alert.latestLog!.status)}',
+                ),
+              if (alert.recentFailureCount > 0)
+                _MetaChip(
+                  icon: Icons.error_outline_rounded,
+                  label: 'Fallos recientes: ${alert.recentFailureCount}',
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                onPressed: isBusy
+                    ? null
+                    : () => unawaited(onOpenTechnicalDetail(alert)),
+                icon: const Icon(Icons.article_outlined),
+                label: const Text('Ver detalle'),
+              ),
+              FilledButton.tonalIcon(
+                onPressed: isBusy
+                    ? null
+                    : () => unawaited(onRegisterSyncError(alert)),
+                icon: const Icon(Icons.bug_report_outlined),
+                label: const Text('Registrar error'),
+              ),
+              FilledButton.icon(
+                onPressed: isBusy
+                    ? null
+                    : () => unawaited(onRequestRetry(alert)),
+                icon: isBusy
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.refresh_rounded),
+                label: const Text('Solicitar reintento'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FailureRulesCard extends StatelessWidget {
+  const _FailureRulesCard({required this.rules});
+
+  final List<String> rules;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        color: const Color(0x1D102545),
+        border: Border.all(color: AppPalette.panelBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Reglas de fallo',
+            style: Theme.of(
+              context,
+            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Estas reglas disparan el modulo de monitoreo cuando una sucursal deja de ser confiable.',
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+          ),
+          const SizedBox(height: 14),
+          ...rules.map(
+            (rule) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(top: 3),
+                    child: Icon(
+                      Icons.rule_folder_outlined,
+                      size: 16,
+                      color: AppPalette.cyan,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      rule,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodyMedium?.copyWith(color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -886,6 +1417,7 @@ String _formatSyncType(String value) {
     'inventory' => 'Inventario',
     'catalog' => 'Catalogo',
     'users' => 'Usuarios',
+    'reservations' => 'Reservas',
     'transfers' => 'Traslados',
     '' => 'Sin tipo',
     _ => '${value[0].toUpperCase()}${value.substring(1)}',
@@ -897,8 +1429,17 @@ String _formatRawSyncStatus(String value) {
     'success' || 'completed' || 'ok' => 'Exitosa',
     'failed' || 'error' || 'timeout' => 'Con error',
     'running' || 'in_progress' || 'pending' => 'En proceso',
+    'retry_requested' || 'retry-requested' || 'retry' => 'Reintento solicitado',
     '' => 'Sin estado',
     _ => '${value[0].toUpperCase()}${value.substring(1)}',
+  };
+}
+
+String _monitoringKindLabel(SyncMonitoringAlert alert) {
+  return switch (alert.kind) {
+    SyncMonitoringAlertKind.syncFailure => 'Fallo',
+    SyncMonitoringAlertKind.staleData => 'Desactualizada',
+    SyncMonitoringAlertKind.retryRequested => 'Reintento',
   };
 }
 

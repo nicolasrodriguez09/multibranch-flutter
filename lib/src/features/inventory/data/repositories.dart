@@ -652,6 +652,21 @@ class SystemRepository {
         .toList(growable: false);
   }
 
+  Future<List<SyncLog>> fetchBranchSyncLogs(
+    String branchId, {
+    int limit = 24,
+  }) async {
+    final snapshot = await _syncLogs
+        .where('branchId', isEqualTo: branchId)
+        .orderBy('createdAt', descending: true)
+        .limit(limit)
+        .get();
+
+    return snapshot.docs
+        .map((doc) => SyncLog.fromFirestore(doc.id, doc.data()))
+        .toList(growable: false);
+  }
+
   Stream<List<StockAlertReadState>> watchStockAlertReadStates(String userId) {
     return _stockAlertReads
         .where('userId', isEqualTo: userId)

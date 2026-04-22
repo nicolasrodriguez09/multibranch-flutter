@@ -596,6 +596,15 @@ void main() {
 
     expect(find.text('Estado de sincronizacion'), findsOneWidget);
     expect(find.text('API de sincronizacion'), findsOneWidget);
+    expect(find.text('Alertas de monitoreo'), findsOneWidget);
+    expect(find.text('Solicitar reintento'), findsWidgets);
+    await tester.scrollUntilVisible(
+      find.text('Reglas de fallo'),
+      180,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Reglas de fallo'), findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('Ultima sincronizacion por sucursal'),
       220,

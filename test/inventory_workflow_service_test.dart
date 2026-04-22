@@ -156,6 +156,103 @@ void main() {
   );
 
   test(
+    'sync monitoring alerts expose stale branches, failure bursts and failure rules',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final admin = sampleData.users.first;
+
+      await service.system.addSyncLog(
+        SyncLog(
+          id: 'sync_failed_burst_1',
+          branchId: DemoIds.branchNorth,
+          branchName: 'Sucursal Norte',
+          type: 'inventory',
+          status: 'failed',
+          recordsProcessed: 0,
+          startedAt: now.subtract(const Duration(minutes: 26)),
+          finishedAt: now.subtract(const Duration(minutes: 24)),
+          message: 'Fallo en lote 1.',
+          createdAt: now.subtract(const Duration(minutes: 24)),
+        ),
+      );
+      await service.system.addSyncLog(
+        SyncLog(
+          id: 'sync_failed_burst_2',
+          branchId: DemoIds.branchNorth,
+          branchName: 'Sucursal Norte',
+          type: 'inventory',
+          status: 'timeout',
+          recordsProcessed: 0,
+          startedAt: now.subtract(const Duration(minutes: 10)),
+          finishedAt: now.subtract(const Duration(minutes: 8)),
+          message: 'Fallo en lote 2.',
+          createdAt: now.subtract(const Duration(minutes: 8)),
+        ),
+      );
+
+      final overview = await service.fetchSyncStatusOverview(actorUser: admin);
+
+      expect(overview.failureRules, isNotEmpty);
+      expect(
+        overview.monitoringAlerts.any(
+          (item) =>
+              item.branchId == DemoIds.branchNorth &&
+              item.kind == SyncMonitoringAlertKind.syncFailure,
+        ),
+        isTrue,
+      );
+      expect(
+        overview.monitoringAlerts.any(
+          (item) =>
+              item.branchId == DemoIds.branchNorth &&
+              item.kind == SyncMonitoringAlertKind.staleData,
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  test('admin can register sync errors as monitoring events', () async {
+    await service.seedMasterData(actorUser: sampleData.users.first);
+    final admin = sampleData.users.first;
+
+    await service.registerSyncError(
+      actorUser: admin,
+      branchId: DemoIds.branchNorth,
+      type: 'inventory',
+      technicalDetail: 'Timeout al consultar el consolidado central.',
+    );
+
+    final syncLogs = await service.system.fetchBranchSyncLogs(
+      DemoIds.branchNorth,
+      limit: 6,
+    );
+
+    expect(syncLogs.first.status, 'failed');
+    expect(syncLogs.first.message, contains('Timeout'));
+  });
+
+  test('admin can request sync retries from monitoring', () async {
+    await service.seedMasterData(actorUser: sampleData.users.first);
+    final admin = sampleData.users.first;
+
+    await service.requestSyncRetry(
+      actorUser: admin,
+      branchId: DemoIds.branchNorth,
+      preferredType: 'inventory',
+      note: 'Reintentar despues de validar conectividad.',
+    );
+
+    final syncLogs = await service.system.fetchBranchSyncLogs(
+      DemoIds.branchNorth,
+      limit: 6,
+    );
+
+    expect(syncLogs.first.status, 'retry_requested');
+    expect(syncLogs.first.message, contains('Reintentar'));
+  });
+
+  test(
     'stock alerts can be marked as read and reopen after inventory updates',
     () async {
       await service.seedMasterData(actorUser: sampleData.users.first);

@@ -2234,6 +2234,15 @@ class _SyncStatusOverviewPanel extends StatelessWidget {
               ),
             )
             .toList(growable: false);
+        final monitoringAlerts = data.monitoringAlerts;
+        final criticalMonitoringCount = monitoringAlerts
+            .where((item) => item.isCritical)
+            .length;
+        final retryMonitoringCount = monitoringAlerts
+            .where(
+              (item) => item.kind == SyncMonitoringAlertKind.retryRequested,
+            )
+            .length;
 
         return _DashboardPanel(
           title: 'Estado de sincronizacion',
@@ -2249,6 +2258,15 @@ class _SyncStatusOverviewPanel extends StatelessWidget {
                   context,
                 ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
               ),
+              if (currentUser.role == UserRole.admin) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Monitoreo admin: ${monitoringAlerts.length} activas | Criticas: $criticalMonitoringCount | Reintentos: $retryMonitoringCount',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: Colors.white60),
+                ),
+              ],
               const SizedBox(height: 12),
               _InsightList(
                 items: items,

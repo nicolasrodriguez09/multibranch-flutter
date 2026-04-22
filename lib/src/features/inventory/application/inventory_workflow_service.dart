@@ -117,12 +117,16 @@ class SyncStatusOverview {
     required this.apiStatus,
     required this.branches,
     required this.warnings,
+    required this.monitoringAlerts,
+    required this.failureRules,
   });
 
   final DateTime generatedAt;
   final SyncApiStatus apiStatus;
   final List<SyncBranchStatus> branches;
   final List<String> warnings;
+  final List<SyncMonitoringAlert> monitoringAlerts;
+  final List<String> failureRules;
 
   List<SyncBranchStatus> get healthyBranches => branches
       .where((item) => item.severity == SyncStatusSeverity.healthy)
@@ -150,6 +154,39 @@ class SyncStatusOverview {
     }
     return null;
   }
+}
+
+enum SyncMonitoringAlertKind { syncFailure, staleData, retryRequested }
+
+class SyncMonitoringAlert {
+  const SyncMonitoringAlert({
+    required this.id,
+    required this.branchId,
+    required this.branchName,
+    required this.kind,
+    required this.severity,
+    required this.title,
+    required this.summary,
+    required this.technicalDetail,
+    required this.triggeredAt,
+    required this.latestLog,
+    required this.recentFailureCount,
+  });
+
+  final String id;
+  final String branchId;
+  final String branchName;
+  final SyncMonitoringAlertKind kind;
+  final SyncStatusSeverity severity;
+  final String title;
+  final String summary;
+  final String technicalDetail;
+  final DateTime triggeredAt;
+  final SyncLog? latestLog;
+  final int recentFailureCount;
+
+  bool get isCritical => severity == SyncStatusSeverity.critical;
+  bool get isWarning => severity == SyncStatusSeverity.warning;
 }
 
 enum StockAlertSeverity { warning, critical }
@@ -705,7 +742,9 @@ class InventoryWorkflowService {
   static const Duration _yellowDataThreshold = Duration(minutes: 30);
   static const Duration _redDataThreshold = Duration(minutes: 60);
   static const Duration _syncStatusTick = Duration(minutes: 1);
+  static const Duration _syncFailureBurstWindow = Duration(hours: 2);
   static const int _syncStatusLogLimit = 180;
+  static const int _syncFailureBurstThreshold = 2;
   static const double _criticalStockThresholdFactor = 0.5;
   static const Map<InventoryRefreshDataType, InventoryRefreshPolicy>
   _refreshPolicies = <InventoryRefreshDataType, InventoryRefreshPolicy>{
@@ -749,6 +788,8 @@ class InventoryWorkflowService {
       _firestore.collection(FirestoreCollections.reservations);
   CollectionReference<Map<String, dynamic>> get _transfersCollection =>
       _firestore.collection(FirestoreCollections.transfers);
+  CollectionReference<Map<String, dynamic>> get _syncLogsCollection =>
+      _firestore.collection(FirestoreCollections.syncLogs);
   CollectionReference<Map<String, dynamic>> get _notificationsCollection =>
       _firestore.collection(FirestoreCollections.notifications);
   CollectionReference<Map<String, dynamic>> get _auditLogsCollection =>
@@ -1261,6 +1302,17 @@ class InventoryWorkflowService {
 
     throw InventoryException(
       'El rol ${actorUser.role.displayName} no tiene permiso para ${permission.label.toLowerCase()}.',
+    );
+  }
+
+  void _ensureAdminSyncMonitoringAccess(AppUser actorUser) {
+    _ensurePermission(actorUser, AppPermission.viewSyncStatus);
+    if (actorUser.role == UserRole.admin) {
+      return;
+    }
+
+    throw const InventoryException(
+      'Solo el administrador puede registrar errores o solicitar reintentos de sincronizacion.',
     );
   }
 
@@ -3023,6 +3075,127 @@ class InventoryWorkflowService {
     return controller.stream;
   }
 
+  Future<SyncLog> registerSyncError({
+    required AppUser actorUser,
+    required String branchId,
+    required String type,
+    required String technicalDetail,
+  }) async {
+    _ensureAdminSyncMonitoringAccess(actorUser);
+
+    final normalizedDetail = technicalDetail.trim();
+    if (normalizedDetail.isEmpty) {
+      throw const InventoryException(
+        'Debes registrar un detalle tecnico para el evento de error.',
+      );
+    }
+
+    final branch = await catalog.fetchBranch(branchId);
+    if (branch == null) {
+      throw const InventoryException('La sucursal no existe.');
+    }
+
+    final now = _clock();
+    final syncRef = _syncLogsCollection.doc();
+    final auditLogRef = _auditLogsCollection.doc();
+    final syncLog = SyncLog(
+      id: syncRef.id,
+      branchId: branch.id,
+      branchName: branch.name,
+      type: _normalizeSyncType(type),
+      status: 'failed',
+      recordsProcessed: 0,
+      startedAt: now,
+      finishedAt: now,
+      message: normalizedDetail,
+      createdAt: now,
+    );
+    final auditLog = _buildAuditLog(
+      actorUser: actorUser,
+      action: 'sync_error_logged',
+      entityType: 'sync',
+      entityId: syncLog.id,
+      entityLabel: branch.name,
+      message: 'Registro un evento de error de sincronizacion para',
+      metadata: {
+        'branchId': branch.id,
+        'branchName': branch.name,
+        'syncType': syncLog.type,
+        'status': syncLog.status,
+        'technicalDetail': normalizedDetail,
+      },
+      branchId: branch.id,
+      branchName: branch.name,
+    );
+
+    final batch = _firestore.batch();
+    batch.set(syncRef, syncLog.toFirestore());
+    batch.set(auditLogRef, auditLog.toFirestore());
+    await batch.commit();
+    return syncLog;
+  }
+
+  Future<SyncLog> requestSyncRetry({
+    required AppUser actorUser,
+    required String branchId,
+    String? preferredType,
+    String note = '',
+  }) async {
+    _ensureAdminSyncMonitoringAccess(actorUser);
+
+    final branch = await catalog.fetchBranch(branchId);
+    if (branch == null) {
+      throw const InventoryException('La sucursal no existe.');
+    }
+
+    final branchLogs = await system.fetchBranchSyncLogs(branchId, limit: 1);
+    final latestLog = branchLogs.isEmpty ? null : branchLogs.first;
+    final syncType = _normalizeSyncType(
+      preferredType ?? latestLog?.type ?? 'inventory',
+    );
+    final normalizedNote = note.trim();
+    final now = _clock();
+    final syncRef = _syncLogsCollection.doc();
+    final auditLogRef = _auditLogsCollection.doc();
+    final syncLog = SyncLog(
+      id: syncRef.id,
+      branchId: branch.id,
+      branchName: branch.name,
+      type: syncType,
+      status: 'retry_requested',
+      recordsProcessed: 0,
+      startedAt: now,
+      finishedAt: now,
+      message: normalizedNote.isEmpty
+          ? 'Reintento manual solicitado desde monitoreo.'
+          : normalizedNote,
+      createdAt: now,
+    );
+    final auditLog = _buildAuditLog(
+      actorUser: actorUser,
+      action: 'sync_retry_requested',
+      entityType: 'sync',
+      entityId: syncLog.id,
+      entityLabel: branch.name,
+      message: 'Solicito un reintento de sincronizacion para',
+      metadata: {
+        'branchId': branch.id,
+        'branchName': branch.name,
+        'syncType': syncLog.type,
+        'status': syncLog.status,
+        if (normalizedNote.isNotEmpty) 'note': normalizedNote,
+      },
+      branchId: branch.id,
+      branchName: branch.name,
+    );
+
+    final batch = _firestore.batch();
+    batch.set(syncRef, syncLog.toFirestore());
+    batch.set(auditLogRef, auditLog.toFirestore());
+    await batch.commit();
+    return syncLog;
+  }
+
   Stream<List<RequestTrackingItem>> watchRequestTracking({
     required AppUser actorUser,
   }) {
@@ -4574,6 +4747,15 @@ class InventoryWorkflowService {
   String _stockAlertReadStateId(String userId, String alertId) =>
       '${userId}_$alertId';
 
+  String _normalizeSyncType(String value) {
+    final normalized = value
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+    return normalized.isEmpty ? 'inventory' : normalized;
+  }
+
   Future<void> _handleLowStockAlertTransition({
     required InventoryItem? previousInventory,
     required InventoryItem updatedInventory,
@@ -4662,8 +4844,10 @@ class InventoryWorkflowService {
     final orderedLogs = List<SyncLog>.from(syncLogs)
       ..sort((left, right) => right.createdAt.compareTo(left.createdAt));
     final latestLogByBranch = <String, SyncLog>{};
+    final logsByBranch = <String, List<SyncLog>>{};
     for (final log in orderedLogs) {
       latestLogByBranch.putIfAbsent(log.branchId, () => log);
+      logsByBranch.putIfAbsent(log.branchId, () => <SyncLog>[]).add(log);
     }
 
     final branchStatuses =
@@ -4671,7 +4855,7 @@ class InventoryWorkflowService {
             .map(
               (branch) => _buildBranchSyncStatus(
                 branch: branch,
-                latestLog: latestLogByBranch[branch.id],
+                branchLogs: logsByBranch[branch.id] ?? const <SyncLog>[],
               ),
             )
             .toList(growable: false)
@@ -4687,6 +4871,10 @@ class InventoryWorkflowService {
       syncLogs: orderedLogs,
       branchStatuses: branchStatuses,
     );
+    final monitoringAlerts = _buildSyncMonitoringAlerts(
+      branchStatuses: branchStatuses,
+      logsByBranch: logsByBranch,
+    );
 
     return SyncStatusOverview(
       generatedAt: _clock(),
@@ -4698,14 +4886,22 @@ class InventoryWorkflowService {
           branchStatuses: branchStatuses,
         ),
       ),
+      monitoringAlerts: List<SyncMonitoringAlert>.unmodifiable(
+        monitoringAlerts,
+      ),
+      failureRules: List<String>.unmodifiable(_syncFailureRules()),
     );
   }
 
   SyncBranchStatus _buildBranchSyncStatus({
     required Branch branch,
-    required SyncLog? latestLog,
+    required List<SyncLog> branchLogs,
   }) {
-    final lastSyncAt = latestLog?.createdAt ?? branch.lastSyncAt;
+    final latestLog = branchLogs.isEmpty ? null : branchLogs.first;
+    final lastSyncAt = _resolveLastSuccessfulSyncAt(
+      branch: branch,
+      branchLogs: branchLogs,
+    );
     final age = lastSyncAt == null ? null : _clock().difference(lastSyncAt);
     final normalizedStatus = latestLog?.status.trim().toLowerCase() ?? '';
 
@@ -4720,6 +4916,21 @@ class InventoryWorkflowService {
         detail: latestLog.message.trim().isEmpty
             ? 'La ultima sincronizacion reporto un error y requiere revision.'
             : latestLog.message.trim(),
+      );
+    }
+
+    if (latestLog != null && _isSyncRetryRequestedStatus(normalizedStatus)) {
+      final note = latestLog.message.trim();
+      return SyncBranchStatus(
+        branch: branch,
+        latestLog: latestLog,
+        lastSyncAt: lastSyncAt,
+        age: age,
+        severity: SyncStatusSeverity.warning,
+        summary: 'Reintento solicitado',
+        detail: note.isEmpty
+            ? 'Se registro un reintento manual y sigue pendiente de ejecucion.'
+            : 'Reintento solicitado. $note',
       );
     }
 
@@ -4822,6 +5033,19 @@ class InventoryWorkflowService {
       );
     }
 
+    if (_isSyncRetryRequestedStatus(normalizedStatus)) {
+      return SyncApiStatus(
+        severity: SyncStatusSeverity.warning,
+        summary: 'Reintento pendiente',
+        detail: latestLog.message.trim().isEmpty
+            ? 'Hay un reintento manual de sincronizacion pendiente de ejecucion.'
+            : latestLog.message.trim(),
+        latestLog: latestLog,
+        averageResponseTime: averageResponseTime,
+        lastUpdatedAt: latestLog.createdAt,
+      );
+    }
+
     if (latestAge > _redDataThreshold) {
       return SyncApiStatus(
         severity: SyncStatusSeverity.critical,
@@ -4892,8 +5116,191 @@ class InventoryWorkflowService {
         '$missingSync sucursal(es) no tienen registro de ultima sincronizacion.',
       );
     }
+    final retryRequested = branchStatuses.where((item) {
+      final status = item.latestLog?.status.trim().toLowerCase() ?? '';
+      return _isSyncRetryRequestedStatus(status);
+    }).length;
+    if (retryRequested > 0) {
+      warnings.add(
+        '$retryRequested sucursal(es) tienen un reintento de sincronizacion solicitado.',
+      );
+    }
 
     return warnings;
+  }
+
+  List<SyncMonitoringAlert> _buildSyncMonitoringAlerts({
+    required List<SyncBranchStatus> branchStatuses,
+    required Map<String, List<SyncLog>> logsByBranch,
+  }) {
+    final alerts = <SyncMonitoringAlert>[];
+
+    for (final branchStatus in branchStatuses) {
+      final branchLogs =
+          logsByBranch[branchStatus.branch.id] ?? const <SyncLog>[];
+      final recentFailureCount = _recentSyncFailureCount(branchLogs);
+      final latestFailureLog = _findLatestLogByStatus(
+        logs: branchLogs,
+        predicate: _isSyncFailureStatus,
+      );
+      final latestRetryLog = _findLatestLogByStatus(
+        logs: branchLogs,
+        predicate: _isSyncRetryRequestedStatus,
+      );
+
+      if (latestFailureLog != null ||
+          recentFailureCount >= _syncFailureBurstThreshold) {
+        final focusLog = latestFailureLog ?? branchStatus.latestLog;
+        final title = recentFailureCount >= _syncFailureBurstThreshold
+            ? 'Racha de fallos de sincronizacion'
+            : 'Fallo de sincronizacion';
+        final summary = recentFailureCount >= _syncFailureBurstThreshold
+            ? '${branchStatus.branch.name} acumula $recentFailureCount fallos en las ultimas ${_describeDuration(_syncFailureBurstWindow)}.'
+            : '${branchStatus.branch.name} reporto un error de sincronizacion y requiere revision.';
+
+        alerts.add(
+          SyncMonitoringAlert(
+            id: '${branchStatus.branch.id}_sync_failure',
+            branchId: branchStatus.branch.id,
+            branchName: branchStatus.branch.name,
+            kind: SyncMonitoringAlertKind.syncFailure,
+            severity: SyncStatusSeverity.critical,
+            title: title,
+            summary: summary,
+            technicalDetail: _buildSyncMonitoringTechnicalDetail(
+              branchStatus: branchStatus,
+              latestLog: focusLog,
+              recentFailureCount: recentFailureCount,
+              prefix: latestFailureLog == null
+                  ? 'Se detecto una concentracion anormal de fallos recientes.'
+                  : 'El ultimo evento fallido exige revision antes de confiar en el dato.',
+            ),
+            triggeredAt:
+                focusLog?.createdAt ??
+                branchStatus.lastSyncAt ??
+                branchStatus.branch.updatedAt,
+            latestLog: focusLog,
+            recentFailureCount: recentFailureCount,
+          ),
+        );
+      }
+
+      if (latestRetryLog != null) {
+        alerts.add(
+          SyncMonitoringAlert(
+            id: '${branchStatus.branch.id}_retry_requested',
+            branchId: branchStatus.branch.id,
+            branchName: branchStatus.branch.name,
+            kind: SyncMonitoringAlertKind.retryRequested,
+            severity: SyncStatusSeverity.warning,
+            title: 'Reintento pendiente',
+            summary:
+                'Se solicito un reintento manual para ${branchStatus.branch.name}.',
+            technicalDetail: _buildSyncMonitoringTechnicalDetail(
+              branchStatus: branchStatus,
+              latestLog: latestRetryLog,
+              recentFailureCount: recentFailureCount,
+              prefix:
+                  'Existe un reintento manual pendiente de ejecucion o validacion.',
+            ),
+            triggeredAt: latestRetryLog.createdAt,
+            latestLog: latestRetryLog,
+            recentFailureCount: recentFailureCount,
+          ),
+        );
+      }
+
+      final isStale =
+          branchStatus.lastSyncAt == null ||
+          (branchStatus.age != null &&
+              branchStatus.age! > _yellowDataThreshold);
+      if (isStale) {
+        final severity =
+            branchStatus.lastSyncAt == null ||
+                (branchStatus.age != null &&
+                    branchStatus.age! > _redDataThreshold)
+            ? SyncStatusSeverity.critical
+            : SyncStatusSeverity.warning;
+        final summary = branchStatus.lastSyncAt == null
+            ? '${branchStatus.branch.name} no tiene una ultima sincronizacion registrada.'
+            : '${branchStatus.branch.name} lleva ${_describeDuration(branchStatus.age!)} sin actualizarse.';
+
+        alerts.add(
+          SyncMonitoringAlert(
+            id: '${branchStatus.branch.id}_stale_data',
+            branchId: branchStatus.branch.id,
+            branchName: branchStatus.branch.name,
+            kind: SyncMonitoringAlertKind.staleData,
+            severity: severity,
+            title: severity == SyncStatusSeverity.critical
+                ? 'Sucursal sin sincronizacion reciente'
+                : 'Sucursal con retraso de sincronizacion',
+            summary: summary,
+            technicalDetail: _buildSyncMonitoringTechnicalDetail(
+              branchStatus: branchStatus,
+              latestLog: branchStatus.latestLog,
+              recentFailureCount: recentFailureCount,
+              prefix: branchStatus.lastSyncAt == null
+                  ? 'No existe un punto de sincronizacion reciente para validar la sucursal.'
+                  : 'La sucursal supero el TTL de sincronizacion recomendado.',
+            ),
+            triggeredAt:
+                branchStatus.lastSyncAt ?? branchStatus.branch.updatedAt,
+            latestLog: branchStatus.latestLog,
+            recentFailureCount: recentFailureCount,
+          ),
+        );
+      }
+    }
+
+    alerts.sort(_compareSyncMonitoringAlerts);
+    return alerts;
+  }
+
+  String _buildSyncMonitoringTechnicalDetail({
+    required SyncBranchStatus branchStatus,
+    required SyncLog? latestLog,
+    required int recentFailureCount,
+    required String prefix,
+  }) {
+    final buffer = StringBuffer(prefix);
+    buffer.write('\nSucursal: ${branchStatus.branch.name}');
+    buffer.write('\nEstado resumido: ${branchStatus.summary}');
+    buffer.write(
+      '\nUltima referencia: ${_formatSyncTechnicalDate(branchStatus.lastSyncAt)}',
+    );
+    if (latestLog != null) {
+      buffer.write('\nTipo: ${_normalizeSyncType(latestLog.type)}');
+      buffer.write(
+        '\nEstado tecnico: ${latestLog.status.trim().toLowerCase()}',
+      );
+      buffer.write(
+        '\nInicio: ${_formatSyncTechnicalDate(latestLog.startedAt)} | Fin: ${_formatSyncTechnicalDate(latestLog.finishedAt)}',
+      );
+      buffer.write(
+        '\nDuracion: ${_describeDuration(latestLog.finishedAt.difference(latestLog.startedAt))}',
+      );
+      if (latestLog.message.trim().isNotEmpty) {
+        buffer.write('\nDetalle: ${latestLog.message.trim()}');
+      }
+      buffer.write('\nRegistros procesados: ${latestLog.recordsProcessed}');
+    }
+    if (recentFailureCount > 0) {
+      buffer.write(
+        '\nFallos recientes: $recentFailureCount en ${_describeDuration(_syncFailureBurstWindow)}.',
+      );
+    }
+    return buffer.toString();
+  }
+
+  List<String> _syncFailureRules() {
+    return const <String>[
+      'Fallo critico: el ultimo evento tecnico llega con estado failed, error o timeout.',
+      'Retraso moderado: la sucursal supera 30 minutos sin una sincronizacion reciente.',
+      'Desactualizacion critica: la sucursal supera 60 minutos sin actualizar o no tiene registro.',
+      'Racha de fallos: dos o mas errores de sincronizacion en una ventana de 2 horas.',
+      'Reintento pendiente: un administrador dejo registrado un retry_requested para la sucursal.',
+    ];
   }
 
   int _compareBranchSyncStatus(
@@ -4944,11 +5351,112 @@ class InventoryWorkflowService {
     };
   }
 
+  bool _isSyncSuccessStatus(String value) {
+    return switch (value) {
+      'success' || 'completed' || 'ok' => true,
+      _ => false,
+    };
+  }
+
+  bool _isSyncRetryRequestedStatus(String value) {
+    return switch (value) {
+      'retry_requested' || 'retry-requested' || 'retry' => true,
+      _ => false,
+    };
+  }
+
   bool _isSyncRunningStatus(String value) {
     return switch (value) {
       'running' || 'in_progress' || 'pending' => true,
       _ => false,
     };
+  }
+
+  SyncLog? _findLatestLogByStatus({
+    required List<SyncLog> logs,
+    required bool Function(String value) predicate,
+  }) {
+    for (final log in logs) {
+      final status = log.status.trim().toLowerCase();
+      if (predicate(status)) {
+        return log;
+      }
+    }
+    return null;
+  }
+
+  DateTime? _resolveLastSuccessfulSyncAt({
+    required Branch branch,
+    required List<SyncLog> branchLogs,
+  }) {
+    for (final log in branchLogs) {
+      final status = log.status.trim().toLowerCase();
+      if (_isSyncSuccessStatus(status)) {
+        return log.createdAt;
+      }
+    }
+    return branch.lastSyncAt;
+  }
+
+  int _recentSyncFailureCount(List<SyncLog> logs) {
+    final now = _clock();
+    return logs.where((log) {
+      final status = log.status.trim().toLowerCase();
+      final isRecent = now.difference(log.createdAt) <= _syncFailureBurstWindow;
+      return isRecent && _isSyncFailureStatus(status);
+    }).length;
+  }
+
+  int _compareSyncMonitoringAlerts(
+    SyncMonitoringAlert left,
+    SyncMonitoringAlert right,
+  ) {
+    final severityComparison = _syncSeverityPriority(
+      right.severity,
+    ).compareTo(_syncSeverityPriority(left.severity));
+    if (severityComparison != 0) {
+      return severityComparison;
+    }
+
+    final triggeredAtComparison = right.triggeredAt.compareTo(left.triggeredAt);
+    if (triggeredAtComparison != 0) {
+      return triggeredAtComparison;
+    }
+
+    final kindComparison = left.kind.index.compareTo(right.kind.index);
+    if (kindComparison != 0) {
+      return kindComparison;
+    }
+
+    return left.branchName.compareTo(right.branchName);
+  }
+
+  String _formatSyncTechnicalDate(DateTime? value) {
+    if (value == null) {
+      return 'sin registro';
+    }
+    return '${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')} ${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
+  }
+
+  String _describeDuration(Duration value) {
+    final duration = value.isNegative ? value.abs() : value;
+    if (duration.inDays >= 1) {
+      final hours = duration.inHours.remainder(24);
+      return hours == 0 ? '$duration.inDays d' : '$duration.inDays d $hours h';
+    }
+    if (duration.inHours >= 1) {
+      final minutes = duration.inMinutes.remainder(60);
+      return minutes == 0
+          ? '$duration.inHours h'
+          : '$duration.inHours h $minutes min';
+    }
+    if (duration.inMinutes >= 1) {
+      final seconds = duration.inSeconds.remainder(60);
+      return seconds == 0
+          ? '$duration.inMinutes min'
+          : '$duration.inMinutes min $seconds s';
+    }
+    return '${math.max(duration.inSeconds, 0)} s';
   }
 
   BranchOperationalStats _buildOperationalStats({
