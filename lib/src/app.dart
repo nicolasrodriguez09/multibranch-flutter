@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import 'core/app_theme.dart';
+import 'features/auth/application/auth_session.dart';
 import 'features/auth/application/auth_service.dart';
 import 'features/auth/presentation/auth_page.dart';
 import 'features/inventory/application/inventory_workflow_service.dart';
@@ -10,31 +13,112 @@ import 'features/inventory/data/inventory_offline_cache.dart';
 import 'features/inventory/domain/models.dart';
 import 'features/inventory/presentation/inventory_dashboard_page.dart';
 
-class MyApp extends StatelessWidget {
-  MyApp({
+class MyApp extends StatefulWidget {
+  const MyApp({
     super.key,
-    FirebaseFirestore? firestore,
-    FirebaseAuth? auth,
-    InventoryOfflineCache? offlineCache,
-  }) : firestore = firestore ?? FirebaseFirestore.instance,
-       auth = auth ?? FirebaseAuth.instance,
-       authService = AuthService(
-         auth: auth ?? FirebaseAuth.instance,
-         firestore: firestore ?? FirebaseFirestore.instance,
-       ),
-       inventoryService = InventoryWorkflowService(
-         firestore: firestore ?? FirebaseFirestore.instance,
-         offlineCache: offlineCache ?? MemoryInventoryOfflineCache(),
-       );
+    this.firestore,
+    this.auth,
+    this.offlineCache,
+    this.secureSessionStore,
+    this.sessionSnapshotResolver,
+    this.enableSessionRefreshMonitoring = true,
+  });
 
-  final FirebaseFirestore firestore;
-  final FirebaseAuth auth;
-  final AuthService authService;
-  final InventoryWorkflowService inventoryService;
+  final FirebaseFirestore? firestore;
+  final FirebaseAuth? auth;
+  final InventoryOfflineCache? offlineCache;
+  final SecureSessionStore? secureSessionStore;
+  final AuthSessionSnapshotResolver? sessionSnapshotResolver;
+  final bool enableSessionRefreshMonitoring;
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  late final FirebaseFirestore firestore;
+  late final FirebaseAuth auth;
+  late final AuthService authService;
+  late final InventoryWorkflowService inventoryService;
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  StreamSubscription<User?>? _authSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    firestore = widget.firestore ?? FirebaseFirestore.instance;
+    auth = widget.auth ?? FirebaseAuth.instance;
+    authService = AuthService(
+      auth: auth,
+      firestore: firestore,
+      secureSessionStore:
+          widget.secureSessionStore ?? FlutterSecureSessionStore(),
+      sessionSnapshotResolver: widget.sessionSnapshotResolver,
+      enableSessionRefreshMonitoring: widget.enableSessionRefreshMonitoring,
+    );
+    inventoryService = InventoryWorkflowService(
+      firestore: firestore,
+      offlineCache: widget.offlineCache ?? MemoryInventoryOfflineCache(),
+    );
+    _authSubscription = authService.authStateChanges().listen(_handleAuthState);
+  }
+
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    unawaited(authService.dispose());
+    super.dispose();
+  }
+
+  void _handleAuthState(User? user) {
+    if (user != null) {
+      return;
+    }
+
+    final navigator = _navigatorKey.currentState;
+    if (navigator != null) {
+      navigator.pushAndRemoveUntil<void>(
+        PageRouteBuilder<void>(
+          pageBuilder: (context, animation, secondaryAnimation) {
+            return _AuthGate(
+              authService: authService,
+              inventoryService: inventoryService,
+            );
+          },
+          transitionDuration: Duration.zero,
+          reverseTransitionDuration: Duration.zero,
+        ),
+        (route) => false,
+      );
+    }
+
+    final notice = authService.takePendingSessionNotice();
+    if (notice == null || notice.isEmpty) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = _navigatorKey.currentContext;
+      if (context == null) {
+        return;
+      }
+
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger
+        ?..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(notice),
+            backgroundColor: const Color(0xFF9B2226),
+          ),
+        );
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       title: 'Multi-Branch Inventory',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),

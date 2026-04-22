@@ -1013,6 +1013,118 @@ class AuditLog {
   }
 }
 
+enum RequestLogStatus {
+  success,
+  error;
+
+  static RequestLogStatus fromValue(String value) {
+    return RequestLogStatus.values.firstWhere(
+      (status) => status.name == value.trim().toLowerCase(),
+      orElse: () => RequestLogStatus.success,
+    );
+  }
+}
+
+class RequestLog {
+  const RequestLog({
+    required this.id,
+    required this.operation,
+    required this.source,
+    required this.status,
+    required this.actorUserId,
+    required this.actorName,
+    required this.actorRole,
+    required this.durationMs,
+    required this.requestSummary,
+    required this.responseSummary,
+    required this.createdAt,
+    this.branchId,
+    this.branchName,
+    this.entityType,
+    this.entityId,
+    this.entityLabel,
+    this.errorType,
+    this.errorMessage,
+  });
+
+  final String id;
+  final String operation;
+  final String source;
+  final RequestLogStatus status;
+  final String actorUserId;
+  final String actorName;
+  final UserRole actorRole;
+  final int durationMs;
+  final Map<String, String> requestSummary;
+  final Map<String, String> responseSummary;
+  final DateTime createdAt;
+  final String? branchId;
+  final String? branchName;
+  final String? entityType;
+  final String? entityId;
+  final String? entityLabel;
+  final String? errorType;
+  final String? errorMessage;
+
+  bool get isError => status == RequestLogStatus.error;
+
+  Map<String, dynamic> toFirestore() => {
+    'operation': operation,
+    'source': source,
+    'status': status.name,
+    'actorUserId': actorUserId,
+    'actorName': actorName,
+    'actorRole': actorRole.name,
+    'durationMs': durationMs,
+    'requestSummary': requestSummary,
+    'responseSummary': responseSummary,
+    'createdAt': writeDateTime(createdAt),
+    'branchId': branchId,
+    'branchName': branchName,
+    'entityType': entityType,
+    'entityId': entityId,
+    'entityLabel': entityLabel,
+    'errorType': errorType,
+    'errorMessage': errorMessage,
+  };
+
+  factory RequestLog.fromFirestore(String id, Map<String, dynamic> data) {
+    final rawRequestSummary =
+        (data['requestSummary'] as Map?)?.cast<Object?, Object?>() ?? const {};
+    final rawResponseSummary =
+        (data['responseSummary'] as Map?)?.cast<Object?, Object?>() ?? const {};
+
+    return RequestLog(
+      id: id,
+      operation: readString(data, 'operation'),
+      source: readString(data, 'source'),
+      status: RequestLogStatus.fromValue(readString(data, 'status')),
+      actorUserId: readString(data, 'actorUserId'),
+      actorName: readString(data, 'actorName'),
+      actorRole: UserRole.fromValue(readString(data, 'actorRole')),
+      durationMs: readInt(data, 'durationMs'),
+      requestSummary: rawRequestSummary.map(
+        (key, value) =>
+            MapEntry(key?.toString() ?? '', value?.toString() ?? ''),
+      ),
+      responseSummary: rawResponseSummary.map(
+        (key, value) =>
+            MapEntry(key?.toString() ?? '', value?.toString() ?? ''),
+      ),
+      createdAt:
+          readDateTime(data, 'createdAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      branchId: data['branchId'] as String?,
+      branchName: data['branchName'] as String?,
+      entityType: data['entityType'] as String?,
+      entityId: data['entityId'] as String?,
+      entityLabel: data['entityLabel'] as String?,
+      errorType: data['errorType'] as String?,
+      errorMessage: data['errorMessage'] as String?,
+    );
+  }
+}
+
 class SearchHistoryEntry {
   const SearchHistoryEntry({
     required this.id,

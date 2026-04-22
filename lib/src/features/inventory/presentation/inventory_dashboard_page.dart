@@ -3026,6 +3026,10 @@ class _AdminTraceabilityPage extends StatelessWidget {
                     service: service,
                     currentUser: currentUser,
                   ),
+                  _AdminTechnicalAuditPanel(
+                    service: service,
+                    currentUser: currentUser,
+                  ),
                 ],
               ),
             ],
@@ -3142,6 +3146,139 @@ class _AdminReservationTraceabilityPanel extends StatelessWidget {
   }
 }
 
+class _AdminTechnicalAuditPanel extends StatelessWidget {
+  const _AdminTechnicalAuditPanel({
+    required this.service,
+    required this.currentUser,
+  });
+
+  final InventoryWorkflowService service;
+  final AppUser currentUser;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<TechnicalAuditReport>(
+      future: service.fetchTechnicalAuditReport(actorUser: currentUser),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return _DashboardPanel(
+            title: 'Observabilidad tecnica',
+            subtitle:
+                'Operaciones instrumentadas, errores recientes y latencia por endpoint logico.',
+            accent: AppPalette.mint,
+            child: const SizedBox(
+              height: 220,
+              child: Center(child: CircularProgressIndicator()),
+            ),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return _DashboardPanel(
+            title: 'Observabilidad tecnica',
+            subtitle:
+                'Operaciones instrumentadas, errores recientes y latencia por endpoint logico.',
+            accent: AppPalette.mint,
+            child: _TraceabilityBlock(
+              child: Text(
+                'No se pudo cargar el reporte tecnico.\n${snapshot.error}',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+              ),
+            ),
+          );
+        }
+
+        final report = snapshot.requireData;
+        final metrics = report.endpointMetrics.take(6).toList(growable: false);
+        final recentErrors = report.recentErrors
+            .take(4)
+            .toList(growable: false);
+
+        return _DashboardPanel(
+          title: 'Observabilidad tecnica',
+          subtitle:
+              'Operaciones instrumentadas, errores recientes y latencia por endpoint logico.',
+          accent: AppPalette.mint,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  _TraceabilityMetricCard(
+                    label: 'Requests',
+                    value: '${report.recentRequests.length}',
+                    accent: AppPalette.mint,
+                  ),
+                  _TraceabilityMetricCard(
+                    label: 'Errores',
+                    value: '${report.totalFailures}',
+                    accent: AppPalette.amber,
+                  ),
+                  _TraceabilityMetricCard(
+                    label: 'Latencia media',
+                    value: _formatDurationCompact(report.averageResponseTime),
+                    accent: AppPalette.blueSoft,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              const _TraceabilitySectionTitle(title: 'Endpoints observados'),
+              const SizedBox(height: 10),
+              if (metrics.isEmpty)
+                _TraceabilityBlock(
+                  child: Text(
+                    'Aun no hay operaciones tecnicas registradas.',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+                  ),
+                )
+              else
+                Column(
+                  children: metrics
+                      .map(
+                        (item) => Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: _TechnicalAuditMetricTile(metric: item),
+                        ),
+                      )
+                      .toList(growable: false),
+                ),
+              const SizedBox(height: 18),
+              const _TraceabilitySectionTitle(title: 'Errores recientes'),
+              const SizedBox(height: 10),
+              if (recentErrors.isEmpty)
+                _TraceabilityBlock(
+                  child: Text(
+                    'No hay errores recientes en las operaciones instrumentadas.',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+                  ),
+                )
+              else
+                Column(
+                  children: recentErrors
+                      .map(
+                        (item) => Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: _TechnicalAuditErrorTile(requestLog: item),
+                        ),
+                      )
+                      .toList(growable: false),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
 class _TraceabilityEntryList extends StatelessWidget {
   const _TraceabilityEntryList({
     required this.children,
@@ -3173,6 +3310,123 @@ class _TraceabilityEntryList extends StatelessWidget {
             ),
           )
           .toList(growable: false),
+    );
+  }
+}
+
+class _TechnicalAuditMetricTile extends StatelessWidget {
+  const _TechnicalAuditMetricTile({required this.metric});
+
+  final EndpointPerformanceMetric metric;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = metric.failureCount > 0 ? AppPalette.amber : AppPalette.mint;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF102540),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: accent.withValues(alpha: 0.32)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _formatTechnicalOperation(metric.operation),
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${metric.source} | ultima ejecucion ${_formatRelativeTime(metric.lastRequestedAt)}',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: Colors.white70),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            children: [
+              Text(
+                'Requests ${metric.totalRequests}',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              Text(
+                'OK ${metric.successCount}',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: AppPalette.mint),
+              ),
+              Text(
+                'Fallos ${metric.failureCount}',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: AppPalette.amber),
+              ),
+              Text(
+                'Promedio ${_formatDurationCompact(metric.averageDuration)}',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              Text(
+                'Pico ${_formatDurationCompact(metric.slowestDuration)}',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TechnicalAuditErrorTile extends StatelessWidget {
+  const _TechnicalAuditErrorTile({required this.requestLog});
+
+  final RequestLog requestLog;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF102540),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppPalette.danger.withValues(alpha: 0.38)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _formatTechnicalOperation(requestLog.operation),
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${requestLog.errorType ?? 'Error'} | ${_formatRelativeTime(requestLog.createdAt)} | ${_formatDurationCompact(Duration(milliseconds: requestLog.durationMs))}',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: Colors.white70),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            requestLog.errorMessage ?? 'Sin detalle de error.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${requestLog.actorName} | ${requestLog.actorRole.displayName} | ${requestLog.branchName ?? requestLog.branchId ?? 'Global'}',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: Colors.white70),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -5317,6 +5571,27 @@ String _formatDurationCompact(Duration value) {
     return '${value.inMinutes}m ${seconds}s';
   }
   return '${value.inSeconds}s';
+}
+
+String _formatTechnicalOperation(String value) {
+  final normalized = value.trim();
+  if (normalized.isEmpty) {
+    return 'Operacion sin nombre';
+  }
+
+  final segments = normalized
+      .split('.')
+      .where((segment) => segment.isNotEmpty)
+      .map(
+        (segment) => segment
+            .split('_')
+            .where((part) => part.isNotEmpty)
+            .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
+            .join(' '),
+      )
+      .toList(growable: false);
+
+  return segments.join(' / ');
 }
 
 String _formatSyncStatus(String value) {

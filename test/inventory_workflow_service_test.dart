@@ -1184,6 +1184,114 @@ void main() {
   );
 
   test(
+    'transfer operations write technical request logs with response metadata',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final supervisor = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.secondBranchSeller,
+      );
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      final transfer = await service.requestTransfer(
+        actorUser: seller,
+        productId: DemoIds.laptopProduct,
+        fromBranchId: DemoIds.branchNorth,
+        toBranchId: DemoIds.branchCenter,
+        quantity: 1,
+        reason: 'Instrumentacion tecnica',
+      );
+      await service.approveTransfer(
+        actorUser: supervisor,
+        transferId: transfer.id,
+      );
+
+      final requestLogs = await service.system.fetchRecentRequestLogs(
+        limit: 12,
+      );
+      final requestLog = requestLogs.cast<RequestLog?>().firstWhere(
+        (item) => item?.operation == 'transfer.request',
+        orElse: () => null,
+      );
+      final approveLog = requestLogs.cast<RequestLog?>().firstWhere(
+        (item) => item?.operation == 'transfer.approve',
+        orElse: () => null,
+      );
+
+      expect(requestLog, isNotNull);
+      expect(requestLog!.status, RequestLogStatus.success);
+      expect(requestLog.durationMs, greaterThanOrEqualTo(0));
+      expect(requestLog.entityType, 'transfer');
+      expect(requestLog.entityId, transfer.id);
+      expect(requestLog.responseSummary['status'], 'pending');
+
+      expect(approveLog, isNotNull);
+      expect(approveLog!.status, RequestLogStatus.success);
+      expect(approveLog.durationMs, greaterThanOrEqualTo(0));
+      expect(approveLog.entityType, 'transfer');
+      expect(approveLog.entityId, transfer.id);
+      expect(approveLog.responseSummary['status'], 'approved');
+    },
+  );
+
+  test(
+    'technical audit report aggregates transfer errors and endpoint latency',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final admin = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.adminUser,
+      );
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      await service.requestTransfer(
+        actorUser: seller,
+        productId: DemoIds.laptopProduct,
+        fromBranchId: DemoIds.branchNorth,
+        toBranchId: DemoIds.branchCenter,
+        quantity: 1,
+        reason: 'Exito para metricas',
+      );
+
+      await expectLater(
+        service.requestTransfer(
+          actorUser: seller,
+          productId: DemoIds.phoneProduct,
+          fromBranchId: DemoIds.branchNorth,
+          toBranchId: DemoIds.branchCenter,
+          quantity: 18,
+          reason: 'Error tecnico esperado',
+        ),
+        throwsA(isA<InventoryException>()),
+      );
+
+      final report = await service.fetchTechnicalAuditReport(actorUser: admin);
+      final transferMetric = report.endpointMetrics
+          .cast<EndpointPerformanceMetric?>()
+          .firstWhere(
+            (item) => item?.operation == 'transfer.request',
+            orElse: () => null,
+          );
+      final transferError = report.recentErrors.cast<RequestLog?>().firstWhere(
+        (item) => item?.operation == 'transfer.request',
+        orElse: () => null,
+      );
+
+      expect(transferMetric, isNotNull);
+      expect(transferMetric!.totalRequests, greaterThanOrEqualTo(2));
+      expect(transferMetric.failureCount, greaterThanOrEqualTo(1));
+      expect(transferMetric.averageDuration, isA<Duration>());
+      expect(transferMetric.slowestDuration, isA<Duration>());
+
+      expect(transferError, isNotNull);
+      expect(transferError!.status, RequestLogStatus.error);
+      expect(transferError.errorMessage, contains('Stock insuficiente'));
+    },
+  );
+
+  test(
     'supervisor can reject transfer requests and notify the requester',
     () async {
       await service.seedMasterData(actorUser: sampleData.users.first);

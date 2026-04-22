@@ -643,6 +643,58 @@ class BranchDirectoryData {
   }
 }
 
+class EndpointPerformanceMetric {
+  const EndpointPerformanceMetric({
+    required this.operation,
+    required this.source,
+    required this.totalRequests,
+    required this.successCount,
+    required this.failureCount,
+    required this.averageDuration,
+    required this.slowestDuration,
+    required this.lastRequestedAt,
+  });
+
+  final String operation;
+  final String source;
+  final int totalRequests;
+  final int successCount;
+  final int failureCount;
+  final Duration averageDuration;
+  final Duration slowestDuration;
+  final DateTime lastRequestedAt;
+}
+
+class TechnicalAuditReport {
+  const TechnicalAuditReport({
+    required this.generatedAt,
+    required this.recentRequests,
+    required this.recentErrors,
+    required this.endpointMetrics,
+  });
+
+  final DateTime generatedAt;
+  final List<RequestLog> recentRequests;
+  final List<RequestLog> recentErrors;
+  final List<EndpointPerformanceMetric> endpointMetrics;
+
+  int get totalFailures => recentRequests
+      .where((item) => item.status == RequestLogStatus.error)
+      .length;
+
+  Duration get averageResponseTime {
+    if (recentRequests.isEmpty) {
+      return Duration.zero;
+    }
+
+    final totalMs = recentRequests.fold<int>(
+      0,
+      (total, item) => total + item.durationMs,
+    );
+    return Duration(milliseconds: (totalMs / recentRequests.length).round());
+  }
+}
+
 class ProductDetailData {
   const ProductDetailData({
     required this.product,
@@ -862,11 +914,6 @@ class InventoryWorkflowService {
     _branchDirectoryCache.clear();
     _searchFilterOptionsCache = null;
     _runBackgroundTask(_offlineCache.clearBranchCatalogCaches);
-  }
-
-  void _invalidateSearchOptionsCache() {
-    _searchFilterOptionsCache = null;
-    _productSearchCache.clear();
   }
 
   void _runBackgroundTask(Future<void> Function() action) {
@@ -1394,6 +1441,126 @@ class InventoryWorkflowService {
     );
   }
 
+  RequestLog _buildRequestLog({
+    required AppUser actorUser,
+    required String operation,
+    required String source,
+    required RequestLogStatus status,
+    required int durationMs,
+    required Map<String, String> requestSummary,
+    required Map<String, String> responseSummary,
+    required DateTime createdAt,
+    String? branchId,
+    String? branchName,
+    String? entityType,
+    String? entityId,
+    String? entityLabel,
+    String? errorType,
+    String? errorMessage,
+  }) {
+    return RequestLog(
+      id: 'request_log_${createdAt.microsecondsSinceEpoch}_${math.Random().nextInt(1 << 32)}',
+      operation: operation,
+      source: source,
+      status: status,
+      actorUserId: actorUser.id,
+      actorName: actorUser.fullName,
+      actorRole: actorUser.role,
+      durationMs: durationMs,
+      requestSummary: requestSummary,
+      responseSummary: responseSummary,
+      createdAt: createdAt,
+      branchId: branchId,
+      branchName: branchName,
+      entityType: entityType,
+      entityId: entityId,
+      entityLabel: entityLabel,
+      errorType: errorType,
+      errorMessage: errorMessage,
+    );
+  }
+
+  Future<void> _recordRequestLog(RequestLog requestLog) async {
+    try {
+      await system.addRequestLog(requestLog);
+    } catch (_) {}
+  }
+
+  Future<T> _trackOperation<T>({
+    required AppUser actorUser,
+    required String operation,
+    required Future<T> Function() action,
+    String source = 'firestore',
+    String? branchId,
+    String? branchName,
+    String? entityType,
+    String? entityId,
+    String? entityLabel,
+    Map<String, String> requestSummary = const {},
+    Map<String, String> Function(T result)? responseSummaryBuilder,
+    String? Function(T result)? branchIdBuilder,
+    String? Function(T result)? branchNameBuilder,
+    String? Function(T result)? entityIdBuilder,
+    String? Function(T result)? entityLabelBuilder,
+  }) async {
+    final startedAt = _clock();
+
+    try {
+      final result = await action();
+      final finishedAt = _clock();
+      await _recordRequestLog(
+        _buildRequestLog(
+          actorUser: actorUser,
+          operation: operation,
+          source: source,
+          status: RequestLogStatus.success,
+          durationMs: finishedAt.difference(startedAt).inMilliseconds,
+          requestSummary: requestSummary,
+          responseSummary: responseSummaryBuilder?.call(result) ?? const {},
+          createdAt: finishedAt,
+          branchId: branchIdBuilder?.call(result) ?? branchId,
+          branchName: branchNameBuilder?.call(result) ?? branchName,
+          entityType: entityType,
+          entityId: entityIdBuilder?.call(result) ?? entityId,
+          entityLabel: entityLabelBuilder?.call(result) ?? entityLabel,
+        ),
+      );
+      return result;
+    } catch (error) {
+      final finishedAt = _clock();
+      await _recordRequestLog(
+        _buildRequestLog(
+          actorUser: actorUser,
+          operation: operation,
+          source: source,
+          status: RequestLogStatus.error,
+          durationMs: finishedAt.difference(startedAt).inMilliseconds,
+          requestSummary: requestSummary,
+          responseSummary: const {},
+          createdAt: finishedAt,
+          branchId: branchId,
+          branchName: branchName,
+          entityType: entityType,
+          entityId: entityId,
+          entityLabel: entityLabel,
+          errorType: error.runtimeType.toString(),
+          errorMessage: '$error',
+        ),
+      );
+      rethrow;
+    }
+  }
+
+  void _ensureAdminAuditAccess(AppUser actorUser) {
+    if (actorUser.role == UserRole.admin) {
+      return;
+    }
+
+    throw const InventoryException(
+      'Solo un administrador puede acceder al reporte tecnico y de auditoria.',
+    );
+  }
+
   Future<void> seedMasterData({required AppUser actorUser}) async {
     _ensurePermission(actorUser, AppPermission.seedMasterData);
 
@@ -1735,63 +1902,85 @@ class InventoryWorkflowService {
     ProductSearchFilters filters = const ProductSearchFilters(),
     bool forceRefresh = false,
   }) async {
-    _ensurePermission(actorUser, AppPermission.viewOwnInventory);
     final normalizedFilters = _normalizeSearchFilters(filters);
     final effectiveBranchId = normalizedFilters.branchId ?? branchId;
-    _ensureBranchAccess(actorUser, effectiveBranchId);
-
     final normalizedQuery = _normalizeSearchQuery(query);
-    if (normalizedQuery.isEmpty && normalizedFilters.isEmpty) {
-      return const ProductSearchData(
-        results: <ProductSearchResult>[],
-        isFromCache: false,
-      );
-    }
 
-    final searchCacheKey = _buildSearchCacheKey(
+    return _trackOperation(
+      actorUser: actorUser,
+      operation: 'catalog.search_products',
       branchId: effectiveBranchId,
-      normalizedQuery: normalizedQuery,
-      filters: normalizedFilters,
-    );
-    final cached = _productSearchCache[searchCacheKey];
-    if (!forceRefresh && cached != null) {
-      if (shouldRefreshData(
-        type: InventoryRefreshDataType.searchResults,
-        scope: searchCacheKey,
-      )) {
-        _runBackgroundTask(
-          () => _loadSearchProducts(
+      branchName: actorUser.branchId == effectiveBranchId
+          ? actorUser.branchId
+          : null,
+      requestSummary: {
+        'branchId': effectiveBranchId,
+        'query': normalizedQuery,
+        'availability': normalizedFilters.availability.name,
+        'forceRefresh': '$forceRefresh',
+        'activeFilters': '${normalizedFilters.activeFilterCount}',
+      },
+      responseSummaryBuilder: (result) => {
+        'results': '${result.results.length}',
+        'isFromCache': '${result.isFromCache}',
+      },
+      action: () async {
+        _ensurePermission(actorUser, AppPermission.viewOwnInventory);
+        _ensureBranchAccess(actorUser, effectiveBranchId);
+
+        if (normalizedQuery.isEmpty && normalizedFilters.isEmpty) {
+          return const ProductSearchData(
+            results: <ProductSearchResult>[],
+            isFromCache: false,
+          );
+        }
+
+        final searchCacheKey = _buildSearchCacheKey(
+          branchId: effectiveBranchId,
+          normalizedQuery: normalizedQuery,
+          filters: normalizedFilters,
+        );
+        final cached = _productSearchCache[searchCacheKey];
+        if (!forceRefresh && cached != null) {
+          if (shouldRefreshData(
+            type: InventoryRefreshDataType.searchResults,
+            scope: searchCacheKey,
+          )) {
+            _runBackgroundTask(
+              () => _loadSearchProducts(
+                actorUser: actorUser,
+                effectiveBranchId: effectiveBranchId,
+                normalizedQuery: normalizedQuery,
+                filters: normalizedFilters,
+                searchCacheKey: searchCacheKey,
+              ).then((_) {}),
+            );
+          }
+          return cached.copyWith(isFromCache: true);
+        }
+
+        try {
+          return await _loadSearchProducts(
             actorUser: actorUser,
             effectiveBranchId: effectiveBranchId,
             normalizedQuery: normalizedQuery,
             filters: normalizedFilters,
             searchCacheKey: searchCacheKey,
-          ).then((_) {}),
-        );
-      }
-      return cached.copyWith(isFromCache: true);
-    }
-
-    try {
-      return await _loadSearchProducts(
-        actorUser: actorUser,
-        effectiveBranchId: effectiveBranchId,
-        normalizedQuery: normalizedQuery,
-        filters: normalizedFilters,
-        searchCacheKey: searchCacheKey,
-      );
-    } catch (error) {
-      final cachedRecords = _offlineCache.getSearchResults(searchCacheKey);
-      if (cachedRecords != null) {
-        final searchData = _materializeSearchCache(cachedRecords);
-        _productSearchCache[searchCacheKey] = ProductSearchData(
-          results: searchData.results,
-          isFromCache: false,
-        );
-        return searchData;
-      }
-      rethrow;
-    }
+          );
+        } catch (error) {
+          final cachedRecords = _offlineCache.getSearchResults(searchCacheKey);
+          if (cachedRecords != null) {
+            final searchData = _materializeSearchCache(cachedRecords);
+            _productSearchCache[searchCacheKey] = ProductSearchData(
+              results: searchData.results,
+              isFromCache: false,
+            );
+            return searchData;
+          }
+          rethrow;
+        }
+      },
+    );
   }
 
   Future<ProductSearchResult?> findProductByBarcode({
@@ -1919,148 +2108,174 @@ class InventoryWorkflowService {
     required String productId,
     bool forceRefresh = false,
   }) async {
-    _ensurePermission(actorUser, AppPermission.viewOwnInventory);
-    _ensureBranchAccess(actorUser, branchId);
-
     final cacheKey = detailRefreshScope(
       branchId: branchId,
       productId: productId,
     );
-    if (!forceRefresh) {
-      final cached = _productDetailCache[cacheKey];
-      if (cached != null) {
-        if (shouldRefreshData(
-          type: InventoryRefreshDataType.productDetail,
-          scope: cacheKey,
-        )) {
-          _runBackgroundTask(
-            () => fetchProductDetail(
-              actorUser: actorUser,
-              branchId: branchId,
-              productId: productId,
-              forceRefresh: true,
-            ).then((_) {}),
-          );
+
+    return _trackOperation(
+      actorUser: actorUser,
+      operation: 'catalog.product_detail',
+      branchId: branchId,
+      entityType: 'product',
+      entityId: productId,
+      entityLabel: productId,
+      requestSummary: {
+        'branchId': branchId,
+        'productId': productId,
+        'forceRefresh': '$forceRefresh',
+      },
+      branchNameBuilder: (detail) => detail.branch?.name,
+      entityLabelBuilder: (detail) => detail.product.name,
+      responseSummaryBuilder: (detail) => {
+        'isFromCache': '${detail.isFromCache}',
+        'stockByBranch': '${detail.stockByBranch.length}',
+        'availableStock': '${detail.inventory?.availableStock ?? 0}',
+      },
+      action: () async {
+        _ensurePermission(actorUser, AppPermission.viewOwnInventory);
+        _ensureBranchAccess(actorUser, branchId);
+
+        if (!forceRefresh) {
+          final cached = _productDetailCache[cacheKey];
+          if (cached != null) {
+            if (shouldRefreshData(
+              type: InventoryRefreshDataType.productDetail,
+              scope: cacheKey,
+            )) {
+              _runBackgroundTask(
+                () => fetchProductDetail(
+                  actorUser: actorUser,
+                  branchId: branchId,
+                  productId: productId,
+                  forceRefresh: true,
+                ).then((_) {}),
+              );
+            }
+            return cached.copyWith(isFromCache: true);
+          }
         }
-        return cached.copyWith(isFromCache: true);
-      }
-    }
 
-    try {
-      final product = await _fetchProductById(
-        productId,
-        forceRefresh: forceRefresh,
-      );
-      final resolvedProduct = product.data;
-      if (resolvedProduct == null || !resolvedProduct.isActive) {
-        throw const InventoryException(
-          'No se encontro el producto solicitado en el catalogo.',
-        );
-      }
-
-      final branch = await _fetchBranchById(
-        branchId,
-        forceRefresh: forceRefresh,
-      );
-      final inventory = await _fetchInventoryItem(branchId, resolvedProduct.id);
-      final category = resolvedProduct.categoryId.isEmpty
-          ? const _CachedLoad<Category?>(data: null, isFromCache: false)
-          : await _fetchCategoryById(
-              resolvedProduct.categoryId,
-              forceRefresh: forceRefresh,
+        try {
+          final product = await _fetchProductById(
+            productId,
+            forceRefresh: forceRefresh,
+          );
+          final resolvedProduct = product.data;
+          if (resolvedProduct == null || !resolvedProduct.isActive) {
+            throw const InventoryException(
+              'No se encontro el producto solicitado en el catalogo.',
             );
-      final stockByBranch = await fetchProductStockByBranch(
-        actorUser: actorUser,
-        productId: resolvedProduct.id,
-        forceRefresh: forceRefresh,
-      );
-      final branchSuggestions = _buildBranchSuggestions(
-        currentBranch: branch.data,
-        currentBranchId: branchId,
-        stockByBranch: stockByBranch,
-      );
-      final reliability = _buildInventoryReliability(
-        inventory: inventory.data,
-        branch: branch.data,
-      );
-      final isFromCache =
-          product.isFromCache ||
-          branch.isFromCache ||
-          inventory.isFromCache ||
-          category.isFromCache;
+          }
 
-      final detail = ProductDetailData(
-        product: resolvedProduct,
-        inventory: inventory.data,
-        category: category.data,
-        branch: branch.data,
-        stockByBranch: stockByBranch,
-        branchSuggestions: branchSuggestions,
-        recommendedSuggestion: branchSuggestions.isEmpty
-            ? null
-            : branchSuggestions.first,
-        reliability: reliability,
-        isFromCache: isFromCache,
-      );
-      _productDetailCache[cacheKey] = detail.copyWith(isFromCache: false);
-      await _offlineCache.cacheProductDetail(
-        cacheKey,
-        CachedProductDetailRecord(
-          product: resolvedProduct,
-          inventory: inventory.data,
-          category: category.data,
-          branch: branch.data,
-          stockByBranch: stockByBranch
-              .map(
-                (entry) => CachedBranchStockRecord(
-                  branch: entry.branch,
-                  inventory: entry.inventory,
-                ),
-              )
-              .toList(growable: false),
-        ),
-      );
-      await _offlineCache.cacheRecentProducts(actorUser.id, <Product>[
-        resolvedProduct,
-      ]);
-      markRefreshCompleted(
-        type: InventoryRefreshDataType.productDetail,
-        scope: cacheKey,
-      );
-      return detail;
-    } catch (error) {
-      final cachedDetail = _offlineCache.getProductDetail(cacheKey);
-      if (cachedDetail != null) {
-        final stockByBranch = _materializeStockByBranch(
-          cachedDetail.stockByBranch,
-        );
-        final branchSuggestions = _buildBranchSuggestions(
-          currentBranch: cachedDetail.branch,
-          currentBranchId: branchId,
-          stockByBranch: stockByBranch,
-        );
-        final reliability = _buildInventoryReliability(
-          inventory: cachedDetail.inventory,
-          branch: cachedDetail.branch,
-        );
-        final detail = ProductDetailData(
-          product: cachedDetail.product,
-          inventory: cachedDetail.inventory,
-          category: cachedDetail.category,
-          branch: cachedDetail.branch,
-          stockByBranch: stockByBranch,
-          branchSuggestions: branchSuggestions,
-          recommendedSuggestion: branchSuggestions.isEmpty
-              ? null
-              : branchSuggestions.first,
-          reliability: reliability,
-          isFromCache: true,
-        );
-        _productDetailCache[cacheKey] = detail.copyWith(isFromCache: false);
-        return detail;
-      }
-      rethrow;
-    }
+          final branch = await _fetchBranchById(
+            branchId,
+            forceRefresh: forceRefresh,
+          );
+          final inventory = await _fetchInventoryItem(
+            branchId,
+            resolvedProduct.id,
+          );
+          final category = resolvedProduct.categoryId.isEmpty
+              ? const _CachedLoad<Category?>(data: null, isFromCache: false)
+              : await _fetchCategoryById(
+                  resolvedProduct.categoryId,
+                  forceRefresh: forceRefresh,
+                );
+          final stockByBranch = await fetchProductStockByBranch(
+            actorUser: actorUser,
+            productId: resolvedProduct.id,
+            forceRefresh: forceRefresh,
+          );
+          final branchSuggestions = _buildBranchSuggestions(
+            currentBranch: branch.data,
+            currentBranchId: branchId,
+            stockByBranch: stockByBranch,
+          );
+          final reliability = _buildInventoryReliability(
+            inventory: inventory.data,
+            branch: branch.data,
+          );
+          final isFromCache =
+              product.isFromCache ||
+              branch.isFromCache ||
+              inventory.isFromCache ||
+              category.isFromCache;
+
+          final detail = ProductDetailData(
+            product: resolvedProduct,
+            inventory: inventory.data,
+            category: category.data,
+            branch: branch.data,
+            stockByBranch: stockByBranch,
+            branchSuggestions: branchSuggestions,
+            recommendedSuggestion: branchSuggestions.isEmpty
+                ? null
+                : branchSuggestions.first,
+            reliability: reliability,
+            isFromCache: isFromCache,
+          );
+          _productDetailCache[cacheKey] = detail.copyWith(isFromCache: false);
+          await _offlineCache.cacheProductDetail(
+            cacheKey,
+            CachedProductDetailRecord(
+              product: resolvedProduct,
+              inventory: inventory.data,
+              category: category.data,
+              branch: branch.data,
+              stockByBranch: stockByBranch
+                  .map(
+                    (entry) => CachedBranchStockRecord(
+                      branch: entry.branch,
+                      inventory: entry.inventory,
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+          );
+          await _offlineCache.cacheRecentProducts(actorUser.id, <Product>[
+            resolvedProduct,
+          ]);
+          markRefreshCompleted(
+            type: InventoryRefreshDataType.productDetail,
+            scope: cacheKey,
+          );
+          return detail;
+        } catch (error) {
+          final cachedDetail = _offlineCache.getProductDetail(cacheKey);
+          if (cachedDetail != null) {
+            final stockByBranch = _materializeStockByBranch(
+              cachedDetail.stockByBranch,
+            );
+            final branchSuggestions = _buildBranchSuggestions(
+              currentBranch: cachedDetail.branch,
+              currentBranchId: branchId,
+              stockByBranch: stockByBranch,
+            );
+            final reliability = _buildInventoryReliability(
+              inventory: cachedDetail.inventory,
+              branch: cachedDetail.branch,
+            );
+            final detail = ProductDetailData(
+              product: cachedDetail.product,
+              inventory: cachedDetail.inventory,
+              category: cachedDetail.category,
+              branch: cachedDetail.branch,
+              stockByBranch: stockByBranch,
+              branchSuggestions: branchSuggestions,
+              recommendedSuggestion: branchSuggestions.isEmpty
+                  ? null
+                  : branchSuggestions.first,
+              reliability: reliability,
+              isFromCache: true,
+            );
+            _productDetailCache[cacheKey] = detail.copyWith(isFromCache: false);
+            return detail;
+          }
+          rethrow;
+        }
+      },
+    );
   }
 
   Future<List<ProductBranchStockEntry>> fetchProductStockByBranch({
@@ -2148,159 +2363,183 @@ class InventoryWorkflowService {
     String? productId,
     bool forceRefresh = false,
   }) async {
-    _ensurePermission(actorUser, AppPermission.viewOwnInventory);
-
     final normalizedProductId = productId?.trim();
     final cacheKey = branchDirectoryRefreshScope(
       actorUser: actorUser,
       productId: normalizedProductId,
     );
-    if (!forceRefresh) {
-      final cached = _branchDirectoryCache[cacheKey];
-      if (cached != null) {
-        if (shouldRefreshData(
-          type: InventoryRefreshDataType.branchDirectory,
-          scope: cacheKey,
-        )) {
-          _runBackgroundTask(
-            () => fetchBranchDirectory(
+    return _trackOperation(
+      actorUser: actorUser,
+      operation: 'catalog.branch_directory',
+      branchId: actorUser.branchId,
+      requestSummary: {
+        'currentBranchId': actorUser.branchId,
+        'productId': normalizedProductId ?? '',
+        'forceRefresh': '$forceRefresh',
+      },
+      responseSummaryBuilder: (directory) => {
+        'entries': '${directory.entries.length}',
+        'selectedProduct': directory.selectedProduct?.id ?? '',
+        'isFromCache': '${directory.isFromCache}',
+      },
+      action: () async {
+        _ensurePermission(actorUser, AppPermission.viewOwnInventory);
+
+        if (!forceRefresh) {
+          final cached = _branchDirectoryCache[cacheKey];
+          if (cached != null) {
+            if (shouldRefreshData(
+              type: InventoryRefreshDataType.branchDirectory,
+              scope: cacheKey,
+            )) {
+              _runBackgroundTask(
+                () => fetchBranchDirectory(
+                  actorUser: actorUser,
+                  productId: productId,
+                  forceRefresh: true,
+                ).then((_) {}),
+              );
+            }
+            return cached.copyWith(isFromCache: true);
+          }
+        }
+
+        try {
+          final branches = await _fetchBranchCatalog(
+            forceRefresh: forceRefresh,
+          );
+          final currentBranch = branches.data.cast<Branch?>().firstWhere(
+            (branch) => branch?.id == actorUser.branchId,
+            orElse: () => null,
+          );
+
+          Product? selectedProduct;
+          bool selectedProductFromCache = false;
+          Map<String, ProductBranchStockEntry> stockByBranchId =
+              const <String, ProductBranchStockEntry>{};
+
+          if (normalizedProductId != null && normalizedProductId.isNotEmpty) {
+            final product = await _fetchProductById(
+              normalizedProductId,
+              forceRefresh: forceRefresh,
+            );
+            selectedProduct = product.data;
+            selectedProductFromCache = product.isFromCache;
+            if (selectedProduct == null || !selectedProduct.isActive) {
+              throw const InventoryException(
+                'No se encontro el producto solicitado en el catalogo.',
+              );
+            }
+
+            final stockByBranch = await fetchProductStockByBranch(
               actorUser: actorUser,
-              productId: productId,
-              forceRefresh: true,
-            ).then((_) {}),
+              productId: normalizedProductId,
+              forceRefresh: forceRefresh,
+            );
+            stockByBranchId = {
+              for (final entry in stockByBranch) entry.branch.id: entry,
+            };
+          }
+
+          final entries =
+              branches.data
+                  .where((branch) => branch.isActive)
+                  .map(
+                    (branch) => BranchDirectoryEntry(
+                      branch: branch,
+                      distanceKm: currentBranch == null
+                          ? 0
+                          : _distanceInKm(
+                              currentBranch.location,
+                              branch.location,
+                            ),
+                      stockEntry: stockByBranchId[branch.id],
+                    ),
+                  )
+                  .toList(growable: false)
+                ..sort((left, right) {
+                  if (selectedProduct != null) {
+                    final availability = right.availableStock.compareTo(
+                      left.availableStock,
+                    );
+                    if (availability != 0) {
+                      return availability;
+                    }
+                  }
+
+                  final distance = left.distanceKm.compareTo(right.distanceKm);
+                  if (distance != 0) {
+                    return distance;
+                  }
+
+                  return left.branch.name.compareTo(right.branch.name);
+                });
+
+          final directory = BranchDirectoryData(
+            entries: List<BranchDirectoryEntry>.unmodifiable(entries),
+            selectedProduct: selectedProduct,
+            currentBranch: currentBranch,
+            isFromCache: branches.isFromCache || selectedProductFromCache,
           );
-        }
-        return cached.copyWith(isFromCache: true);
-      }
-    }
-
-    try {
-      final branches = await _fetchBranchCatalog(forceRefresh: forceRefresh);
-      final currentBranch = branches.data.cast<Branch?>().firstWhere(
-        (branch) => branch?.id == actorUser.branchId,
-        orElse: () => null,
-      );
-
-      Product? selectedProduct;
-      bool selectedProductFromCache = false;
-      Map<String, ProductBranchStockEntry> stockByBranchId =
-          const <String, ProductBranchStockEntry>{};
-
-      if (normalizedProductId != null && normalizedProductId.isNotEmpty) {
-        final product = await _fetchProductById(
-          normalizedProductId,
-          forceRefresh: forceRefresh,
-        );
-        selectedProduct = product.data;
-        selectedProductFromCache = product.isFromCache;
-        if (selectedProduct == null || !selectedProduct.isActive) {
-          throw const InventoryException(
-            'No se encontro el producto solicitado en el catalogo.',
+          _branchDirectoryCache[cacheKey] = directory.copyWith(
+            isFromCache: false,
           );
+          await _offlineCache.cacheBranchDirectory(
+            cacheKey,
+            CachedBranchDirectoryRecord(
+              entries: entries
+                  .map(
+                    (entry) => CachedBranchDirectoryEntryRecord(
+                      branch: entry.branch,
+                      distanceKm: entry.distanceKm,
+                      stockEntry: entry.stockEntry == null
+                          ? null
+                          : CachedBranchStockRecord(
+                              branch: entry.stockEntry!.branch,
+                              inventory: entry.stockEntry!.inventory,
+                            ),
+                    ),
+                  )
+                  .toList(growable: false),
+              selectedProduct: selectedProduct,
+              currentBranch: currentBranch,
+            ),
+          );
+          markRefreshCompleted(
+            type: InventoryRefreshDataType.branchDirectory,
+            scope: cacheKey,
+          );
+          return directory;
+        } catch (error) {
+          final cachedDirectory = _offlineCache.getBranchDirectory(cacheKey);
+          if (cachedDirectory != null) {
+            final directory = BranchDirectoryData(
+              entries: List<BranchDirectoryEntry>.unmodifiable(
+                cachedDirectory.entries
+                    .map(
+                      (entry) => BranchDirectoryEntry(
+                        branch: entry.branch,
+                        distanceKm: entry.distanceKm,
+                        stockEntry: entry.stockEntry == null
+                            ? null
+                            : _materializeStockEntry(entry.stockEntry!),
+                      ),
+                    )
+                    .toList(growable: false),
+              ),
+              selectedProduct: cachedDirectory.selectedProduct,
+              currentBranch: cachedDirectory.currentBranch,
+              isFromCache: true,
+            );
+            _branchDirectoryCache[cacheKey] = directory.copyWith(
+              isFromCache: false,
+            );
+            return directory;
+          }
+          rethrow;
         }
-
-        final stockByBranch = await fetchProductStockByBranch(
-          actorUser: actorUser,
-          productId: normalizedProductId,
-          forceRefresh: forceRefresh,
-        );
-        stockByBranchId = {
-          for (final entry in stockByBranch) entry.branch.id: entry,
-        };
-      }
-
-      final entries =
-          branches.data
-              .where((branch) => branch.isActive)
-              .map(
-                (branch) => BranchDirectoryEntry(
-                  branch: branch,
-                  distanceKm: currentBranch == null
-                      ? 0
-                      : _distanceInKm(currentBranch.location, branch.location),
-                  stockEntry: stockByBranchId[branch.id],
-                ),
-              )
-              .toList(growable: false)
-            ..sort((left, right) {
-              if (selectedProduct != null) {
-                final availability = right.availableStock.compareTo(
-                  left.availableStock,
-                );
-                if (availability != 0) {
-                  return availability;
-                }
-              }
-
-              final distance = left.distanceKm.compareTo(right.distanceKm);
-              if (distance != 0) {
-                return distance;
-              }
-
-              return left.branch.name.compareTo(right.branch.name);
-            });
-
-      final directory = BranchDirectoryData(
-        entries: List<BranchDirectoryEntry>.unmodifiable(entries),
-        selectedProduct: selectedProduct,
-        currentBranch: currentBranch,
-        isFromCache: branches.isFromCache || selectedProductFromCache,
-      );
-      _branchDirectoryCache[cacheKey] = directory.copyWith(isFromCache: false);
-      await _offlineCache.cacheBranchDirectory(
-        cacheKey,
-        CachedBranchDirectoryRecord(
-          entries: entries
-              .map(
-                (entry) => CachedBranchDirectoryEntryRecord(
-                  branch: entry.branch,
-                  distanceKm: entry.distanceKm,
-                  stockEntry: entry.stockEntry == null
-                      ? null
-                      : CachedBranchStockRecord(
-                          branch: entry.stockEntry!.branch,
-                          inventory: entry.stockEntry!.inventory,
-                        ),
-                ),
-              )
-              .toList(growable: false),
-          selectedProduct: selectedProduct,
-          currentBranch: currentBranch,
-        ),
-      );
-      markRefreshCompleted(
-        type: InventoryRefreshDataType.branchDirectory,
-        scope: cacheKey,
-      );
-      return directory;
-    } catch (error) {
-      final cachedDirectory = _offlineCache.getBranchDirectory(cacheKey);
-      if (cachedDirectory != null) {
-        final directory = BranchDirectoryData(
-          entries: List<BranchDirectoryEntry>.unmodifiable(
-            cachedDirectory.entries
-                .map(
-                  (entry) => BranchDirectoryEntry(
-                    branch: entry.branch,
-                    distanceKm: entry.distanceKm,
-                    stockEntry: entry.stockEntry == null
-                        ? null
-                        : _materializeStockEntry(entry.stockEntry!),
-                  ),
-                )
-                .toList(growable: false),
-          ),
-          selectedProduct: cachedDirectory.selectedProduct,
-          currentBranch: cachedDirectory.currentBranch,
-          isFromCache: true,
-        );
-        _branchDirectoryCache[cacheKey] = directory.copyWith(
-          isFromCache: false,
-        );
-        return directory;
-      }
-      rethrow;
-    }
+      },
+    );
   }
 
   Future<ProductSearchFilterOptions> fetchSearchFilterOptions({
@@ -2513,51 +2752,68 @@ class InventoryWorkflowService {
     required AppUser actorUser,
     required String transferId,
   }) async {
-    final transfer = await transfers.fetchTransfer(transferId);
-    if (transfer == null) {
-      throw const InventoryException('El traslado solicitado no existe.');
-    }
+    return _trackOperation(
+      actorUser: actorUser,
+      operation: 'audit.transfer_traceability',
+      entityType: 'transfer',
+      entityId: transferId,
+      requestSummary: {'transferId': transferId},
+      responseSummaryBuilder: (detail) => {
+        'status': detail.transfer.status.firestoreValue,
+        'auditEvents': '${detail.auditTrail.length}',
+      },
+      branchIdBuilder: (detail) => detail.transfer.toBranchId,
+      branchNameBuilder: (detail) => detail.transfer.toBranchName,
+      entityLabelBuilder: (detail) => detail.transfer.productName,
+      action: () async {
+        final transfer = await transfers.fetchTransfer(transferId);
+        if (transfer == null) {
+          throw const InventoryException('El traslado solicitado no existe.');
+        }
 
-    final canInspect =
-        actorUser.role == UserRole.admin ||
-        actorUser.canAccessBranch(transfer.fromBranchId) ||
-        actorUser.canAccessBranch(transfer.toBranchId);
-    if (!canInspect) {
-      throw const InventoryException(
-        'No tienes permiso para revisar la trazabilidad de este traslado.',
-      );
-    }
+        final canInspect =
+            actorUser.role == UserRole.admin ||
+            actorUser.canAccessBranch(transfer.fromBranchId) ||
+            actorUser.canAccessBranch(transfer.toBranchId);
+        if (!canInspect) {
+          throw const InventoryException(
+            'No tienes permiso para revisar la trazabilidad de este traslado.',
+          );
+        }
 
-    final requesterFuture =
-        actorUser.role == UserRole.admin || actorUser.id == transfer.requestedBy
-        ? users.fetchUser(transfer.requestedBy)
-        : Future<AppUser?>.value(null);
-    final approverFuture =
-        actorUser.role == UserRole.admin && transfer.approvedBy != null
-        ? users.fetchUser(transfer.approvedBy!)
-        : Future<AppUser?>.value(null);
-    final auditTrailFuture = actorUser.role == UserRole.admin
-        ? system.fetchAuditLogsForEntity(
-            entityId: transfer.id,
-            entityType: 'transfer',
-          )
-        : Future<List<AuditLog>>.value(const <AuditLog>[]);
+        final requesterFuture =
+            actorUser.role == UserRole.admin ||
+                actorUser.id == transfer.requestedBy
+            ? users.fetchUser(transfer.requestedBy)
+            : Future<AppUser?>.value(null);
+        final approverFuture =
+            actorUser.role == UserRole.admin && transfer.approvedBy != null
+            ? users.fetchUser(transfer.approvedBy!)
+            : Future<AppUser?>.value(null);
+        final auditTrailFuture = actorUser.role == UserRole.admin
+            ? system.fetchAuditLogsForEntity(
+                entityId: transfer.id,
+                entityType: 'transfer',
+              )
+            : Future<List<AuditLog>>.value(const <AuditLog>[]);
 
-    final results = await Future.wait<Object?>([
-      requesterFuture,
-      approverFuture,
-      inventories.fetchInventory(transfer.fromBranchId, transfer.productId),
-      inventories.fetchInventory(transfer.toBranchId, transfer.productId),
-      auditTrailFuture,
-    ]);
+        final results = await Future.wait<Object?>([
+          requesterFuture,
+          approverFuture,
+          inventories.fetchInventory(transfer.fromBranchId, transfer.productId),
+          inventories.fetchInventory(transfer.toBranchId, transfer.productId),
+          auditTrailFuture,
+        ]);
 
-    return TransferTraceabilityData(
-      transfer: transfer,
-      requesterUser: results[0] as AppUser?,
-      approverUser: results[1] as AppUser?,
-      sourceInventory: results[2] as InventoryItem?,
-      destinationInventory: results[3] as InventoryItem?,
-      auditTrail: List<AuditLog>.unmodifiable(results[4] as List<AuditLog>),
+        return TransferTraceabilityData(
+          transfer: transfer,
+          requesterUser: results[0] as AppUser?,
+          approverUser: results[1] as AppUser?,
+          sourceInventory: results[2] as InventoryItem?,
+          destinationInventory: results[3] as InventoryItem?,
+          auditTrail: List<AuditLog>.unmodifiable(results[4] as List<AuditLog>),
+        );
+      },
     );
   }
 
@@ -2565,44 +2821,142 @@ class InventoryWorkflowService {
     required AppUser actorUser,
     required String reservationId,
   }) async {
-    final reservation = await reservations.fetchReservation(reservationId);
-    if (reservation == null) {
-      throw const InventoryException('La reserva solicitada no existe.');
+    return _trackOperation(
+      actorUser: actorUser,
+      operation: 'audit.reservation_traceability',
+      entityType: 'reservation',
+      entityId: reservationId,
+      requestSummary: {'reservationId': reservationId},
+      responseSummaryBuilder: (detail) => {
+        'status': detail.reservation.status.name,
+        'auditEvents': '${detail.auditTrail.length}',
+      },
+      branchIdBuilder: (detail) => detail.reservation.branchId,
+      branchNameBuilder: (detail) => detail.reservation.branchName,
+      entityLabelBuilder: (detail) => detail.reservation.productName,
+      action: () async {
+        final reservation = await reservations.fetchReservation(reservationId);
+        if (reservation == null) {
+          throw const InventoryException('La reserva solicitada no existe.');
+        }
+
+        final canInspect =
+            actorUser.role == UserRole.admin ||
+            actorUser.canAccessBranch(reservation.branchId) ||
+            actorUser.id == reservation.reservedBy;
+        if (!canInspect) {
+          throw const InventoryException(
+            'No tienes permiso para revisar la trazabilidad de esta reserva.',
+          );
+        }
+
+        final requesterFuture =
+            actorUser.role == UserRole.admin ||
+                actorUser.id == reservation.reservedBy
+            ? users.fetchUser(reservation.reservedBy)
+            : Future<AppUser?>.value(null);
+        final auditTrailFuture = actorUser.role == UserRole.admin
+            ? system.fetchAuditLogsForEntity(
+                entityId: reservation.id,
+                entityType: 'reservation',
+              )
+            : Future<List<AuditLog>>.value(const <AuditLog>[]);
+
+        final results = await Future.wait<Object?>([
+          requesterFuture,
+          inventories.fetchInventory(
+            reservation.branchId,
+            reservation.productId,
+          ),
+          auditTrailFuture,
+        ]);
+
+        return ReservationTraceabilityData(
+          reservation: reservation,
+          requesterUser: results[0] as AppUser?,
+          branchInventory: results[1] as InventoryItem?,
+          auditTrail: List<AuditLog>.unmodifiable(results[2] as List<AuditLog>),
+        );
+      },
+    );
+  }
+
+  Future<TechnicalAuditReport> fetchTechnicalAuditReport({
+    required AppUser actorUser,
+    int limit = 120,
+  }) async {
+    _ensureAdminAuditAccess(actorUser);
+
+    final recentRequests = await system.fetchRecentRequestLogs(limit: limit);
+    final recentErrors = recentRequests
+        .where((item) => item.status == RequestLogStatus.error)
+        .take(8)
+        .toList(growable: false);
+
+    final grouped = <String, List<RequestLog>>{};
+    for (final item in recentRequests) {
+      grouped.putIfAbsent(item.operation, () => <RequestLog>[]).add(item);
     }
 
-    final canInspect =
-        actorUser.role == UserRole.admin ||
-        actorUser.canAccessBranch(reservation.branchId) ||
-        actorUser.id == reservation.reservedBy;
-    if (!canInspect) {
-      throw const InventoryException(
-        'No tienes permiso para revisar la trazabilidad de esta reserva.',
-      );
-    }
+    final metrics =
+        grouped.entries
+            .map((entry) {
+              final requests = entry.value;
+              final source = requests.first.source;
+              final totalRequests = requests.length;
+              final successCount = requests
+                  .where((item) => item.status == RequestLogStatus.success)
+                  .length;
+              final failureCount = totalRequests - successCount;
+              final totalDuration = requests.fold<int>(
+                0,
+                (total, item) => total + item.durationMs,
+              );
+              final slowestDurationMs = requests.fold<int>(
+                0,
+                (current, item) => math.max(current, item.durationMs),
+              );
+              final lastRequestedAt = requests
+                  .map((item) => item.createdAt)
+                  .reduce((left, right) => right.isAfter(left) ? right : left);
 
-    final requesterFuture =
-        actorUser.role == UserRole.admin ||
-            actorUser.id == reservation.reservedBy
-        ? users.fetchUser(reservation.reservedBy)
-        : Future<AppUser?>.value(null);
-    final auditTrailFuture = actorUser.role == UserRole.admin
-        ? system.fetchAuditLogsForEntity(
-            entityId: reservation.id,
-            entityType: 'reservation',
-          )
-        : Future<List<AuditLog>>.value(const <AuditLog>[]);
+              return EndpointPerformanceMetric(
+                operation: entry.key,
+                source: source,
+                totalRequests: totalRequests,
+                successCount: successCount,
+                failureCount: failureCount,
+                averageDuration: Duration(
+                  milliseconds: (totalDuration / totalRequests).round(),
+                ),
+                slowestDuration: Duration(milliseconds: slowestDurationMs),
+                lastRequestedAt: lastRequestedAt,
+              );
+            })
+            .toList(growable: false)
+          ..sort((left, right) {
+            final failureComparison = right.failureCount.compareTo(
+              left.failureCount,
+            );
+            if (failureComparison != 0) {
+              return failureComparison;
+            }
 
-    final results = await Future.wait<Object?>([
-      requesterFuture,
-      inventories.fetchInventory(reservation.branchId, reservation.productId),
-      auditTrailFuture,
-    ]);
+            final latencyComparison = right.averageDuration.compareTo(
+              left.averageDuration,
+            );
+            if (latencyComparison != 0) {
+              return latencyComparison;
+            }
 
-    return ReservationTraceabilityData(
-      reservation: reservation,
-      requesterUser: results[0] as AppUser?,
-      branchInventory: results[1] as InventoryItem?,
-      auditTrail: List<AuditLog>.unmodifiable(results[2] as List<AuditLog>),
+            return right.lastRequestedAt.compareTo(left.lastRequestedAt);
+          });
+
+    return TechnicalAuditReport(
+      generatedAt: _clock(),
+      recentRequests: List<RequestLog>.unmodifiable(recentRequests),
+      recentErrors: List<RequestLog>.unmodifiable(recentErrors),
+      endpointMetrics: List<EndpointPerformanceMetric>.unmodifiable(metrics),
     );
   }
 
@@ -2832,20 +3186,33 @@ class InventoryWorkflowService {
   Future<StockAlertFeedData> fetchLowStockAlerts({
     required AppUser actorUser,
   }) async {
-    _ensurePermission(actorUser, AppPermission.viewLowStock);
+    return _trackOperation(
+      actorUser: actorUser,
+      operation: 'monitoring.low_stock_alerts',
+      branchId: actorUser.branchId,
+      requestSummary: {'actorBranchId': actorUser.branchId},
+      responseSummaryBuilder: (result) => {
+        'alerts': '${result.alerts.length}',
+        'critical': '${result.criticalCount}',
+        'unread': '${result.unreadCount}',
+      },
+      action: () async {
+        _ensurePermission(actorUser, AppPermission.viewLowStock);
 
-    final inventoryItems = actorUser.role == UserRole.admin
-        ? await inventories.fetchInventories()
-        : await inventories.fetchBranchInventory(actorUser.branchId);
-    final products = await catalog.fetchProducts();
-    final categories = await catalog.fetchCategories();
-    final readStates = await _fetchStockAlertReadStatesSafe(actorUser.id);
+        final inventoryItems = actorUser.role == UserRole.admin
+            ? await inventories.fetchInventories()
+            : await inventories.fetchBranchInventory(actorUser.branchId);
+        final products = await catalog.fetchProducts();
+        final categories = await catalog.fetchCategories();
+        final readStates = await _fetchStockAlertReadStatesSafe(actorUser.id);
 
-    return _buildStockAlertFeedData(
-      inventoryItems: inventoryItems,
-      products: products,
-      categories: categories,
-      readStates: readStates,
+        return _buildStockAlertFeedData(
+          inventoryItems: inventoryItems,
+          products: products,
+          categories: categories,
+          readStates: readStates,
+        );
+      },
     );
   }
 
@@ -3003,17 +3370,31 @@ class InventoryWorkflowService {
   Future<SyncStatusOverview> fetchSyncStatusOverview({
     required AppUser actorUser,
   }) async {
-    _ensurePermission(actorUser, AppPermission.viewSyncStatus);
+    return _trackOperation(
+      actorUser: actorUser,
+      operation: 'monitoring.sync_status_overview',
+      branchId: actorUser.branchId,
+      requestSummary: {'actorBranchId': actorUser.branchId},
+      responseSummaryBuilder: (overview) => {
+        'branches': '${overview.branches.length}',
+        'warnings': '${overview.warnings.length}',
+        'alerts': '${overview.monitoringAlerts.length}',
+        'apiSeverity': overview.apiStatus.severity.name,
+      },
+      action: () async {
+        _ensurePermission(actorUser, AppPermission.viewSyncStatus);
 
-    final branches = await catalog.fetchBranches();
-    final syncLogs = await system.fetchRecentSyncLogs(
-      limit: _syncStatusLogLimit,
-    );
+        final branches = await catalog.fetchBranches();
+        final syncLogs = await system.fetchRecentSyncLogs(
+          limit: _syncStatusLogLimit,
+        );
 
-    return _buildSyncStatusOverview(
-      branches: branches,
-      syncLogs: syncLogs,
-      currentBranchId: actorUser.branchId,
+        return _buildSyncStatusOverview(
+          branches: branches,
+          syncLogs: syncLogs,
+          currentBranchId: actorUser.branchId,
+        );
+      },
     );
   }
 
@@ -3081,58 +3462,80 @@ class InventoryWorkflowService {
     required String type,
     required String technicalDetail,
   }) async {
-    _ensureAdminSyncMonitoringAccess(actorUser);
-
-    final normalizedDetail = technicalDetail.trim();
-    if (normalizedDetail.isEmpty) {
-      throw const InventoryException(
-        'Debes registrar un detalle tecnico para el evento de error.',
-      );
-    }
-
-    final branch = await catalog.fetchBranch(branchId);
-    if (branch == null) {
-      throw const InventoryException('La sucursal no existe.');
-    }
-
-    final now = _clock();
-    final syncRef = _syncLogsCollection.doc();
-    final auditLogRef = _auditLogsCollection.doc();
-    final syncLog = SyncLog(
-      id: syncRef.id,
-      branchId: branch.id,
-      branchName: branch.name,
-      type: _normalizeSyncType(type),
-      status: 'failed',
-      recordsProcessed: 0,
-      startedAt: now,
-      finishedAt: now,
-      message: normalizedDetail,
-      createdAt: now,
-    );
-    final auditLog = _buildAuditLog(
+    return _trackOperation(
       actorUser: actorUser,
-      action: 'sync_error_logged',
+      operation: 'sync.log_error',
+      branchId: branchId,
       entityType: 'sync',
-      entityId: syncLog.id,
-      entityLabel: branch.name,
-      message: 'Registro un evento de error de sincronizacion para',
-      metadata: {
-        'branchId': branch.id,
-        'branchName': branch.name,
-        'syncType': syncLog.type,
-        'status': syncLog.status,
-        'technicalDetail': normalizedDetail,
+      requestSummary: {
+        'branchId': branchId,
+        'type': type.trim(),
+        'technicalDetail': technicalDetail.trim(),
       },
-      branchId: branch.id,
-      branchName: branch.name,
-    );
+      responseSummaryBuilder: (syncLog) => {
+        'syncLogId': syncLog.id,
+        'status': syncLog.status,
+        'type': syncLog.type,
+      },
+      branchIdBuilder: (syncLog) => syncLog.branchId,
+      branchNameBuilder: (syncLog) => syncLog.branchName,
+      entityIdBuilder: (syncLog) => syncLog.id,
+      entityLabelBuilder: (syncLog) => syncLog.branchName,
+      action: () async {
+        _ensureAdminSyncMonitoringAccess(actorUser);
 
-    final batch = _firestore.batch();
-    batch.set(syncRef, syncLog.toFirestore());
-    batch.set(auditLogRef, auditLog.toFirestore());
-    await batch.commit();
-    return syncLog;
+        final normalizedDetail = technicalDetail.trim();
+        if (normalizedDetail.isEmpty) {
+          throw const InventoryException(
+            'Debes registrar un detalle tecnico para el evento de error.',
+          );
+        }
+
+        final branch = await catalog.fetchBranch(branchId);
+        if (branch == null) {
+          throw const InventoryException('La sucursal no existe.');
+        }
+
+        final now = _clock();
+        final syncRef = _syncLogsCollection.doc();
+        final auditLogRef = _auditLogsCollection.doc();
+        final syncLog = SyncLog(
+          id: syncRef.id,
+          branchId: branch.id,
+          branchName: branch.name,
+          type: _normalizeSyncType(type),
+          status: 'failed',
+          recordsProcessed: 0,
+          startedAt: now,
+          finishedAt: now,
+          message: normalizedDetail,
+          createdAt: now,
+        );
+        final auditLog = _buildAuditLog(
+          actorUser: actorUser,
+          action: 'sync_error_logged',
+          entityType: 'sync',
+          entityId: syncLog.id,
+          entityLabel: branch.name,
+          message: 'Registro un evento de error de sincronizacion para',
+          metadata: {
+            'branchId': branch.id,
+            'branchName': branch.name,
+            'syncType': syncLog.type,
+            'status': syncLog.status,
+            'technicalDetail': normalizedDetail,
+          },
+          branchId: branch.id,
+          branchName: branch.name,
+        );
+
+        final batch = _firestore.batch();
+        batch.set(syncRef, syncLog.toFirestore());
+        batch.set(auditLogRef, auditLog.toFirestore());
+        await batch.commit();
+        return syncLog;
+      },
+    );
   }
 
   Future<SyncLog> requestSyncRetry({
@@ -3141,59 +3544,81 @@ class InventoryWorkflowService {
     String? preferredType,
     String note = '',
   }) async {
-    _ensureAdminSyncMonitoringAccess(actorUser);
-
-    final branch = await catalog.fetchBranch(branchId);
-    if (branch == null) {
-      throw const InventoryException('La sucursal no existe.');
-    }
-
-    final branchLogs = await system.fetchBranchSyncLogs(branchId, limit: 1);
-    final latestLog = branchLogs.isEmpty ? null : branchLogs.first;
-    final syncType = _normalizeSyncType(
-      preferredType ?? latestLog?.type ?? 'inventory',
-    );
-    final normalizedNote = note.trim();
-    final now = _clock();
-    final syncRef = _syncLogsCollection.doc();
-    final auditLogRef = _auditLogsCollection.doc();
-    final syncLog = SyncLog(
-      id: syncRef.id,
-      branchId: branch.id,
-      branchName: branch.name,
-      type: syncType,
-      status: 'retry_requested',
-      recordsProcessed: 0,
-      startedAt: now,
-      finishedAt: now,
-      message: normalizedNote.isEmpty
-          ? 'Reintento manual solicitado desde monitoreo.'
-          : normalizedNote,
-      createdAt: now,
-    );
-    final auditLog = _buildAuditLog(
+    return _trackOperation(
       actorUser: actorUser,
-      action: 'sync_retry_requested',
+      operation: 'sync.request_retry',
+      branchId: branchId,
       entityType: 'sync',
-      entityId: syncLog.id,
-      entityLabel: branch.name,
-      message: 'Solicito un reintento de sincronizacion para',
-      metadata: {
-        'branchId': branch.id,
-        'branchName': branch.name,
-        'syncType': syncLog.type,
-        'status': syncLog.status,
-        if (normalizedNote.isNotEmpty) 'note': normalizedNote,
+      requestSummary: {
+        'branchId': branchId,
+        'preferredType': preferredType?.trim() ?? '',
+        'note': note.trim(),
       },
-      branchId: branch.id,
-      branchName: branch.name,
-    );
+      responseSummaryBuilder: (syncLog) => {
+        'syncLogId': syncLog.id,
+        'status': syncLog.status,
+        'type': syncLog.type,
+      },
+      branchIdBuilder: (syncLog) => syncLog.branchId,
+      branchNameBuilder: (syncLog) => syncLog.branchName,
+      entityIdBuilder: (syncLog) => syncLog.id,
+      entityLabelBuilder: (syncLog) => syncLog.branchName,
+      action: () async {
+        _ensureAdminSyncMonitoringAccess(actorUser);
 
-    final batch = _firestore.batch();
-    batch.set(syncRef, syncLog.toFirestore());
-    batch.set(auditLogRef, auditLog.toFirestore());
-    await batch.commit();
-    return syncLog;
+        final branch = await catalog.fetchBranch(branchId);
+        if (branch == null) {
+          throw const InventoryException('La sucursal no existe.');
+        }
+
+        final branchLogs = await system.fetchBranchSyncLogs(branchId, limit: 1);
+        final latestLog = branchLogs.isEmpty ? null : branchLogs.first;
+        final syncType = _normalizeSyncType(
+          preferredType ?? latestLog?.type ?? 'inventory',
+        );
+        final normalizedNote = note.trim();
+        final now = _clock();
+        final syncRef = _syncLogsCollection.doc();
+        final auditLogRef = _auditLogsCollection.doc();
+        final syncLog = SyncLog(
+          id: syncRef.id,
+          branchId: branch.id,
+          branchName: branch.name,
+          type: syncType,
+          status: 'retry_requested',
+          recordsProcessed: 0,
+          startedAt: now,
+          finishedAt: now,
+          message: normalizedNote.isEmpty
+              ? 'Reintento manual solicitado desde monitoreo.'
+              : normalizedNote,
+          createdAt: now,
+        );
+        final auditLog = _buildAuditLog(
+          actorUser: actorUser,
+          action: 'sync_retry_requested',
+          entityType: 'sync',
+          entityId: syncLog.id,
+          entityLabel: branch.name,
+          message: 'Solicito un reintento de sincronizacion para',
+          metadata: {
+            'branchId': branch.id,
+            'branchName': branch.name,
+            'syncType': syncLog.type,
+            'status': syncLog.status,
+            if (normalizedNote.isNotEmpty) 'note': normalizedNote,
+          },
+          branchId: branch.id,
+          branchName: branch.name,
+        );
+
+        final batch = _firestore.batch();
+        batch.set(syncRef, syncLog.toFirestore());
+        batch.set(auditLogRef, auditLog.toFirestore());
+        await batch.commit();
+        return syncLog;
+      },
+    );
   }
 
   Stream<List<RequestTrackingItem>> watchRequestTracking({
@@ -3645,100 +4070,128 @@ class InventoryWorkflowService {
     required int quantity,
     required Duration expiresIn,
   }) async {
-    _ensurePermission(actorUser, AppPermission.createReservation);
+    return _trackOperation(
+      actorUser: actorUser,
+      operation: 'reservation.create',
+      branchId: branchId,
+      entityType: 'reservation',
+      requestSummary: {
+        'branchId': branchId,
+        'productId': productId,
+        'customerName': customerName.trim(),
+        'quantity': '$quantity',
+        'expiresInHours': '${expiresIn.inHours}',
+      },
+      responseSummaryBuilder: (reservation) => {
+        'reservationId': reservation.id,
+        'status': reservation.status.name,
+        'expiresAt': reservation.expiresAt.toIso8601String(),
+      },
+      branchIdBuilder: (reservation) => reservation.branchId,
+      branchNameBuilder: (reservation) => reservation.branchName,
+      entityIdBuilder: (reservation) => reservation.id,
+      entityLabelBuilder: (reservation) => reservation.productName,
+      action: () async {
+        _ensurePermission(actorUser, AppPermission.createReservation);
 
-    if (quantity <= 0) {
-      throw const InventoryException(
-        'La cantidad reservada debe ser mayor que cero.',
-      );
-    }
-    final normalizedCustomerName = customerName.trim();
-    if (normalizedCustomerName.isEmpty) {
-      throw const InventoryException(
-        'Debes asociar la reserva a un cliente o referencia comercial.',
-      );
-    }
+        if (quantity <= 0) {
+          throw const InventoryException(
+            'La cantidad reservada debe ser mayor que cero.',
+          );
+        }
+        final normalizedCustomerName = customerName.trim();
+        if (normalizedCustomerName.isEmpty) {
+          throw const InventoryException(
+            'Debes asociar la reserva a un cliente o referencia comercial.',
+          );
+        }
 
-    final now = _clock();
-    final expiresAt = now.add(expiresIn);
-    final requestingBranch = await catalog.fetchBranch(actorUser.branchId);
-    final inventoryRef = _inventoriesCollection.doc(
-      inventories.inventoryId(branchId, productId),
+        final now = _clock();
+        final expiresAt = now.add(expiresIn);
+        final requestingBranch = await catalog.fetchBranch(actorUser.branchId);
+        final inventoryRef = _inventoriesCollection.doc(
+          inventories.inventoryId(branchId, productId),
+        );
+        final reservationRef = _reservationsCollection.doc();
+        final auditLogRef = _auditLogsCollection.doc();
+
+        final reservation = await _firestore.runTransaction((
+          transaction,
+        ) async {
+          final inventorySnapshot = await transaction.get(inventoryRef);
+          if (!inventorySnapshot.exists) {
+            throw const InventoryException(
+              'No existe inventario para la sucursal y producto indicados.',
+            );
+          }
+
+          final inventory = InventoryItem.fromFirestore(
+            inventorySnapshot.id,
+            inventorySnapshot.data()!,
+          );
+
+          if (!inventory.isActive) {
+            throw const InventoryException(
+              'El inventario se encuentra inactivo.',
+            );
+          }
+
+          if (inventory.availableStock < quantity) {
+            throw InventoryException(
+              'Stock insuficiente. Disponible: ${inventory.availableStock}, solicitado: $quantity.',
+            );
+          }
+
+          final reservation = Reservation(
+            id: reservationRef.id,
+            productId: inventory.productId,
+            productName: inventory.productName,
+            sku: inventory.sku,
+            branchId: inventory.branchId,
+            branchName: inventory.branchName,
+            requestingBranchId: actorUser.branchId,
+            requestingBranchName: requestingBranch?.name.isNotEmpty == true
+                ? requestingBranch!.name
+                : actorUser.branchId,
+            customerName: normalizedCustomerName,
+            customerPhone: customerPhone.trim(),
+            quantity: quantity,
+            status: ReservationStatus.pending,
+            reservedBy: actorUser.id,
+            requestedByName: actorUser.fullName,
+            expiresAt: expiresAt,
+            createdAt: now,
+            updatedAt: now,
+          );
+          final auditLog = _buildAuditLog(
+            actorUser: actorUser,
+            action: 'reservation_created',
+            entityType: 'reservation',
+            entityId: reservation.id,
+            entityLabel: reservation.productName,
+            message: 'Registro una solicitud de reserva para',
+            metadata: {
+              'reservationBranchId': reservation.branchId,
+              'reservationBranchName': reservation.branchName,
+              'quantity': '${reservation.quantity}',
+              'customerName': reservation.customerName,
+              'requestingBranchId': actorUser.branchId,
+              'requestingBranchName': reservation.requestingBranchName,
+              'status': reservation.status.name,
+            },
+            branchId: reservation.branchId,
+            branchName: reservation.branchName,
+          );
+
+          transaction.set(reservationRef, reservation.toFirestore());
+          transaction.set(auditLogRef, auditLog.toFirestore());
+
+          return reservation;
+        });
+        _invalidateProductCaches(productId);
+        return reservation;
+      },
     );
-    final reservationRef = _reservationsCollection.doc();
-    final auditLogRef = _auditLogsCollection.doc();
-
-    final reservation = await _firestore.runTransaction((transaction) async {
-      final inventorySnapshot = await transaction.get(inventoryRef);
-      if (!inventorySnapshot.exists) {
-        throw const InventoryException(
-          'No existe inventario para la sucursal y producto indicados.',
-        );
-      }
-
-      final inventory = InventoryItem.fromFirestore(
-        inventorySnapshot.id,
-        inventorySnapshot.data()!,
-      );
-
-      if (!inventory.isActive) {
-        throw const InventoryException('El inventario se encuentra inactivo.');
-      }
-
-      if (inventory.availableStock < quantity) {
-        throw InventoryException(
-          'Stock insuficiente. Disponible: ${inventory.availableStock}, solicitado: $quantity.',
-        );
-      }
-
-      final reservation = Reservation(
-        id: reservationRef.id,
-        productId: inventory.productId,
-        productName: inventory.productName,
-        sku: inventory.sku,
-        branchId: inventory.branchId,
-        branchName: inventory.branchName,
-        requestingBranchId: actorUser.branchId,
-        requestingBranchName: requestingBranch?.name.isNotEmpty == true
-            ? requestingBranch!.name
-            : actorUser.branchId,
-        customerName: normalizedCustomerName,
-        customerPhone: customerPhone.trim(),
-        quantity: quantity,
-        status: ReservationStatus.pending,
-        reservedBy: actorUser.id,
-        requestedByName: actorUser.fullName,
-        expiresAt: expiresAt,
-        createdAt: now,
-        updatedAt: now,
-      );
-      final auditLog = _buildAuditLog(
-        actorUser: actorUser,
-        action: 'reservation_created',
-        entityType: 'reservation',
-        entityId: reservation.id,
-        entityLabel: reservation.productName,
-        message: 'Registro una solicitud de reserva para',
-        metadata: {
-          'reservationBranchId': reservation.branchId,
-          'reservationBranchName': reservation.branchName,
-          'quantity': '${reservation.quantity}',
-          'customerName': reservation.customerName,
-          'requestingBranchId': actorUser.branchId,
-          'requestingBranchName': reservation.requestingBranchName,
-          'status': reservation.status.name,
-        },
-        branchId: reservation.branchId,
-        branchName: reservation.branchName,
-      );
-
-      transaction.set(reservationRef, reservation.toFirestore());
-      transaction.set(auditLogRef, auditLog.toFirestore());
-
-      return reservation;
-    });
-    _invalidateProductCaches(productId);
-    return reservation;
   }
 
   Future<Reservation> approveReservation({
@@ -3746,121 +4199,146 @@ class InventoryWorkflowService {
     required String reservationId,
     String reviewComment = '',
   }) async {
-    _ensurePermission(actorUser, AppPermission.approveReservation);
+    return _trackOperation(
+      actorUser: actorUser,
+      operation: 'reservation.approve',
+      entityType: 'reservation',
+      entityId: reservationId,
+      requestSummary: {
+        'reservationId': reservationId,
+        'reviewComment': reviewComment.trim(),
+      },
+      responseSummaryBuilder: (reservation) => {
+        'status': reservation.status.name,
+        'approvedBy': reservation.approvedBy ?? '',
+      },
+      branchIdBuilder: (reservation) => reservation.branchId,
+      branchNameBuilder: (reservation) => reservation.branchName,
+      entityLabelBuilder: (reservation) => reservation.productName,
+      action: () async {
+        _ensurePermission(actorUser, AppPermission.approveReservation);
 
-    final now = _clock();
-    final normalizedComment = reviewComment.trim();
-    final reservationRef = _reservationsCollection.doc(reservationId);
-    final notificationRef = _notificationsCollection.doc();
-    final auditLogRef = _auditLogsCollection.doc();
-    InventoryItem? previousInventory;
-    InventoryItem? updatedInventory;
+        final now = _clock();
+        final normalizedComment = reviewComment.trim();
+        final reservationRef = _reservationsCollection.doc(reservationId);
+        final notificationRef = _notificationsCollection.doc();
+        final auditLogRef = _auditLogsCollection.doc();
+        InventoryItem? previousInventory;
+        InventoryItem? updatedInventory;
 
-    final updatedReservation = await _firestore.runTransaction((
-      transaction,
-    ) async {
-      final reservationSnapshot = await transaction.get(reservationRef);
-      if (!reservationSnapshot.exists) {
-        throw const InventoryException('La reserva no existe.');
-      }
+        final updatedReservation = await _firestore.runTransaction((
+          transaction,
+        ) async {
+          final reservationSnapshot = await transaction.get(reservationRef);
+          if (!reservationSnapshot.exists) {
+            throw const InventoryException('La reserva no existe.');
+          }
 
-      final reservation = Reservation.fromFirestore(
-        reservationSnapshot.id,
-        reservationSnapshot.data()!,
-      );
-      _ensureBranchAccess(actorUser, reservation.branchId);
+          final reservation = Reservation.fromFirestore(
+            reservationSnapshot.id,
+            reservationSnapshot.data()!,
+          );
+          _ensureBranchAccess(actorUser, reservation.branchId);
 
-      if (reservation.status != ReservationStatus.pending) {
-        throw InventoryException(
-          'Solo se pueden aprobar reservas pendientes. Estado actual: ${reservation.status.name}.',
-        );
-      }
+          if (reservation.status != ReservationStatus.pending) {
+            throw InventoryException(
+              'Solo se pueden aprobar reservas pendientes. Estado actual: ${reservation.status.name}.',
+            );
+          }
 
-      final inventoryRef = _inventoriesCollection.doc(
-        inventories.inventoryId(reservation.branchId, reservation.productId),
-      );
-      final inventorySnapshot = await transaction.get(inventoryRef);
-      if (!inventorySnapshot.exists) {
-        throw const InventoryException(
-          'El inventario vinculado a la reserva no existe.',
-        );
-      }
+          final inventoryRef = _inventoriesCollection.doc(
+            inventories.inventoryId(
+              reservation.branchId,
+              reservation.productId,
+            ),
+          );
+          final inventorySnapshot = await transaction.get(inventoryRef);
+          if (!inventorySnapshot.exists) {
+            throw const InventoryException(
+              'El inventario vinculado a la reserva no existe.',
+            );
+          }
 
-      final inventory = InventoryItem.fromFirestore(
-        inventorySnapshot.id,
-        inventorySnapshot.data()!,
-      );
-      previousInventory = inventory;
-      if (!inventory.isActive) {
-        throw const InventoryException('El inventario se encuentra inactivo.');
-      }
-      if (inventory.availableStock < reservation.quantity) {
-        throw InventoryException(
-          'Stock insuficiente para aprobar la reserva. Disponible: ${inventory.availableStock}.',
-        );
-      }
+          final inventory = InventoryItem.fromFirestore(
+            inventorySnapshot.id,
+            inventorySnapshot.data()!,
+          );
+          previousInventory = inventory;
+          if (!inventory.isActive) {
+            throw const InventoryException(
+              'El inventario se encuentra inactivo.',
+            );
+          }
+          if (inventory.availableStock < reservation.quantity) {
+            throw InventoryException(
+              'Stock insuficiente para aprobar la reserva. Disponible: ${inventory.availableStock}.',
+            );
+          }
 
-      updatedInventory = inventory.recalculate(
-        reservedStock: inventory.reservedStock + reservation.quantity,
-        updatedBy: actorUser.id,
-        updatedAt: now,
-        lastMovementAt: now,
-      );
-      final updatedReservation = reservation.copyWith(
-        status: ReservationStatus.active,
-        approvedBy: actorUser.id,
-        approvedAt: now,
-        reviewComment: normalizedComment,
-        updatedAt: now,
-      );
-      final notification = AppNotification(
-        id: notificationRef.id,
-        userId: reservation.reservedBy,
-        title: 'Reserva aprobada',
-        message:
-            'La solicitud ${reservation.id} fue aprobada en ${reservation.branchName}.${normalizedComment.isNotEmpty ? ' Nota: $normalizedComment' : ''}',
-        type: 'reservation',
-        referenceId: reservation.id,
-        isRead: false,
-        createdAt: now,
-      );
-      final auditLog = _buildAuditLog(
-        actorUser: actorUser,
-        action: 'reservation_approved',
-        entityType: 'reservation',
-        entityId: updatedReservation.id,
-        entityLabel: updatedReservation.productName,
-        message: 'Aprobo la solicitud de reserva para',
-        metadata: {
-          'status': updatedReservation.status.name,
-          'reservationBranchId': updatedReservation.branchId,
-          'reservationBranchName': updatedReservation.branchName,
-          'quantity': '${updatedReservation.quantity}',
-          'customerName': updatedReservation.customerName,
-          'requestingBranchId': updatedReservation.requestingBranchId,
-          'requestingBranchName': updatedReservation.requestingBranchName,
-          if (normalizedComment.isNotEmpty) 'reviewComment': normalizedComment,
-          'approvedByUserId': actorUser.id,
-        },
-        branchId: updatedReservation.branchId,
-        branchName: updatedReservation.branchName,
-      );
+          updatedInventory = inventory.recalculate(
+            reservedStock: inventory.reservedStock + reservation.quantity,
+            updatedBy: actorUser.id,
+            updatedAt: now,
+            lastMovementAt: now,
+          );
+          final updatedReservation = reservation.copyWith(
+            status: ReservationStatus.active,
+            approvedBy: actorUser.id,
+            approvedAt: now,
+            reviewComment: normalizedComment,
+            updatedAt: now,
+          );
+          final notification = AppNotification(
+            id: notificationRef.id,
+            userId: reservation.reservedBy,
+            title: 'Reserva aprobada',
+            message:
+                'La solicitud ${reservation.id} fue aprobada en ${reservation.branchName}.${normalizedComment.isNotEmpty ? ' Nota: $normalizedComment' : ''}',
+            type: 'reservation',
+            referenceId: reservation.id,
+            isRead: false,
+            createdAt: now,
+          );
+          final auditLog = _buildAuditLog(
+            actorUser: actorUser,
+            action: 'reservation_approved',
+            entityType: 'reservation',
+            entityId: updatedReservation.id,
+            entityLabel: updatedReservation.productName,
+            message: 'Aprobo la solicitud de reserva para',
+            metadata: {
+              'status': updatedReservation.status.name,
+              'reservationBranchId': updatedReservation.branchId,
+              'reservationBranchName': updatedReservation.branchName,
+              'quantity': '${updatedReservation.quantity}',
+              'customerName': updatedReservation.customerName,
+              'requestingBranchId': updatedReservation.requestingBranchId,
+              'requestingBranchName': updatedReservation.requestingBranchName,
+              if (normalizedComment.isNotEmpty)
+                'reviewComment': normalizedComment,
+              'approvedByUserId': actorUser.id,
+            },
+            branchId: updatedReservation.branchId,
+            branchName: updatedReservation.branchName,
+          );
 
-      transaction.set(inventoryRef, updatedInventory!.toFirestore());
-      transaction.set(reservationRef, updatedReservation.toFirestore());
-      transaction.set(notificationRef, notification.toFirestore());
-      transaction.set(auditLogRef, auditLog.toFirestore());
+          transaction.set(inventoryRef, updatedInventory!.toFirestore());
+          transaction.set(reservationRef, updatedReservation.toFirestore());
+          transaction.set(notificationRef, notification.toFirestore());
+          transaction.set(auditLogRef, auditLog.toFirestore());
 
-      return updatedReservation;
-    });
-    if (updatedInventory != null) {
-      await _handleLowStockAlertTransition(
-        previousInventory: previousInventory,
-        updatedInventory: updatedInventory!,
-      );
-    }
-    _invalidateProductCaches(updatedReservation.productId);
-    return updatedReservation;
+          return updatedReservation;
+        });
+        if (updatedInventory != null) {
+          await _handleLowStockAlertTransition(
+            previousInventory: previousInventory,
+            updatedInventory: updatedInventory!,
+          );
+        }
+        _invalidateProductCaches(updatedReservation.productId);
+        return updatedReservation;
+      },
+    );
   }
 
   Future<Reservation> rejectReservation({
@@ -3868,88 +4346,107 @@ class InventoryWorkflowService {
     required String reservationId,
     required String reviewComment,
   }) async {
-    _ensurePermission(actorUser, AppPermission.approveReservation);
+    return _trackOperation(
+      actorUser: actorUser,
+      operation: 'reservation.reject',
+      entityType: 'reservation',
+      entityId: reservationId,
+      requestSummary: {
+        'reservationId': reservationId,
+        'reviewComment': reviewComment.trim(),
+      },
+      responseSummaryBuilder: (reservation) => {
+        'status': reservation.status.name,
+        'rejectedBy': reservation.rejectedBy ?? '',
+      },
+      branchIdBuilder: (reservation) => reservation.branchId,
+      branchNameBuilder: (reservation) => reservation.branchName,
+      entityLabelBuilder: (reservation) => reservation.productName,
+      action: () async {
+        _ensurePermission(actorUser, AppPermission.approveReservation);
 
-    final normalizedComment = reviewComment.trim();
-    if (normalizedComment.isEmpty) {
-      throw const InventoryException(
-        'Debes registrar un motivo para rechazar la reserva.',
-      );
-    }
+        final normalizedComment = reviewComment.trim();
+        if (normalizedComment.isEmpty) {
+          throw const InventoryException(
+            'Debes registrar un motivo para rechazar la reserva.',
+          );
+        }
 
-    final now = _clock();
-    final reservationRef = _reservationsCollection.doc(reservationId);
-    final notificationRef = _notificationsCollection.doc();
-    final auditLogRef = _auditLogsCollection.doc();
+        final now = _clock();
+        final reservationRef = _reservationsCollection.doc(reservationId);
+        final notificationRef = _notificationsCollection.doc();
+        final auditLogRef = _auditLogsCollection.doc();
 
-    final updatedReservation = await _firestore.runTransaction((
-      transaction,
-    ) async {
-      final reservationSnapshot = await transaction.get(reservationRef);
-      if (!reservationSnapshot.exists) {
-        throw const InventoryException('La reserva no existe.');
-      }
+        final updatedReservation = await _firestore.runTransaction((
+          transaction,
+        ) async {
+          final reservationSnapshot = await transaction.get(reservationRef);
+          if (!reservationSnapshot.exists) {
+            throw const InventoryException('La reserva no existe.');
+          }
 
-      final reservation = Reservation.fromFirestore(
-        reservationSnapshot.id,
-        reservationSnapshot.data()!,
-      );
-      _ensureBranchAccess(actorUser, reservation.branchId);
+          final reservation = Reservation.fromFirestore(
+            reservationSnapshot.id,
+            reservationSnapshot.data()!,
+          );
+          _ensureBranchAccess(actorUser, reservation.branchId);
 
-      if (reservation.status != ReservationStatus.pending) {
-        throw InventoryException(
-          'Solo se pueden rechazar reservas pendientes. Estado actual: ${reservation.status.name}.',
-        );
-      }
+          if (reservation.status != ReservationStatus.pending) {
+            throw InventoryException(
+              'Solo se pueden rechazar reservas pendientes. Estado actual: ${reservation.status.name}.',
+            );
+          }
 
-      final updatedReservation = reservation.copyWith(
-        status: ReservationStatus.rejected,
-        rejectedBy: actorUser.id,
-        rejectedAt: now,
-        reviewComment: normalizedComment,
-        updatedAt: now,
-      );
-      final notification = AppNotification(
-        id: notificationRef.id,
-        userId: reservation.reservedBy,
-        title: 'Reserva rechazada',
-        message:
-            'La solicitud ${reservation.id} fue rechazada en ${reservation.branchName}. Motivo: $normalizedComment',
-        type: 'reservation',
-        referenceId: reservation.id,
-        isRead: false,
-        createdAt: now,
-      );
-      final auditLog = _buildAuditLog(
-        actorUser: actorUser,
-        action: 'reservation_rejected',
-        entityType: 'reservation',
-        entityId: updatedReservation.id,
-        entityLabel: updatedReservation.productName,
-        message: 'Rechazo la solicitud de reserva para',
-        metadata: {
-          'status': updatedReservation.status.name,
-          'reservationBranchId': updatedReservation.branchId,
-          'reservationBranchName': updatedReservation.branchName,
-          'quantity': '${updatedReservation.quantity}',
-          'customerName': updatedReservation.customerName,
-          'requestingBranchId': updatedReservation.requestingBranchId,
-          'requestingBranchName': updatedReservation.requestingBranchName,
-          'reviewComment': normalizedComment,
-          'rejectedByUserId': actorUser.id,
-        },
-        branchId: updatedReservation.branchId,
-        branchName: updatedReservation.branchName,
-      );
+          final updatedReservation = reservation.copyWith(
+            status: ReservationStatus.rejected,
+            rejectedBy: actorUser.id,
+            rejectedAt: now,
+            reviewComment: normalizedComment,
+            updatedAt: now,
+          );
+          final notification = AppNotification(
+            id: notificationRef.id,
+            userId: reservation.reservedBy,
+            title: 'Reserva rechazada',
+            message:
+                'La solicitud ${reservation.id} fue rechazada en ${reservation.branchName}. Motivo: $normalizedComment',
+            type: 'reservation',
+            referenceId: reservation.id,
+            isRead: false,
+            createdAt: now,
+          );
+          final auditLog = _buildAuditLog(
+            actorUser: actorUser,
+            action: 'reservation_rejected',
+            entityType: 'reservation',
+            entityId: updatedReservation.id,
+            entityLabel: updatedReservation.productName,
+            message: 'Rechazo la solicitud de reserva para',
+            metadata: {
+              'status': updatedReservation.status.name,
+              'reservationBranchId': updatedReservation.branchId,
+              'reservationBranchName': updatedReservation.branchName,
+              'quantity': '${updatedReservation.quantity}',
+              'customerName': updatedReservation.customerName,
+              'requestingBranchId': updatedReservation.requestingBranchId,
+              'requestingBranchName': updatedReservation.requestingBranchName,
+              'reviewComment': normalizedComment,
+              'rejectedByUserId': actorUser.id,
+            },
+            branchId: updatedReservation.branchId,
+            branchName: updatedReservation.branchName,
+          );
 
-      transaction.set(reservationRef, updatedReservation.toFirestore());
-      transaction.set(notificationRef, notification.toFirestore());
-      transaction.set(auditLogRef, auditLog.toFirestore());
+          transaction.set(reservationRef, updatedReservation.toFirestore());
+          transaction.set(notificationRef, notification.toFirestore());
+          transaction.set(auditLogRef, auditLog.toFirestore());
 
-      return updatedReservation;
-    });
-    _invalidateProductCaches(updatedReservation.productId);
-    return updatedReservation;
+          return updatedReservation;
+        });
+        _invalidateProductCaches(updatedReservation.productId);
+        return updatedReservation;
+      },
+    );
   }
 
   Future<Reservation> updateReservationStatus({
@@ -3957,123 +4454,144 @@ class InventoryWorkflowService {
     required String reservationId,
     required ReservationStatus nextStatus,
   }) async {
-    _ensurePermission(actorUser, AppPermission.updateReservation);
+    return _trackOperation(
+      actorUser: actorUser,
+      operation: 'reservation.update_status',
+      entityType: 'reservation',
+      entityId: reservationId,
+      requestSummary: {
+        'reservationId': reservationId,
+        'nextStatus': nextStatus.name,
+      },
+      responseSummaryBuilder: (reservation) => {
+        'status': reservation.status.name,
+      },
+      branchIdBuilder: (reservation) => reservation.branchId,
+      branchNameBuilder: (reservation) => reservation.branchName,
+      entityLabelBuilder: (reservation) => reservation.productName,
+      action: () async {
+        _ensurePermission(actorUser, AppPermission.updateReservation);
 
-    if (nextStatus == ReservationStatus.active) {
-      throw const InventoryException(
-        'Las reservas pendientes se aprueban desde la bandeja de solicitudes.',
-      );
-    }
-    if (nextStatus == ReservationStatus.pending ||
-        nextStatus == ReservationStatus.rejected) {
-      throw const InventoryException(
-        'Ese estado se gestiona desde la bandeja de aprobaciones.',
-      );
-    }
+        if (nextStatus == ReservationStatus.active) {
+          throw const InventoryException(
+            'Las reservas pendientes se aprueban desde la bandeja de solicitudes.',
+          );
+        }
+        if (nextStatus == ReservationStatus.pending ||
+            nextStatus == ReservationStatus.rejected) {
+          throw const InventoryException(
+            'Ese estado se gestiona desde la bandeja de aprobaciones.',
+          );
+        }
 
-    final now = _clock();
-    final reservationRef = _reservationsCollection.doc(reservationId);
-    InventoryItem? previousInventory;
-    InventoryItem? updatedInventory;
+        final now = _clock();
+        final reservationRef = _reservationsCollection.doc(reservationId);
+        InventoryItem? previousInventory;
+        InventoryItem? updatedInventory;
 
-    final updatedReservation = await _firestore.runTransaction((
-      transaction,
-    ) async {
-      final reservationSnapshot = await transaction.get(reservationRef);
-      if (!reservationSnapshot.exists) {
-        throw const InventoryException('La reserva no existe.');
-      }
+        final updatedReservation = await _firestore.runTransaction((
+          transaction,
+        ) async {
+          final reservationSnapshot = await transaction.get(reservationRef);
+          if (!reservationSnapshot.exists) {
+            throw const InventoryException('La reserva no existe.');
+          }
 
-      final reservation = Reservation.fromFirestore(
-        reservationSnapshot.id,
-        reservationSnapshot.data()!,
-      );
-      final canManageReservation =
-          actorUser.canAccessBranch(reservation.branchId) ||
-          actorUser.id == reservation.reservedBy;
-      if (!canManageReservation) {
-        throw const InventoryException(
-          'No puedes operar esta reserva desde una sucursal diferente.',
-        );
-      }
+          final reservation = Reservation.fromFirestore(
+            reservationSnapshot.id,
+            reservationSnapshot.data()!,
+          );
+          final canManageReservation =
+              actorUser.canAccessBranch(reservation.branchId) ||
+              actorUser.id == reservation.reservedBy;
+          if (!canManageReservation) {
+            throw const InventoryException(
+              'No puedes operar esta reserva desde una sucursal diferente.',
+            );
+          }
 
-      if (reservation.status != ReservationStatus.active) {
-        throw InventoryException(
-          'Solo se pueden cerrar reservas activas. Estado actual: ${reservation.status.name}.',
-        );
-      }
+          if (reservation.status != ReservationStatus.active) {
+            throw InventoryException(
+              'Solo se pueden cerrar reservas activas. Estado actual: ${reservation.status.name}.',
+            );
+          }
 
-      final inventoryRef = _inventoriesCollection.doc(
-        inventories.inventoryId(reservation.branchId, reservation.productId),
-      );
-      final inventorySnapshot = await transaction.get(inventoryRef);
-      if (!inventorySnapshot.exists) {
-        throw const InventoryException(
-          'El inventario vinculado a la reserva no existe.',
-        );
-      }
+          final inventoryRef = _inventoriesCollection.doc(
+            inventories.inventoryId(
+              reservation.branchId,
+              reservation.productId,
+            ),
+          );
+          final inventorySnapshot = await transaction.get(inventoryRef);
+          if (!inventorySnapshot.exists) {
+            throw const InventoryException(
+              'El inventario vinculado a la reserva no existe.',
+            );
+          }
 
-      final inventory = InventoryItem.fromFirestore(
-        inventorySnapshot.id,
-        inventorySnapshot.data()!,
-      );
-      previousInventory = inventory;
-      final updatedReservedStock =
-          inventory.reservedStock - reservation.quantity;
-      if (updatedReservedStock < 0) {
-        throw const InventoryException(
-          'La reserva no puede liberar mas stock del que esta reservado.',
-        );
-      }
+          final inventory = InventoryItem.fromFirestore(
+            inventorySnapshot.id,
+            inventorySnapshot.data()!,
+          );
+          previousInventory = inventory;
+          final updatedReservedStock =
+              inventory.reservedStock - reservation.quantity;
+          if (updatedReservedStock < 0) {
+            throw const InventoryException(
+              'La reserva no puede liberar mas stock del que esta reservado.',
+            );
+          }
 
-      updatedInventory = inventory.recalculate(
-        reservedStock: updatedReservedStock,
-        updatedBy: actorUser.id,
-        updatedAt: now,
-        lastMovementAt: now,
-      );
-      final updatedReservation = reservation.copyWith(
-        status: nextStatus,
-        updatedAt: now,
-      );
-      final auditLog = _buildAuditLog(
-        actorUser: actorUser,
-        action: switch (nextStatus) {
-          ReservationStatus.pending => 'reservation_updated',
-          ReservationStatus.active => 'reservation_updated',
-          ReservationStatus.rejected => 'reservation_updated',
-          ReservationStatus.completed => 'reservation_completed',
-          ReservationStatus.cancelled => 'reservation_cancelled',
-          ReservationStatus.expired => 'reservation_expired',
-        },
-        entityType: 'reservation',
-        entityId: updatedReservation.id,
-        entityLabel: updatedReservation.productName,
-        message: 'Actualizo el estado de la reserva para',
-        metadata: {
-          'status': nextStatus.name,
-          'reservationBranchId': updatedReservation.branchId,
-          'customerName': updatedReservation.customerName,
-        },
-        branchId: updatedReservation.branchId,
-        branchName: updatedReservation.branchName,
-      );
-      final auditLogRef = _auditLogsCollection.doc();
+          updatedInventory = inventory.recalculate(
+            reservedStock: updatedReservedStock,
+            updatedBy: actorUser.id,
+            updatedAt: now,
+            lastMovementAt: now,
+          );
+          final updatedReservation = reservation.copyWith(
+            status: nextStatus,
+            updatedAt: now,
+          );
+          final auditLog = _buildAuditLog(
+            actorUser: actorUser,
+            action: switch (nextStatus) {
+              ReservationStatus.pending => 'reservation_updated',
+              ReservationStatus.active => 'reservation_updated',
+              ReservationStatus.rejected => 'reservation_updated',
+              ReservationStatus.completed => 'reservation_completed',
+              ReservationStatus.cancelled => 'reservation_cancelled',
+              ReservationStatus.expired => 'reservation_expired',
+            },
+            entityType: 'reservation',
+            entityId: updatedReservation.id,
+            entityLabel: updatedReservation.productName,
+            message: 'Actualizo el estado de la reserva para',
+            metadata: {
+              'status': nextStatus.name,
+              'reservationBranchId': updatedReservation.branchId,
+              'customerName': updatedReservation.customerName,
+            },
+            branchId: updatedReservation.branchId,
+            branchName: updatedReservation.branchName,
+          );
+          final auditLogRef = _auditLogsCollection.doc();
 
-      transaction.set(inventoryRef, updatedInventory!.toFirestore());
-      transaction.set(reservationRef, updatedReservation.toFirestore());
-      transaction.set(auditLogRef, auditLog.toFirestore());
+          transaction.set(inventoryRef, updatedInventory!.toFirestore());
+          transaction.set(reservationRef, updatedReservation.toFirestore());
+          transaction.set(auditLogRef, auditLog.toFirestore());
 
-      return updatedReservation;
-    });
-    if (updatedInventory != null) {
-      await _handleLowStockAlertTransition(
-        previousInventory: previousInventory,
-        updatedInventory: updatedInventory!,
-      );
-    }
-    _invalidateProductCaches(updatedReservation.productId);
-    return updatedReservation;
+          return updatedReservation;
+        });
+        if (updatedInventory != null) {
+          await _handleLowStockAlertTransition(
+            previousInventory: previousInventory,
+            updatedInventory: updatedInventory!,
+          );
+        }
+        _invalidateProductCaches(updatedReservation.productId);
+        return updatedReservation;
+      },
+    );
   }
 
   Future<TransferRequest> requestTransfer({
@@ -4085,96 +4603,121 @@ class InventoryWorkflowService {
     required String reason,
     String notes = '',
   }) async {
-    _ensurePermission(actorUser, AppPermission.requestTransfer);
-    _ensureBranchAccess(actorUser, toBranchId);
-
-    if (quantity <= 0) {
-      throw const InventoryException(
-        'La cantidad del traslado debe ser mayor que cero.',
-      );
-    }
-    if (fromBranchId == toBranchId) {
-      throw const InventoryException(
-        'El origen y destino del traslado no pueden ser iguales.',
-      );
-    }
-
-    final normalizedReason = reason.trim();
-    if (normalizedReason.isEmpty) {
-      throw const InventoryException(
-        'Debes indicar el motivo de la solicitud de traslado.',
-      );
-    }
-
-    final product = await catalog.fetchProduct(productId);
-    final sourceBranch = await catalog.fetchBranch(fromBranchId);
-    final destinationBranch = await catalog.fetchBranch(toBranchId);
-
-    if (product == null || sourceBranch == null || destinationBranch == null) {
-      throw const InventoryException(
-        'No se encontro el producto o alguna de las sucursales del traslado.',
-      );
-    }
-
-    final sourceInventory = await inventories.fetchInventory(
-      fromBranchId,
-      productId,
-    );
-    if (sourceInventory == null || !sourceInventory.isActive) {
-      throw const InventoryException(
-        'La sucursal origen no tiene inventario activo para este producto.',
-      );
-    }
-    if (sourceInventory.availableStock < quantity) {
-      throw InventoryException(
-        'Stock insuficiente en ${sourceBranch.name}. Disponible: ${sourceInventory.availableStock}.',
-      );
-    }
-
-    final now = _clock();
-    final transferRef = _transfersCollection.doc();
-    final auditLogRef = _auditLogsCollection.doc();
-    final transfer = TransferRequest(
-      id: transferRef.id,
-      productId: product.id,
-      productName: product.name,
-      sku: product.sku,
-      fromBranchId: sourceBranch.id,
-      fromBranchName: sourceBranch.name,
-      toBranchId: destinationBranch.id,
-      toBranchName: destinationBranch.name,
-      requestedBy: actorUser.id,
-      requestedByName: actorUser.fullName,
-      approvedBy: null,
-      quantity: quantity,
-      status: TransferStatus.pending,
-      reason: normalizedReason,
-      notes: notes.trim(),
-      requestedAt: now,
-      approvedAt: null,
-      shippedAt: null,
-      receivedAt: null,
-      updatedAt: now,
-    );
-    final auditLog = _buildTransferAuditLog(
+    return _trackOperation(
       actorUser: actorUser,
-      transfer: transfer,
-      action: 'transfer_requested',
-      message: 'Solicito un traslado para',
-      branchId: transfer.toBranchId,
-      branchName: transfer.toBranchName,
-      extraMetadata: {
-        'requestingBranchId': transfer.toBranchId,
-        'requestingBranchName': transfer.toBranchName,
+      operation: 'transfer.request',
+      branchId: toBranchId,
+      entityType: 'transfer',
+      requestSummary: {
+        'productId': productId,
+        'fromBranchId': fromBranchId,
+        'toBranchId': toBranchId,
+        'quantity': '$quantity',
+        'reason': reason.trim(),
+      },
+      responseSummaryBuilder: (transfer) => {
+        'transferId': transfer.id,
+        'status': transfer.status.firestoreValue,
+      },
+      branchIdBuilder: (transfer) => transfer.toBranchId,
+      branchNameBuilder: (transfer) => transfer.toBranchName,
+      entityIdBuilder: (transfer) => transfer.id,
+      entityLabelBuilder: (transfer) => transfer.productName,
+      action: () async {
+        _ensurePermission(actorUser, AppPermission.requestTransfer);
+        _ensureBranchAccess(actorUser, toBranchId);
+
+        if (quantity <= 0) {
+          throw const InventoryException(
+            'La cantidad del traslado debe ser mayor que cero.',
+          );
+        }
+        if (fromBranchId == toBranchId) {
+          throw const InventoryException(
+            'El origen y destino del traslado no pueden ser iguales.',
+          );
+        }
+
+        final normalizedReason = reason.trim();
+        if (normalizedReason.isEmpty) {
+          throw const InventoryException(
+            'Debes indicar el motivo de la solicitud de traslado.',
+          );
+        }
+
+        final product = await catalog.fetchProduct(productId);
+        final sourceBranch = await catalog.fetchBranch(fromBranchId);
+        final destinationBranch = await catalog.fetchBranch(toBranchId);
+
+        if (product == null ||
+            sourceBranch == null ||
+            destinationBranch == null) {
+          throw const InventoryException(
+            'No se encontro el producto o alguna de las sucursales del traslado.',
+          );
+        }
+
+        final sourceInventory = await inventories.fetchInventory(
+          fromBranchId,
+          productId,
+        );
+        if (sourceInventory == null || !sourceInventory.isActive) {
+          throw const InventoryException(
+            'La sucursal origen no tiene inventario activo para este producto.',
+          );
+        }
+        if (sourceInventory.availableStock < quantity) {
+          throw InventoryException(
+            'Stock insuficiente en ${sourceBranch.name}. Disponible: ${sourceInventory.availableStock}.',
+          );
+        }
+
+        final now = _clock();
+        final transferRef = _transfersCollection.doc();
+        final auditLogRef = _auditLogsCollection.doc();
+        final transfer = TransferRequest(
+          id: transferRef.id,
+          productId: product.id,
+          productName: product.name,
+          sku: product.sku,
+          fromBranchId: sourceBranch.id,
+          fromBranchName: sourceBranch.name,
+          toBranchId: destinationBranch.id,
+          toBranchName: destinationBranch.name,
+          requestedBy: actorUser.id,
+          requestedByName: actorUser.fullName,
+          approvedBy: null,
+          quantity: quantity,
+          status: TransferStatus.pending,
+          reason: normalizedReason,
+          notes: notes.trim(),
+          requestedAt: now,
+          approvedAt: null,
+          shippedAt: null,
+          receivedAt: null,
+          updatedAt: now,
+        );
+        final auditLog = _buildTransferAuditLog(
+          actorUser: actorUser,
+          transfer: transfer,
+          action: 'transfer_requested',
+          message: 'Solicito un traslado para',
+          branchId: transfer.toBranchId,
+          branchName: transfer.toBranchName,
+          extraMetadata: {
+            'requestingBranchId': transfer.toBranchId,
+            'requestingBranchName': transfer.toBranchName,
+          },
+        );
+
+        final batch = _firestore.batch();
+        batch.set(transferRef, transfer.toFirestore());
+        batch.set(auditLogRef, auditLog.toFirestore());
+        await batch.commit();
+        _invalidateProductCaches(product.id);
+        return transfer;
       },
     );
-
-    final batch = _firestore.batch();
-    batch.set(transferRef, transfer.toFirestore());
-    batch.set(auditLogRef, auditLog.toFirestore());
-    await batch.commit();
-    _invalidateProductCaches(product.id);
-    return transfer;
   }
 
   Future<TransferRequest> approveTransfer({
@@ -4182,163 +4725,186 @@ class InventoryWorkflowService {
     required String transferId,
     String reviewComment = '',
   }) async {
-    _ensurePermission(actorUser, AppPermission.approveTransfer);
+    return _trackOperation(
+      actorUser: actorUser,
+      operation: 'transfer.approve',
+      entityType: 'transfer',
+      entityId: transferId,
+      requestSummary: {
+        'transferId': transferId,
+        'reviewComment': reviewComment.trim(),
+      },
+      responseSummaryBuilder: (transfer) => {
+        'status': transfer.status.firestoreValue,
+        'approvedBy': transfer.approvedBy ?? '',
+      },
+      branchIdBuilder: (transfer) => transfer.fromBranchId,
+      branchNameBuilder: (transfer) => transfer.fromBranchName,
+      entityLabelBuilder: (transfer) => transfer.productName,
+      action: () async {
+        _ensurePermission(actorUser, AppPermission.approveTransfer);
 
-    final now = _clock();
-    final normalizedComment = reviewComment.trim();
-    final transferRef = _transfersCollection.doc(transferId);
-    final notificationRef = _notificationsCollection.doc();
-    final auditLogRef = _auditLogsCollection.doc();
-    InventoryItem? previousSourceInventory;
-    InventoryItem? updatedSourceInventory;
-    InventoryItem? previousDestinationInventory;
-    InventoryItem? updatedDestinationInventory;
+        final now = _clock();
+        final normalizedComment = reviewComment.trim();
+        final transferRef = _transfersCollection.doc(transferId);
+        final notificationRef = _notificationsCollection.doc();
+        final auditLogRef = _auditLogsCollection.doc();
+        InventoryItem? previousSourceInventory;
+        InventoryItem? updatedSourceInventory;
+        InventoryItem? previousDestinationInventory;
+        InventoryItem? updatedDestinationInventory;
 
-    final updatedTransfer = await _firestore.runTransaction((
-      transaction,
-    ) async {
-      final transferSnapshot = await transaction.get(transferRef);
-      if (!transferSnapshot.exists) {
-        throw const InventoryException('El traslado no existe.');
-      }
+        final updatedTransfer = await _firestore.runTransaction((
+          transaction,
+        ) async {
+          final transferSnapshot = await transaction.get(transferRef);
+          if (!transferSnapshot.exists) {
+            throw const InventoryException('El traslado no existe.');
+          }
 
-      final transfer = TransferRequest.fromFirestore(
-        transferSnapshot.id,
-        transferSnapshot.data()!,
-      );
-      _ensureBranchAccess(actorUser, transfer.fromBranchId);
+          final transfer = TransferRequest.fromFirestore(
+            transferSnapshot.id,
+            transferSnapshot.data()!,
+          );
+          _ensureBranchAccess(actorUser, transfer.fromBranchId);
 
-      if (transfer.status != TransferStatus.pending) {
-        throw InventoryException(
-          'Solo se pueden aprobar traslados pendientes. Estado: ${transfer.status.firestoreValue}.',
-        );
-      }
-
-      final sourceInventoryRef = _inventoriesCollection.doc(
-        inventories.inventoryId(transfer.fromBranchId, transfer.productId),
-      );
-      final destinationInventoryRef = _inventoriesCollection.doc(
-        inventories.inventoryId(transfer.toBranchId, transfer.productId),
-      );
-
-      final sourceInventorySnapshot = await transaction.get(sourceInventoryRef);
-      if (!sourceInventorySnapshot.exists) {
-        throw const InventoryException(
-          'No existe inventario origen para este traslado.',
-        );
-      }
-
-      final sourceInventory = InventoryItem.fromFirestore(
-        sourceInventorySnapshot.id,
-        sourceInventorySnapshot.data()!,
-      );
-      previousSourceInventory = sourceInventory;
-      if (sourceInventory.availableStock < transfer.quantity) {
-        throw InventoryException(
-          'Stock insuficiente para aprobar el traslado. Disponible: ${sourceInventory.availableStock}.',
-        );
-      }
-
-      final destinationInventorySnapshot = await transaction.get(
-        destinationInventoryRef,
-      );
-      final destinationInventory = destinationInventorySnapshot.exists
-          ? InventoryItem.fromFirestore(
-              destinationInventorySnapshot.id,
-              destinationInventorySnapshot.data()!,
-            )
-          : InventoryItem.create(
-              branchId: transfer.toBranchId,
-              branchName: transfer.toBranchName,
-              productId: transfer.productId,
-              productName: transfer.productName,
-              sku: transfer.sku,
-              stock: 0,
-              reservedStock: 0,
-              incomingStock: 0,
-              minimumStock: 0,
-              updatedBy: actorUser.id,
-              isActive: true,
-              updatedAt: now,
-              lastMovementAt: now,
+          if (transfer.status != TransferStatus.pending) {
+            throw InventoryException(
+              'Solo se pueden aprobar traslados pendientes. Estado: ${transfer.status.firestoreValue}.',
             );
-      previousDestinationInventory = destinationInventorySnapshot.exists
-          ? destinationInventory
-          : null;
+          }
 
-      updatedSourceInventory = sourceInventory.recalculate(
-        stock: sourceInventory.stock - transfer.quantity,
-        updatedBy: actorUser.id,
-        updatedAt: now,
-        lastMovementAt: now,
-      );
-      updatedDestinationInventory = destinationInventory.recalculate(
-        incomingStock: destinationInventory.incomingStock + transfer.quantity,
-        updatedBy: actorUser.id,
-        updatedAt: now,
-        lastMovementAt: now,
-      );
-      final updatedTransfer = transfer.copyWith(
-        status: TransferStatus.approved,
-        approvedBy: actorUser.id,
-        reviewComment: normalizedComment,
-        approvedAt: now,
-        updatedAt: now,
-      );
+          final sourceInventoryRef = _inventoriesCollection.doc(
+            inventories.inventoryId(transfer.fromBranchId, transfer.productId),
+          );
+          final destinationInventoryRef = _inventoriesCollection.doc(
+            inventories.inventoryId(transfer.toBranchId, transfer.productId),
+          );
 
-      final notification = AppNotification(
-        id: notificationRef.id,
-        userId: transfer.requestedBy,
-        title: 'Solicitud aprobada',
-        message:
-            'El traslado ${transfer.id} fue aprobado y quedo listo para despacho.${normalizedComment.isNotEmpty ? ' Nota: $normalizedComment' : ''}',
-        type: 'transfer',
-        referenceId: transfer.id,
-        isRead: false,
-        createdAt: now,
-      );
-      final auditLog = _buildTransferAuditLog(
-        actorUser: actorUser,
-        transfer: updatedTransfer,
-        action: 'transfer_approved',
-        message: 'Aprobo el traslado de',
-        branchId: updatedTransfer.fromBranchId,
-        branchName: updatedTransfer.fromBranchName,
-        extraMetadata: {
-          'approvedByUserId': actorUser.id,
-          if (normalizedComment.isNotEmpty) 'reviewComment': normalizedComment,
-        },
-      );
+          final sourceInventorySnapshot = await transaction.get(
+            sourceInventoryRef,
+          );
+          if (!sourceInventorySnapshot.exists) {
+            throw const InventoryException(
+              'No existe inventario origen para este traslado.',
+            );
+          }
 
-      transaction.set(
-        sourceInventoryRef,
-        updatedSourceInventory!.toFirestore(),
-      );
-      transaction.set(
-        destinationInventoryRef,
-        updatedDestinationInventory!.toFirestore(),
-        SetOptions(merge: true),
-      );
-      transaction.set(transferRef, updatedTransfer.toFirestore());
-      transaction.set(notificationRef, notification.toFirestore());
-      transaction.set(auditLogRef, auditLog.toFirestore());
+          final sourceInventory = InventoryItem.fromFirestore(
+            sourceInventorySnapshot.id,
+            sourceInventorySnapshot.data()!,
+          );
+          previousSourceInventory = sourceInventory;
+          if (sourceInventory.availableStock < transfer.quantity) {
+            throw InventoryException(
+              'Stock insuficiente para aprobar el traslado. Disponible: ${sourceInventory.availableStock}.',
+            );
+          }
 
-      return updatedTransfer;
-    });
-    if (updatedSourceInventory != null) {
-      await _handleLowStockAlertTransition(
-        previousInventory: previousSourceInventory,
-        updatedInventory: updatedSourceInventory!,
-      );
-    }
-    if (updatedDestinationInventory != null) {
-      await _handleLowStockAlertTransition(
-        previousInventory: previousDestinationInventory,
-        updatedInventory: updatedDestinationInventory!,
-      );
-    }
-    _invalidateProductCaches(updatedTransfer.productId);
-    return updatedTransfer;
+          final destinationInventorySnapshot = await transaction.get(
+            destinationInventoryRef,
+          );
+          final destinationInventory = destinationInventorySnapshot.exists
+              ? InventoryItem.fromFirestore(
+                  destinationInventorySnapshot.id,
+                  destinationInventorySnapshot.data()!,
+                )
+              : InventoryItem.create(
+                  branchId: transfer.toBranchId,
+                  branchName: transfer.toBranchName,
+                  productId: transfer.productId,
+                  productName: transfer.productName,
+                  sku: transfer.sku,
+                  stock: 0,
+                  reservedStock: 0,
+                  incomingStock: 0,
+                  minimumStock: 0,
+                  updatedBy: actorUser.id,
+                  isActive: true,
+                  updatedAt: now,
+                  lastMovementAt: now,
+                );
+          previousDestinationInventory = destinationInventorySnapshot.exists
+              ? destinationInventory
+              : null;
+
+          updatedSourceInventory = sourceInventory.recalculate(
+            stock: sourceInventory.stock - transfer.quantity,
+            updatedBy: actorUser.id,
+            updatedAt: now,
+            lastMovementAt: now,
+          );
+          updatedDestinationInventory = destinationInventory.recalculate(
+            incomingStock:
+                destinationInventory.incomingStock + transfer.quantity,
+            updatedBy: actorUser.id,
+            updatedAt: now,
+            lastMovementAt: now,
+          );
+          final updatedTransfer = transfer.copyWith(
+            status: TransferStatus.approved,
+            approvedBy: actorUser.id,
+            reviewComment: normalizedComment,
+            approvedAt: now,
+            updatedAt: now,
+          );
+
+          final notification = AppNotification(
+            id: notificationRef.id,
+            userId: transfer.requestedBy,
+            title: 'Solicitud aprobada',
+            message:
+                'El traslado ${transfer.id} fue aprobado y quedo listo para despacho.${normalizedComment.isNotEmpty ? ' Nota: $normalizedComment' : ''}',
+            type: 'transfer',
+            referenceId: transfer.id,
+            isRead: false,
+            createdAt: now,
+          );
+          final auditLog = _buildTransferAuditLog(
+            actorUser: actorUser,
+            transfer: updatedTransfer,
+            action: 'transfer_approved',
+            message: 'Aprobo el traslado de',
+            branchId: updatedTransfer.fromBranchId,
+            branchName: updatedTransfer.fromBranchName,
+            extraMetadata: {
+              'approvedByUserId': actorUser.id,
+              if (normalizedComment.isNotEmpty)
+                'reviewComment': normalizedComment,
+            },
+          );
+
+          transaction.set(
+            sourceInventoryRef,
+            updatedSourceInventory!.toFirestore(),
+          );
+          transaction.set(
+            destinationInventoryRef,
+            updatedDestinationInventory!.toFirestore(),
+            SetOptions(merge: true),
+          );
+          transaction.set(transferRef, updatedTransfer.toFirestore());
+          transaction.set(notificationRef, notification.toFirestore());
+          transaction.set(auditLogRef, auditLog.toFirestore());
+
+          return updatedTransfer;
+        });
+        if (updatedSourceInventory != null) {
+          await _handleLowStockAlertTransition(
+            previousInventory: previousSourceInventory,
+            updatedInventory: updatedSourceInventory!,
+          );
+        }
+        if (updatedDestinationInventory != null) {
+          await _handleLowStockAlertTransition(
+            previousInventory: previousDestinationInventory,
+            updatedInventory: updatedDestinationInventory!,
+          );
+        }
+        _invalidateProductCaches(updatedTransfer.productId);
+        return updatedTransfer;
+      },
+    );
   }
 
   Future<TransferRequest> rejectTransfer({
@@ -4346,241 +4912,296 @@ class InventoryWorkflowService {
     required String transferId,
     required String reviewComment,
   }) async {
-    _ensurePermission(actorUser, AppPermission.approveTransfer);
+    return _trackOperation(
+      actorUser: actorUser,
+      operation: 'transfer.reject',
+      entityType: 'transfer',
+      entityId: transferId,
+      requestSummary: {
+        'transferId': transferId,
+        'reviewComment': reviewComment.trim(),
+      },
+      responseSummaryBuilder: (transfer) => {
+        'status': transfer.status.firestoreValue,
+        'rejectedBy': transfer.rejectedBy ?? '',
+      },
+      branchIdBuilder: (transfer) => transfer.fromBranchId,
+      branchNameBuilder: (transfer) => transfer.fromBranchName,
+      entityLabelBuilder: (transfer) => transfer.productName,
+      action: () async {
+        _ensurePermission(actorUser, AppPermission.approveTransfer);
 
-    final normalizedComment = reviewComment.trim();
-    if (normalizedComment.isEmpty) {
-      throw const InventoryException(
-        'Debes registrar un motivo para rechazar el traslado.',
-      );
-    }
+        final normalizedComment = reviewComment.trim();
+        if (normalizedComment.isEmpty) {
+          throw const InventoryException(
+            'Debes registrar un motivo para rechazar el traslado.',
+          );
+        }
 
-    final now = _clock();
-    final transferRef = _transfersCollection.doc(transferId);
-    final notificationRef = _notificationsCollection.doc();
-    final auditLogRef = _auditLogsCollection.doc();
+        final now = _clock();
+        final transferRef = _transfersCollection.doc(transferId);
+        final notificationRef = _notificationsCollection.doc();
+        final auditLogRef = _auditLogsCollection.doc();
 
-    final updatedTransfer = await _firestore.runTransaction((
-      transaction,
-    ) async {
-      final transferSnapshot = await transaction.get(transferRef);
-      if (!transferSnapshot.exists) {
-        throw const InventoryException('El traslado no existe.');
-      }
+        final updatedTransfer = await _firestore.runTransaction((
+          transaction,
+        ) async {
+          final transferSnapshot = await transaction.get(transferRef);
+          if (!transferSnapshot.exists) {
+            throw const InventoryException('El traslado no existe.');
+          }
 
-      final transfer = TransferRequest.fromFirestore(
-        transferSnapshot.id,
-        transferSnapshot.data()!,
-      );
-      _ensureBranchAccess(actorUser, transfer.fromBranchId);
+          final transfer = TransferRequest.fromFirestore(
+            transferSnapshot.id,
+            transferSnapshot.data()!,
+          );
+          _ensureBranchAccess(actorUser, transfer.fromBranchId);
 
-      if (transfer.status != TransferStatus.pending) {
-        throw InventoryException(
-          'Solo se pueden rechazar traslados pendientes. Estado: ${transfer.status.firestoreValue}.',
-        );
-      }
+          if (transfer.status != TransferStatus.pending) {
+            throw InventoryException(
+              'Solo se pueden rechazar traslados pendientes. Estado: ${transfer.status.firestoreValue}.',
+            );
+          }
 
-      final updatedTransfer = transfer.copyWith(
-        status: TransferStatus.rejected,
-        rejectedBy: actorUser.id,
-        rejectedAt: now,
-        reviewComment: normalizedComment,
-        updatedAt: now,
-      );
-      final notification = AppNotification(
-        id: notificationRef.id,
-        userId: transfer.requestedBy,
-        title: 'Solicitud rechazada',
-        message:
-            'El traslado ${transfer.id} fue rechazado por ${transfer.fromBranchName}. Motivo: $normalizedComment',
-        type: 'transfer',
-        referenceId: transfer.id,
-        isRead: false,
-        createdAt: now,
-      );
-      final auditLog = _buildTransferAuditLog(
-        actorUser: actorUser,
-        transfer: updatedTransfer,
-        action: 'transfer_rejected',
-        message: 'Rechazo el traslado de',
-        branchId: updatedTransfer.fromBranchId,
-        branchName: updatedTransfer.fromBranchName,
-        extraMetadata: {
-          'rejectedByUserId': actorUser.id,
-          'reviewComment': normalizedComment,
-        },
-      );
+          final updatedTransfer = transfer.copyWith(
+            status: TransferStatus.rejected,
+            rejectedBy: actorUser.id,
+            rejectedAt: now,
+            reviewComment: normalizedComment,
+            updatedAt: now,
+          );
+          final notification = AppNotification(
+            id: notificationRef.id,
+            userId: transfer.requestedBy,
+            title: 'Solicitud rechazada',
+            message:
+                'El traslado ${transfer.id} fue rechazado por ${transfer.fromBranchName}. Motivo: $normalizedComment',
+            type: 'transfer',
+            referenceId: transfer.id,
+            isRead: false,
+            createdAt: now,
+          );
+          final auditLog = _buildTransferAuditLog(
+            actorUser: actorUser,
+            transfer: updatedTransfer,
+            action: 'transfer_rejected',
+            message: 'Rechazo el traslado de',
+            branchId: updatedTransfer.fromBranchId,
+            branchName: updatedTransfer.fromBranchName,
+            extraMetadata: {
+              'rejectedByUserId': actorUser.id,
+              'reviewComment': normalizedComment,
+            },
+          );
 
-      transaction.set(transferRef, updatedTransfer.toFirestore());
-      transaction.set(notificationRef, notification.toFirestore());
-      transaction.set(auditLogRef, auditLog.toFirestore());
+          transaction.set(transferRef, updatedTransfer.toFirestore());
+          transaction.set(notificationRef, notification.toFirestore());
+          transaction.set(auditLogRef, auditLog.toFirestore());
 
-      return updatedTransfer;
-    });
-    _invalidateProductCaches(updatedTransfer.productId);
-    return updatedTransfer;
+          return updatedTransfer;
+        });
+        _invalidateProductCaches(updatedTransfer.productId);
+        return updatedTransfer;
+      },
+    );
   }
 
   Future<TransferRequest> markTransferInTransit({
     required AppUser actorUser,
     required String transferId,
   }) async {
-    _ensurePermission(actorUser, AppPermission.dispatchTransfer);
+    return _trackOperation(
+      actorUser: actorUser,
+      operation: 'transfer.dispatch',
+      entityType: 'transfer',
+      entityId: transferId,
+      requestSummary: {'transferId': transferId},
+      responseSummaryBuilder: (transfer) => {
+        'status': transfer.status.firestoreValue,
+        'shippedAt': transfer.shippedAt?.toIso8601String() ?? '',
+      },
+      branchIdBuilder: (transfer) => transfer.fromBranchId,
+      branchNameBuilder: (transfer) => transfer.fromBranchName,
+      entityLabelBuilder: (transfer) => transfer.productName,
+      action: () async {
+        _ensurePermission(actorUser, AppPermission.dispatchTransfer);
 
-    final now = _clock();
-    final transferRef = _transfersCollection.doc(transferId);
-    final auditLogRef = _auditLogsCollection.doc();
+        final now = _clock();
+        final transferRef = _transfersCollection.doc(transferId);
+        final auditLogRef = _auditLogsCollection.doc();
 
-    final updatedTransfer = await _firestore.runTransaction((
-      transaction,
-    ) async {
-      final transferSnapshot = await transaction.get(transferRef);
-      if (!transferSnapshot.exists) {
-        throw const InventoryException('El traslado no existe.');
-      }
+        final updatedTransfer = await _firestore.runTransaction((
+          transaction,
+        ) async {
+          final transferSnapshot = await transaction.get(transferRef);
+          if (!transferSnapshot.exists) {
+            throw const InventoryException('El traslado no existe.');
+          }
 
-      final transfer = TransferRequest.fromFirestore(
-        transferSnapshot.id,
-        transferSnapshot.data()!,
-      );
-      _ensureBranchAccess(actorUser, transfer.fromBranchId);
+          final transfer = TransferRequest.fromFirestore(
+            transferSnapshot.id,
+            transferSnapshot.data()!,
+          );
+          _ensureBranchAccess(actorUser, transfer.fromBranchId);
 
-      if (transfer.status != TransferStatus.approved) {
-        throw InventoryException(
-          'Solo se puede despachar un traslado aprobado. Estado: ${transfer.status.firestoreValue}.',
-        );
-      }
+          if (transfer.status != TransferStatus.approved) {
+            throw InventoryException(
+              'Solo se puede despachar un traslado aprobado. Estado: ${transfer.status.firestoreValue}.',
+            );
+          }
 
-      final updatedTransfer = transfer.copyWith(
-        status: TransferStatus.inTransit,
-        shippedAt: now,
-        updatedAt: now,
-        approvedBy: transfer.approvedBy ?? actorUser.id,
-      );
-      final auditLog = _buildTransferAuditLog(
-        actorUser: actorUser,
-        transfer: updatedTransfer,
-        action: 'transfer_in_transit',
-        message: 'Despacho el traslado de',
-        branchId: updatedTransfer.fromBranchId,
-        branchName: updatedTransfer.fromBranchName,
-        extraMetadata: {'dispatchedByUserId': actorUser.id},
-      );
+          final updatedTransfer = transfer.copyWith(
+            status: TransferStatus.inTransit,
+            shippedAt: now,
+            updatedAt: now,
+            approvedBy: transfer.approvedBy ?? actorUser.id,
+          );
+          final auditLog = _buildTransferAuditLog(
+            actorUser: actorUser,
+            transfer: updatedTransfer,
+            action: 'transfer_in_transit',
+            message: 'Despacho el traslado de',
+            branchId: updatedTransfer.fromBranchId,
+            branchName: updatedTransfer.fromBranchName,
+            extraMetadata: {'dispatchedByUserId': actorUser.id},
+          );
 
-      transaction.set(transferRef, updatedTransfer.toFirestore());
-      transaction.set(auditLogRef, auditLog.toFirestore());
-      return updatedTransfer;
-    });
-    _invalidateProductCaches(updatedTransfer.productId);
-    return updatedTransfer;
+          transaction.set(transferRef, updatedTransfer.toFirestore());
+          transaction.set(auditLogRef, auditLog.toFirestore());
+          return updatedTransfer;
+        });
+        _invalidateProductCaches(updatedTransfer.productId);
+        return updatedTransfer;
+      },
+    );
   }
 
   Future<TransferRequest> receiveTransfer({
     required AppUser actorUser,
     required String transferId,
   }) async {
-    _ensurePermission(actorUser, AppPermission.receiveTransfer);
+    return _trackOperation(
+      actorUser: actorUser,
+      operation: 'transfer.receive',
+      entityType: 'transfer',
+      entityId: transferId,
+      requestSummary: {'transferId': transferId},
+      responseSummaryBuilder: (transfer) => {
+        'status': transfer.status.firestoreValue,
+        'receivedAt': transfer.receivedAt?.toIso8601String() ?? '',
+      },
+      branchIdBuilder: (transfer) => transfer.toBranchId,
+      branchNameBuilder: (transfer) => transfer.toBranchName,
+      entityLabelBuilder: (transfer) => transfer.productName,
+      action: () async {
+        _ensurePermission(actorUser, AppPermission.receiveTransfer);
 
-    final now = _clock();
-    final transferRef = _transfersCollection.doc(transferId);
-    final notificationRef = _notificationsCollection.doc();
-    final auditLogRef = _auditLogsCollection.doc();
-    InventoryItem? previousInventory;
-    InventoryItem? updatedInventory;
+        final now = _clock();
+        final transferRef = _transfersCollection.doc(transferId);
+        final notificationRef = _notificationsCollection.doc();
+        final auditLogRef = _auditLogsCollection.doc();
+        InventoryItem? previousInventory;
+        InventoryItem? updatedInventory;
 
-    final updatedTransfer = await _firestore.runTransaction((
-      transaction,
-    ) async {
-      final transferSnapshot = await transaction.get(transferRef);
-      if (!transferSnapshot.exists) {
-        throw const InventoryException('El traslado no existe.');
-      }
+        final updatedTransfer = await _firestore.runTransaction((
+          transaction,
+        ) async {
+          final transferSnapshot = await transaction.get(transferRef);
+          if (!transferSnapshot.exists) {
+            throw const InventoryException('El traslado no existe.');
+          }
 
-      final transfer = TransferRequest.fromFirestore(
-        transferSnapshot.id,
-        transferSnapshot.data()!,
-      );
-      _ensureBranchAccess(actorUser, transfer.toBranchId);
+          final transfer = TransferRequest.fromFirestore(
+            transferSnapshot.id,
+            transferSnapshot.data()!,
+          );
+          _ensureBranchAccess(actorUser, transfer.toBranchId);
 
-      if (transfer.status != TransferStatus.inTransit) {
-        throw InventoryException(
-          'Solo se puede recibir un traslado en transito. Estado: ${transfer.status.firestoreValue}.',
-        );
-      }
+          if (transfer.status != TransferStatus.inTransit) {
+            throw InventoryException(
+              'Solo se puede recibir un traslado en transito. Estado: ${transfer.status.firestoreValue}.',
+            );
+          }
 
-      final destinationInventoryRef = _inventoriesCollection.doc(
-        inventories.inventoryId(transfer.toBranchId, transfer.productId),
-      );
-      final destinationInventorySnapshot = await transaction.get(
-        destinationInventoryRef,
-      );
-      if (!destinationInventorySnapshot.exists) {
-        throw const InventoryException(
-          'No existe inventario destino para recibir el traslado.',
-        );
-      }
+          final destinationInventoryRef = _inventoriesCollection.doc(
+            inventories.inventoryId(transfer.toBranchId, transfer.productId),
+          );
+          final destinationInventorySnapshot = await transaction.get(
+            destinationInventoryRef,
+          );
+          if (!destinationInventorySnapshot.exists) {
+            throw const InventoryException(
+              'No existe inventario destino para recibir el traslado.',
+            );
+          }
 
-      final destinationInventory = InventoryItem.fromFirestore(
-        destinationInventorySnapshot.id,
-        destinationInventorySnapshot.data()!,
-      );
-      previousInventory = destinationInventory;
+          final destinationInventory = InventoryItem.fromFirestore(
+            destinationInventorySnapshot.id,
+            destinationInventorySnapshot.data()!,
+          );
+          previousInventory = destinationInventory;
 
-      if (destinationInventory.incomingStock < transfer.quantity) {
-        throw const InventoryException(
-          'El inventario destino no tiene stock en camino suficiente para recibir.',
-        );
-      }
+          if (destinationInventory.incomingStock < transfer.quantity) {
+            throw const InventoryException(
+              'El inventario destino no tiene stock en camino suficiente para recibir.',
+            );
+          }
 
-      updatedInventory = destinationInventory.recalculate(
-        stock: destinationInventory.stock + transfer.quantity,
-        incomingStock: destinationInventory.incomingStock - transfer.quantity,
-        updatedBy: actorUser.id,
-        updatedAt: now,
-        lastMovementAt: now,
-      );
-      final updatedTransfer = transfer.copyWith(
-        status: TransferStatus.received,
-        receivedAt: now,
-        updatedAt: now,
-      );
+          updatedInventory = destinationInventory.recalculate(
+            stock: destinationInventory.stock + transfer.quantity,
+            incomingStock:
+                destinationInventory.incomingStock - transfer.quantity,
+            updatedBy: actorUser.id,
+            updatedAt: now,
+            lastMovementAt: now,
+          );
+          final updatedTransfer = transfer.copyWith(
+            status: TransferStatus.received,
+            receivedAt: now,
+            updatedAt: now,
+          );
 
-      final notification = AppNotification(
-        id: notificationRef.id,
-        userId: transfer.requestedBy,
-        title: 'Traslado recibido',
-        message:
-            'El traslado ${transfer.id} fue recibido en ${transfer.toBranchName}.',
-        type: 'transfer',
-        referenceId: transfer.id,
-        isRead: false,
-        createdAt: now,
-      );
-      final auditLog = _buildTransferAuditLog(
-        actorUser: actorUser,
-        transfer: updatedTransfer,
-        action: 'transfer_received',
-        message: 'Recibio el traslado de',
-        branchId: updatedTransfer.toBranchId,
-        branchName: updatedTransfer.toBranchName,
-        extraMetadata: {'receivedByUserId': actorUser.id},
-      );
+          final notification = AppNotification(
+            id: notificationRef.id,
+            userId: transfer.requestedBy,
+            title: 'Traslado recibido',
+            message:
+                'El traslado ${transfer.id} fue recibido en ${transfer.toBranchName}.',
+            type: 'transfer',
+            referenceId: transfer.id,
+            isRead: false,
+            createdAt: now,
+          );
+          final auditLog = _buildTransferAuditLog(
+            actorUser: actorUser,
+            transfer: updatedTransfer,
+            action: 'transfer_received',
+            message: 'Recibio el traslado de',
+            branchId: updatedTransfer.toBranchId,
+            branchName: updatedTransfer.toBranchName,
+            extraMetadata: {'receivedByUserId': actorUser.id},
+          );
 
-      transaction.set(destinationInventoryRef, updatedInventory!.toFirestore());
-      transaction.set(transferRef, updatedTransfer.toFirestore());
-      transaction.set(notificationRef, notification.toFirestore());
-      transaction.set(auditLogRef, auditLog.toFirestore());
+          transaction.set(
+            destinationInventoryRef,
+            updatedInventory!.toFirestore(),
+          );
+          transaction.set(transferRef, updatedTransfer.toFirestore());
+          transaction.set(notificationRef, notification.toFirestore());
+          transaction.set(auditLogRef, auditLog.toFirestore());
 
-      return updatedTransfer;
-    });
-    if (updatedInventory != null) {
-      await _handleLowStockAlertTransition(
-        previousInventory: previousInventory,
-        updatedInventory: updatedInventory!,
-      );
-    }
-    _invalidateProductCaches(updatedTransfer.productId);
-    return updatedTransfer;
+          return updatedTransfer;
+        });
+        if (updatedInventory != null) {
+          await _handleLowStockAlertTransition(
+            previousInventory: previousInventory,
+            updatedInventory: updatedInventory!,
+          );
+        }
+        _invalidateProductCaches(updatedTransfer.productId);
+        return updatedTransfer;
+      },
+    );
   }
 
   String _normalizeBranchCode(String value) {
