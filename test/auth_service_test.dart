@@ -2,6 +2,7 @@ import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:firebase_auth_mocks/firebase_auth_mocks.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:flutter_multibranch_proyect/src/features/auth/application/auth_session.dart';
 import 'package:flutter_multibranch_proyect/src/features/auth/application/auth_service.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/domain/models.dart';
 
@@ -21,6 +22,7 @@ void main() {
       auth: auth,
       firestore: firestore,
       employeeAccountCreator: employeeAccountCreator,
+      secureSessionStore: InMemorySecureSessionStore(),
     );
   });
 

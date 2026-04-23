@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:flutter_multibranch_proyect/src/app.dart';
+import 'package:flutter_multibranch_proyect/src/features/auth/application/auth_session.dart';
 import 'package:flutter_multibranch_proyect/src/features/auth/application/auth_service.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/application/inventory_workflow_service.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/data/sample_seed_data.dart';
@@ -24,7 +25,12 @@ void main() {
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
-      MyApp(firestore: FakeFirebaseFirestore(), auth: MockFirebaseAuth()),
+      MyApp(
+        firestore: FakeFirebaseFirestore(),
+        auth: MockFirebaseAuth(),
+        secureSessionStore: InMemorySecureSessionStore(),
+        enableSessionRefreshMonitoring: false,
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -63,6 +69,8 @@ void main() {
           signedIn: true,
           mockUser: MockUser(uid: 'uid_admin', email: 'admin@empresa.com'),
         ),
+        secureSessionStore: InMemorySecureSessionStore(),
+        enableSessionRefreshMonitoring: false,
       ),
     );
     await tester.pumpAndSettle();
@@ -151,6 +159,8 @@ void main() {
             email: 'admintrace@empresa.com',
           ),
         ),
+        secureSessionStore: InMemorySecureSessionStore(),
+        enableSessionRefreshMonitoring: false,
       ),
     );
     await tester.pumpAndSettle();
@@ -216,6 +226,8 @@ void main() {
           mockUser: MockUser(uid: admin.id, email: admin.email),
         ),
         firestore: firestore,
+        secureSessionStore: InMemorySecureSessionStore(),
+        enableSessionRefreshMonitoring: false,
       );
 
       await tester.pumpWidget(
@@ -268,6 +280,8 @@ void main() {
           signedIn: true,
           mockUser: MockUser(uid: 'uid_seller', email: 'seller@empresa.com'),
         ),
+        secureSessionStore: InMemorySecureSessionStore(),
+        enableSessionRefreshMonitoring: false,
       ),
     );
     await tester.pumpAndSettle();
@@ -764,6 +778,8 @@ void main() {
             email: 'search@empresa.com',
           ),
         ),
+        secureSessionStore: InMemorySecureSessionStore(),
+        enableSessionRefreshMonitoring: false,
       ),
     );
     await tester.pumpAndSettle();
@@ -1161,6 +1177,8 @@ void main() {
               email: 'supervisor@empresa.com',
             ),
           ),
+          secureSessionStore: InMemorySecureSessionStore(),
+          enableSessionRefreshMonitoring: false,
         ),
       );
       await tester.pumpAndSettle();
@@ -1280,6 +1298,8 @@ void main() {
               email: 'supervisor2@empresa.com',
             ),
           ),
+          secureSessionStore: InMemorySecureSessionStore(),
+          enableSessionRefreshMonitoring: false,
         ),
       );
       await tester.pumpAndSettle();

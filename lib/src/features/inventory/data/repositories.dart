@@ -450,6 +450,25 @@ class TransferRepository {
         );
   }
 
+  Stream<List<TransferRequest>> watchTransfersFromBranch(String branchId) {
+    return _collection
+        .where('fromBranchId', isEqualTo: branchId)
+        .snapshots()
+        .map((snapshot) {
+          final items =
+              snapshot.docs
+                  .map(
+                    (doc) => TransferRequest.fromFirestore(doc.id, doc.data()),
+                  )
+                  .toList(growable: false)
+                ..sort(
+                  (left, right) =>
+                      right.requestedAt.compareTo(left.requestedAt),
+                );
+          return items;
+        });
+  }
+
   Stream<List<TransferRequest>> watchTransfersForBranch(String branchId) {
     final controller = StreamController<List<TransferRequest>>();
     var outgoing = const <TransferRequest>[];
@@ -556,6 +575,8 @@ class SystemRepository {
       _firestore.collection(FirestoreCollections.notifications);
   CollectionReference<Map<String, dynamic>> get _auditLogs =>
       _firestore.collection(FirestoreCollections.auditLogs);
+  CollectionReference<Map<String, dynamic>> get _requestLogs =>
+      _firestore.collection(FirestoreCollections.requestLogs);
   CollectionReference<Map<String, dynamic>> get _searchHistory =>
       _firestore.collection(FirestoreCollections.searchHistory);
   CollectionReference<Map<String, dynamic>> get _searchFilters =>
@@ -577,6 +598,10 @@ class SystemRepository {
 
   Future<void> addAuditLog(AuditLog auditLog) async {
     await _auditLogs.doc(auditLog.id).set(auditLog.toFirestore());
+  }
+
+  Future<void> addRequestLog(RequestLog requestLog) async {
+    await _requestLogs.doc(requestLog.id).set(requestLog.toFirestore());
   }
 
   Future<SearchHistoryEntry?> fetchSearchHistory(
@@ -754,6 +779,28 @@ class SystemRepository {
               .map((doc) => AuditLog.fromFirestore(doc.id, doc.data()))
               .toList(),
         );
+  }
+
+  Stream<List<RequestLog>> watchRecentRequestLogs({int limit = 20}) {
+    return _requestLogs
+        .orderBy('createdAt', descending: true)
+        .limit(limit)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => RequestLog.fromFirestore(doc.id, doc.data()))
+              .toList(),
+        );
+  }
+
+  Future<List<RequestLog>> fetchRecentRequestLogs({int limit = 80}) async {
+    final snapshot = await _requestLogs
+        .orderBy('createdAt', descending: true)
+        .limit(limit)
+        .get();
+    return snapshot.docs
+        .map((doc) => RequestLog.fromFirestore(doc.id, doc.data()))
+        .toList(growable: false);
   }
 
   Future<List<AuditLog>> fetchAuditLogsForEntity({

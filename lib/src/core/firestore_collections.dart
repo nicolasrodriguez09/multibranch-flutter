@@ -10,6 +10,7 @@ abstract final class FirestoreCollections {
   static const stockAlertReads = 'stock_alert_reads';
   static const notifications = 'notifications';
   static const auditLogs = 'audit_logs';
+  static const requestLogs = 'request_logs';
   static const searchHistory = 'search_history';
   static const searchFilters = 'search_filters';
 }

@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 
+import 'auth_session.dart';
 import '../../inventory/data/repositories.dart';
 import '../../inventory/domain/models.dart';
 import '../../inventory/domain/role_permissions.dart';
@@ -11,15 +14,41 @@ class AuthService {
     required FirebaseAuth auth,
     required FirebaseFirestore firestore,
     EmployeeAccountCreator? employeeAccountCreator,
+    SecureSessionStore? secureSessionStore,
+    AuthSessionSnapshotResolver? sessionSnapshotResolver,
+    DateTime Function()? clock,
+    Duration tokenRefreshBuffer = const Duration(minutes: 5),
+    Duration tokenRefreshRetryDelay = const Duration(minutes: 1),
+    bool enableSessionRefreshMonitoring = true,
   }) : _auth = auth,
        users = UserRepository(firestore),
        catalog = CatalogRepository(firestore),
        system = SystemRepository(firestore),
        _employeeAccountCreator =
-           employeeAccountCreator ?? FirebaseEmployeeAccountCreator();
+           employeeAccountCreator ?? FirebaseEmployeeAccountCreator(),
+       _secureSessionStore = secureSessionStore ?? FlutterSecureSessionStore(),
+       _sessionSnapshotResolver =
+           sessionSnapshotResolver ??
+           FirebaseAuthSessionSnapshotResolver(clock: clock),
+       _clock = clock ?? DateTime.now,
+       _tokenRefreshBuffer = tokenRefreshBuffer,
+       _tokenRefreshRetryDelay = tokenRefreshRetryDelay,
+       _enableSessionRefreshMonitoring = enableSessionRefreshMonitoring {
+    _bindSessionLifecycle();
+  }
 
   final FirebaseAuth _auth;
   final EmployeeAccountCreator _employeeAccountCreator;
+  final SecureSessionStore _secureSessionStore;
+  final AuthSessionSnapshotResolver _sessionSnapshotResolver;
+  final DateTime Function() _clock;
+  final Duration _tokenRefreshBuffer;
+  final Duration _tokenRefreshRetryDelay;
+  final bool _enableSessionRefreshMonitoring;
+  StreamSubscription<User?>? _idTokenSubscription;
+  Timer? _sessionRefreshTimer;
+  String? _pendingSessionNotice;
+  bool _isDisposed = false;
 
   final UserRepository users;
   final CatalogRepository catalog;
@@ -31,18 +60,43 @@ class AuthService {
 
   Stream<AppUser?> watchProfile(String uid) => users.watchUser(uid);
 
+  Future<AuthSessionRecord?> readStoredSession() => _secureSessionStore.read();
+
+  String? takePendingSessionNotice() {
+    final notice = _pendingSessionNotice;
+    _pendingSessionNotice = null;
+    return notice;
+  }
+
   Future<void> signIn({required String email, required String password}) async {
     try {
-      await _auth.signInWithEmailAndPassword(
+      final credential = await _auth.signInWithEmailAndPassword(
         email: email.trim(),
         password: password,
       );
+      final user = credential.user ?? _auth.currentUser;
+      if (user != null) {
+        await _captureAndPersistSession(user, forceRefresh: true);
+      }
     } on FirebaseAuthException catch (error) {
       throw AuthException(_mapAuthError(error));
     }
   }
 
-  Future<void> signOut() => _auth.signOut();
+  Future<void> signOut() async {
+    await _endCurrentSession(shouldSignOut: true);
+  }
+
+  Future<void> signOutWithReason(String reason) async {
+    _pendingSessionNotice = reason;
+    await _endCurrentSession(shouldSignOut: true);
+  }
+
+  Future<void> dispose() async {
+    _isDisposed = true;
+    _sessionRefreshTimer?.cancel();
+    await _idTokenSubscription?.cancel();
+  }
 
   Future<void> createEmployee({
     required AppUser currentUser,
@@ -280,8 +334,141 @@ class AuthService {
         return 'La contrasena es demasiado debil.';
       case 'network-request-failed':
         return 'No fue posible conectar con Firebase.';
+      case 'user-disabled':
+        return 'Tu cuenta fue deshabilitada.';
+      case 'too-many-requests':
+        return 'Hay demasiados intentos. Espera un momento e intenta de nuevo.';
       default:
         return error.message ?? 'Ocurrio un error de autenticacion.';
+    }
+  }
+
+  void _bindSessionLifecycle() {
+    _idTokenSubscription = _auth.idTokenChanges().listen((user) {
+      unawaited(_handleAuthenticatedUserChanged(user));
+    });
+
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) {
+      unawaited(_secureSessionStore.clear());
+      return;
+    }
+    unawaited(_handleAuthenticatedUserChanged(currentUser));
+  }
+
+  Future<void> _handleAuthenticatedUserChanged(User? user) async {
+    if (_isDisposed) {
+      return;
+    }
+
+    _sessionRefreshTimer?.cancel();
+    if (user == null) {
+      await _secureSessionStore.clear();
+      return;
+    }
+
+    try {
+      await _captureAndPersistSession(user, forceRefresh: false);
+    } on FirebaseAuthException catch (_) {
+      await _handleRefreshFailure();
+    } catch (_) {
+      await _handleRefreshFailure();
+    }
+  }
+
+  Future<void> _captureAndPersistSession(
+    User user, {
+    required bool forceRefresh,
+  }) async {
+    final snapshot = await _sessionSnapshotResolver.resolve(
+      user,
+      forceRefresh: forceRefresh,
+    );
+    final record = AuthSessionRecord(
+      userId: user.uid,
+      email: user.email ?? '',
+      accessToken: snapshot.accessToken,
+      refreshToken: snapshot.refreshToken,
+      authenticatedAt: snapshot.authenticatedAt,
+      issuedAt: snapshot.issuedAt,
+      expiresAt: snapshot.expiresAt.toUtc(),
+      lastSyncedAt: _clock().toUtc(),
+    );
+
+    await _secureSessionStore.write(record);
+    _scheduleSessionRefresh(record.expiresAt);
+  }
+
+  void _scheduleSessionRefresh(DateTime expiresAt) {
+    if (_isDisposed || !_enableSessionRefreshMonitoring) {
+      return;
+    }
+
+    _sessionRefreshTimer?.cancel();
+    final now = _clock().toUtc();
+    final refreshAt = expiresAt.subtract(_tokenRefreshBuffer);
+    final delay = refreshAt.isAfter(now)
+        ? refreshAt.difference(now)
+        : Duration.zero;
+    _sessionRefreshTimer = Timer(delay, () {
+      unawaited(_refreshCurrentSession());
+    });
+  }
+
+  Future<void> _refreshCurrentSession() async {
+    if (_isDisposed) {
+      return;
+    }
+
+    final user = _auth.currentUser;
+    if (user == null) {
+      await _secureSessionStore.clear();
+      return;
+    }
+
+    try {
+      await _captureAndPersistSession(user, forceRefresh: true);
+    } on FirebaseAuthException catch (_) {
+      await _handleRefreshFailure();
+    } catch (_) {
+      await _handleRefreshFailure();
+    }
+  }
+
+  Future<void> _handleRefreshFailure() async {
+    final session = await _secureSessionStore.read();
+    final now = _clock().toUtc();
+    final expiresAt = session?.expiresAt;
+
+    if (expiresAt != null && now.isBefore(expiresAt)) {
+      final remaining = expiresAt.difference(now);
+      final retryDelay = remaining < _tokenRefreshRetryDelay
+          ? remaining
+          : _tokenRefreshRetryDelay;
+      _sessionRefreshTimer?.cancel();
+      _sessionRefreshTimer = Timer(retryDelay, () {
+        unawaited(_refreshCurrentSession());
+      });
+      return;
+    }
+
+    await signOutWithReason(
+      'Tu sesion expiro. Ingresa de nuevo para continuar.',
+    );
+  }
+
+  Future<void> _endCurrentSession({required bool shouldSignOut}) async {
+    _sessionRefreshTimer?.cancel();
+    await _secureSessionStore.clear();
+
+    if (!shouldSignOut || _auth.currentUser == null) {
+      return;
+    }
+
+    try {
+      await _auth.signOut();
+    } on FirebaseAuthException catch (error) {
+      throw AuthException(_mapAuthError(error));
     }
   }
 }
