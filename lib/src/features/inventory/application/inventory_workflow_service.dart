@@ -3115,13 +3115,20 @@ class InventoryWorkflowService {
         return;
       }
 
+      final reservationStream = actorUser.role == UserRole.admin
+          ? reservations.watchReservations()
+          : reservations.watchBranchReservations(actorUser.branchId);
+      final transferStream = actorUser.role == UserRole.admin
+          ? transfers.watchTransfers()
+          : transfers.watchTransfersFromBranch(actorUser.branchId);
+
       subscriptions = <StreamSubscription<Object?>>[
-        reservations.watchReservations().listen((items) {
+        reservationStream.listen((items) {
           reservationsState = items;
           reservationsReady = true;
           emit();
         }, onError: controller.addError),
-        transfers.watchTransfers().listen((items) {
+        transferStream.listen((items) {
           transfersState = items;
           transfersReady = true;
           emit();
@@ -3987,7 +3994,7 @@ class InventoryWorkflowService {
           reservationsReady = true;
           emit();
         }, onError: controller.addError),
-        transfers.watchTransfers().listen((items) {
+        transfers.watchTransfersForBranch(branchId).listen((items) {
           transfersState = items;
           transfersReady = true;
           emit();

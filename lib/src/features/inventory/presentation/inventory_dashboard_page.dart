@@ -20,7 +20,7 @@ import 'sync_status_page.dart';
 import 'stock_alerts_page.dart';
 import 'transfer_request_page.dart';
 
-enum _BranchDashboardSection { overview, inventory, workflow, metrics, modules }
+enum _BranchDashboardSection { overview, inventory, workflow, metrics }
 
 class InventoryDashboardPage extends StatefulWidget {
   const InventoryDashboardPage({
@@ -240,7 +240,10 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
             .watchBranchReservations(branchId)
             .first
             .then((_) {}),
-        widget.service.transfers.watchTransfers().first.then((_) {}),
+        widget.service.transfers
+            .watchTransfersForBranch(branchId)
+            .first
+            .then((_) {}),
         widget.service.catalog.watchBranches().first.then((_) {}),
         widget.service.system.watchBranchSyncLogs(branchId).first.then((_) {}),
         widget.service
@@ -348,14 +351,12 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         _BranchDashboardSection.overview,
         _BranchDashboardSection.inventory,
         _BranchDashboardSection.workflow,
-        _BranchDashboardSection.modules,
       ],
       UserRole.supervisor => const <_BranchDashboardSection>[
         _BranchDashboardSection.overview,
         _BranchDashboardSection.metrics,
         _BranchDashboardSection.inventory,
         _BranchDashboardSection.workflow,
-        _BranchDashboardSection.modules,
       ],
       UserRole.admin => const <_BranchDashboardSection>[],
     };
@@ -370,7 +371,6 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
             ? 'Compromisos y sincronizacion'
             : 'Solicitudes y sincronizacion',
       _BranchDashboardSection.metrics => 'KPIs operativos',
-      _BranchDashboardSection.modules => 'Modulos habilitados',
     };
   }
 
@@ -380,7 +380,6 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
       _BranchDashboardSection.inventory => Icons.inventory_2_rounded,
       _BranchDashboardSection.workflow => Icons.sync_alt_rounded,
       _BranchDashboardSection.metrics => Icons.insights_rounded,
-      _BranchDashboardSection.modules => Icons.widgets_rounded,
     };
   }
 
@@ -753,21 +752,12 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
     ];
   }
 
-  List<Widget> _buildBranchModulesSections(AppUser user) {
-    return [
-      ..._buildBranchSectionShell(user, 'Modulos habilitados'),
-      const SizedBox(height: 18),
-      _ModulePanel(modules: user.visibleModules),
-    ];
-  }
-
   List<Widget> _buildBranchSectionContent(AppUser user) {
     return switch (_selectedBranchSection) {
       _BranchDashboardSection.overview => _buildBranchOverviewSections(user),
       _BranchDashboardSection.inventory => _buildBranchInventorySections(user),
       _BranchDashboardSection.workflow => _buildBranchWorkflowSections(user),
       _BranchDashboardSection.metrics => _buildBranchMetricsSections(user),
-      _BranchDashboardSection.modules => _buildBranchModulesSections(user),
     };
   }
 
@@ -825,10 +815,6 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
             ? null
             : () => _runDrawerAction(_openCreateBranchDialog),
         onManageEmployees: () => _runDrawerAction(_openEmployeeManagementPage),
-        onOpenNotifications: () => _runDrawerAction(_openNotificationsPage),
-        onOpenStockAlerts: () => _runDrawerAction(_openStockAlertsPage),
-        onOpenSyncStatus: () => _runDrawerAction(_openSyncStatusPage),
-        onOpenApprovals: () => _runDrawerAction(_openApprovalRequestsPage),
         onOpenTraceability: () => _runDrawerAction(_openAdminTraceabilityPage),
         onSignOut: widget.authService.signOut,
       ),
@@ -918,15 +904,6 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         sectionIconBuilder: _branchSectionIcon,
         onSelectSection: _selectBranchSection,
         onOpenBranches: () => _runDrawerAction(_openBranchDirectoryPage),
-        onOpenNotifications: () => _runDrawerAction(_openNotificationsPage),
-        onOpenStockAlerts: () => _runDrawerAction(_openStockAlertsPage),
-        onOpenSyncStatus: () => _runDrawerAction(_openSyncStatusPage),
-        onOpenRequestTracking: () => _runDrawerAction(_openRequestTrackingPage),
-        onOpenApprovalRequests:
-            user.can(AppPermission.approveTransfer) ||
-                user.can(AppPermission.approveReservation)
-            ? () => _runDrawerAction(_openApprovalRequestsPage)
-            : null,
         onOpenReservationRequests: () =>
             _runDrawerAction(_openReservationRequestPage),
         onOpenTransferRequests: () =>
@@ -1210,7 +1187,7 @@ class _BranchOperationalHero extends StatelessWidget {
                     .length;
 
                 return StreamBuilder<List<TransferRequest>>(
-                  stream: service.transfers.watchTransfers(),
+                  stream: service.transfers.watchTransfersForBranch(branchId),
                   builder: (context, transferSnapshot) {
                     final transfers =
                         transferSnapshot.data ?? const <TransferRequest>[];
@@ -4434,10 +4411,6 @@ class _AdminDrawer extends StatelessWidget {
     required this.onCreateBaseData,
     required this.onCreateBranch,
     required this.onManageEmployees,
-    required this.onOpenNotifications,
-    required this.onOpenStockAlerts,
-    required this.onOpenSyncStatus,
-    required this.onOpenApprovals,
     required this.onOpenTraceability,
     required this.onSignOut,
   });
@@ -4448,10 +4421,6 @@ class _AdminDrawer extends StatelessWidget {
   final VoidCallback? onCreateBaseData;
   final VoidCallback? onCreateBranch;
   final VoidCallback? onManageEmployees;
-  final VoidCallback? onOpenNotifications;
-  final VoidCallback? onOpenStockAlerts;
-  final VoidCallback? onOpenSyncStatus;
-  final VoidCallback? onOpenApprovals;
   final VoidCallback? onOpenTraceability;
   final VoidCallback onSignOut;
 
@@ -4488,30 +4457,6 @@ class _AdminDrawer extends StatelessWidget {
                         icon: Icons.person_add_alt_1_rounded,
                         title: 'Gestion de empleados',
                         onTap: onManageEmployees,
-                      ),
-                      const SizedBox(height: 10),
-                      _AdminDrawerTile(
-                        icon: Icons.notifications_none_rounded,
-                        title: 'Notificaciones',
-                        onTap: onOpenNotifications,
-                      ),
-                      const SizedBox(height: 10),
-                      _AdminDrawerTile(
-                        icon: Icons.notification_important_rounded,
-                        title: 'Alertas de stock',
-                        onTap: onOpenStockAlerts,
-                      ),
-                      const SizedBox(height: 10),
-                      _AdminDrawerTile(
-                        icon: Icons.cloud_done_rounded,
-                        title: 'Estado de sincronizacion',
-                        onTap: onOpenSyncStatus,
-                      ),
-                      const SizedBox(height: 10),
-                      _AdminDrawerTile(
-                        icon: Icons.fact_check_rounded,
-                        title: 'Bandeja de aprobaciones',
-                        onTap: onOpenApprovals,
                       ),
                       const SizedBox(height: 10),
                       _AdminDrawerTile(
@@ -4604,11 +4549,6 @@ class _BranchDrawer extends StatelessWidget {
     required this.sectionIconBuilder,
     required this.onSelectSection,
     required this.onOpenBranches,
-    required this.onOpenNotifications,
-    required this.onOpenStockAlerts,
-    required this.onOpenSyncStatus,
-    required this.onOpenRequestTracking,
-    required this.onOpenApprovalRequests,
     required this.onOpenReservationRequests,
     required this.onOpenTransferRequests,
     required this.onSignOut,
@@ -4621,11 +4561,6 @@ class _BranchDrawer extends StatelessWidget {
   final IconData Function(_BranchDashboardSection section) sectionIconBuilder;
   final Future<void> Function(_BranchDashboardSection section) onSelectSection;
   final VoidCallback onOpenBranches;
-  final VoidCallback onOpenNotifications;
-  final VoidCallback onOpenStockAlerts;
-  final VoidCallback onOpenSyncStatus;
-  final VoidCallback onOpenRequestTracking;
-  final VoidCallback? onOpenApprovalRequests;
   final VoidCallback onOpenReservationRequests;
   final VoidCallback onOpenTransferRequests;
   final VoidCallback onSignOut;
@@ -4678,38 +4613,6 @@ class _BranchDrawer extends StatelessWidget {
                         title: 'Sucursales',
                         onTap: onOpenBranches,
                       ),
-                      const SizedBox(height: 10),
-                      _AdminDrawerTile(
-                        icon: Icons.notifications_none_rounded,
-                        title: 'Notificaciones',
-                        onTap: onOpenNotifications,
-                      ),
-                      const SizedBox(height: 10),
-                      _AdminDrawerTile(
-                        icon: Icons.notification_important_rounded,
-                        title: 'Alertas de stock',
-                        onTap: onOpenStockAlerts,
-                      ),
-                      const SizedBox(height: 10),
-                      _AdminDrawerTile(
-                        icon: Icons.cloud_done_rounded,
-                        title: 'Estado de sincronizacion',
-                        onTap: onOpenSyncStatus,
-                      ),
-                      const SizedBox(height: 10),
-                      _AdminDrawerTile(
-                        icon: Icons.track_changes_rounded,
-                        title: 'Estado de solicitudes',
-                        onTap: onOpenRequestTracking,
-                      ),
-                      if (onOpenApprovalRequests != null) ...[
-                        const SizedBox(height: 10),
-                        _AdminDrawerTile(
-                          icon: Icons.fact_check_rounded,
-                          title: 'Bandeja de aprobaciones',
-                          onTap: onOpenApprovalRequests,
-                        ),
-                      ],
                       const SizedBox(height: 10),
                       _AdminDrawerTile(
                         icon: Icons.bookmark_add_rounded,
@@ -4806,7 +4709,7 @@ class _TopConsultedPanel extends StatelessWidget {
             final reservations =
                 reservationSnapshot.data ?? const <Reservation>[];
             return StreamBuilder<List<TransferRequest>>(
-              stream: service.transfers.watchTransfers(),
+              stream: service.transfers.watchTransfersForBranch(branchId),
               builder: (context, transferSnapshot) {
                 final transfers =
                     transferSnapshot.data ?? const <TransferRequest>[];
@@ -4951,7 +4854,7 @@ class _PendingRequestsPanel extends StatelessWidget {
       builder: (context, reservationSnapshot) {
         final reservations = reservationSnapshot.data ?? const <Reservation>[];
         return StreamBuilder<List<TransferRequest>>(
-          stream: service.transfers.watchTransfers(),
+          stream: service.transfers.watchTransfersForBranch(branchId),
           builder: (context, transferSnapshot) {
             final transfers =
                 transferSnapshot.data ?? const <TransferRequest>[];
@@ -5120,52 +5023,6 @@ class _DashboardPanel extends StatelessWidget {
             child,
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _ModulePanel extends StatelessWidget {
-  const _ModulePanel({required this.modules});
-
-  final List<AppModule> modules;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        gradient: const LinearGradient(
-          colors: [Color(0xFF15304F), Color(0xFF0C1D36)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        border: Border.all(color: const Color(0x26FFFFFF)),
-      ),
-      child: Wrap(
-        spacing: 12,
-        runSpacing: 12,
-        children: modules
-            .map(
-              (module) => Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: const Color(0x40132647),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: const Color(0x26FFFFFF)),
-                ),
-                child: Text(
-                  module.label,
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-              ),
-            )
-            .toList(growable: false),
       ),
     );
   }

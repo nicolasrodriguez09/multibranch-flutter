@@ -1292,6 +1292,56 @@ void main() {
   );
 
   test(
+    'supervisor approval queue only includes requests from own approval scope',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final supervisor = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.secondBranchSeller,
+      );
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      await service.createReservation(
+        actorUser: seller,
+        branchId: DemoIds.branchNorth,
+        productId: DemoIds.phoneProduct,
+        customerName: 'Cliente Norte',
+        customerPhone: '3001002000',
+        quantity: 1,
+        expiresIn: const Duration(hours: 8),
+      );
+      await service.requestTransfer(
+        actorUser: seller,
+        productId: DemoIds.laptopProduct,
+        fromBranchId: DemoIds.branchNorth,
+        toBranchId: DemoIds.branchCenter,
+        quantity: 1,
+        reason: 'Pendiente para supervisor norte',
+      );
+
+      final queue = await service
+          .watchApprovalQueue(actorUser: supervisor)
+          .first;
+
+      expect(
+        queue.pendingReservations.every(
+          (item) => item.branchId == DemoIds.branchNorth,
+        ),
+        isTrue,
+      );
+      expect(
+        queue.pendingTransfers.every(
+          (item) => item.fromBranchId == DemoIds.branchNorth,
+        ),
+        isTrue,
+      );
+      expect(queue.pendingReservations, isNotEmpty);
+      expect(queue.pendingTransfers, isNotEmpty);
+    },
+  );
+
+  test(
     'supervisor can reject transfer requests and notify the requester',
     () async {
       await service.seedMasterData(actorUser: sampleData.users.first);

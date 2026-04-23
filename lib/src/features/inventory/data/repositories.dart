@@ -450,6 +450,25 @@ class TransferRepository {
         );
   }
 
+  Stream<List<TransferRequest>> watchTransfersFromBranch(String branchId) {
+    return _collection
+        .where('fromBranchId', isEqualTo: branchId)
+        .snapshots()
+        .map((snapshot) {
+          final items =
+              snapshot.docs
+                  .map(
+                    (doc) => TransferRequest.fromFirestore(doc.id, doc.data()),
+                  )
+                  .toList(growable: false)
+                ..sort(
+                  (left, right) =>
+                      right.requestedAt.compareTo(left.requestedAt),
+                );
+          return items;
+        });
+  }
+
   Stream<List<TransferRequest>> watchTransfersForBranch(String branchId) {
     final controller = StreamController<List<TransferRequest>>();
     var outgoing = const <TransferRequest>[];
