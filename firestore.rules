@@ -137,6 +137,34 @@ service cloud.firestore {
         && data.productId == existing.productId;
     }
 
+    function canReadTransferAudit(entityId) {
+      return exists(/databases/$(database)/documents/transfers/$(entityId))
+        && (
+          isAdmin()
+          || canReadBranch(get(/databases/$(database)/documents/transfers/$(entityId)).data.fromBranchId)
+          || canReadBranch(get(/databases/$(database)/documents/transfers/$(entityId)).data.toBranchId)
+        );
+    }
+
+    function canReadReservationAudit(entityId) {
+      return exists(/databases/$(database)/documents/reservations/$(entityId))
+        && canReadReservation(
+          get(/databases/$(database)/documents/reservations/$(entityId)).data
+        );
+    }
+
+    function canReadAuditLog(data) {
+      return isAdmin()
+        || (
+          data.entityType == 'transfer'
+          && canReadTransferAudit(data.entityId)
+        )
+        || (
+          data.entityType == 'reservation'
+          && canReadReservationAudit(data.entityId)
+        );
+    }
+
     match /users/{userId} {
       allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
       allow create: if isAdmin();
@@ -282,7 +310,7 @@ service cloud.firestore {
     }
 
     match /audit_logs/{auditId} {
-      allow read: if isAdmin();
+      allow read: if canReadAuditLog(resource.data);
       allow create: if hasUserProfile()
         && request.resource.data.actorUserId == request.auth.uid
         && request.resource.data.actorRole == currentUser().role;

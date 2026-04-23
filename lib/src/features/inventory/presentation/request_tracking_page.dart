@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/app_theme.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
+import 'request_tracking_traceability_dialogs.dart';
 
 enum _RequestTypeFilter { all, reservations, transfers }
 
@@ -241,7 +242,11 @@ class _RequestTrackingPageState extends State<RequestTrackingPage> {
                       ...filteredItems.map(
                         (item) => Padding(
                           padding: const EdgeInsets.only(bottom: 12),
-                          child: _TrackingRequestCard(item: item),
+                          child: _TrackingRequestCard(
+                            item: item,
+                            service: widget.service,
+                            currentUser: widget.currentUser,
+                          ),
                         ),
                       ),
                   ],
@@ -554,9 +559,15 @@ class _TrackingFiltersCard extends StatelessWidget {
 }
 
 class _TrackingRequestCard extends StatelessWidget {
-  const _TrackingRequestCard({required this.item});
+  const _TrackingRequestCard({
+    required this.item,
+    required this.service,
+    required this.currentUser,
+  });
 
   final RequestTrackingItem item;
+  final InventoryWorkflowService service;
+  final AppUser currentUser;
 
   @override
   Widget build(BuildContext context) {
@@ -627,6 +638,23 @@ class _TrackingRequestCard extends StatelessWidget {
                 label: 'Comentario de revision',
                 value: item.reviewComment,
               ),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                FilledButton.icon(
+                  onPressed: () => showRequestTraceabilityDialog(
+                    context,
+                    service: service,
+                    currentUser: currentUser,
+                    item: item,
+                  ),
+                  icon: const Icon(Icons.visibility_rounded),
+                  label: const Text('Ver trazabilidad'),
+                ),
+              ],
+            ),
             const SizedBox(height: 12),
             Row(
               children: [

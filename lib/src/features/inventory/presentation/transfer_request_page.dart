@@ -722,14 +722,9 @@ class _RecentTransferRequestsCard extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           StreamBuilder<List<TransferRequest>>(
-            stream: service.transfers.watchTransfers(),
+            stream: service.transfers.watchTransfersForBranch(branchId),
             builder: (context, snapshot) {
               final items = (snapshot.data ?? const <TransferRequest>[])
-                  .where(
-                    (item) =>
-                        item.fromBranchId == branchId ||
-                        item.toBranchId == branchId,
-                  )
                   .take(5)
                   .toList(growable: false);
 

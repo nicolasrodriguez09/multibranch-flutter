@@ -13,6 +13,7 @@ import 'auto_refresh_state_mixin.dart';
 import 'branch_directory_page.dart';
 import 'create_branch_dialog.dart';
 import 'notifications_page.dart';
+import 'inventory_adjustment_page.dart';
 import 'product_search_page.dart';
 import 'request_tracking_page.dart';
 import 'reservation_request_page.dart';
@@ -345,6 +346,17 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
     );
   }
 
+  Future<void> _openInventoryAdjustmentPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => InventoryAdjustmentPage(
+          service: widget.service,
+          currentUser: widget.currentUser,
+        ),
+      ),
+    );
+  }
+
   List<_BranchDashboardSection> _branchSectionsFor(UserRole role) {
     return switch (role) {
       UserRole.seller => const <_BranchDashboardSection>[
@@ -600,6 +612,17 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
     return [
       ..._buildBranchSectionShell(user, 'Inventario y alertas'),
       const SizedBox(height: 18),
+      if (user.can(AppPermission.manageInventory))
+        _WorkflowActionCard(
+          title: 'Ajuste de inventario',
+          subtitle:
+              'Actualiza stock fisico y minimos operativos sin salir del panel de sucursal.',
+          buttonLabel: 'Abrir ajustes',
+          icon: Icons.tune_rounded,
+          accent: AppPalette.cyan,
+          onPressed: _openInventoryAdjustmentPage,
+        ),
+      if (user.can(AppPermission.manageInventory)) const SizedBox(height: 18),
       _WorkflowActionCard(
         title: 'Alertas de stock',
         subtitle:
@@ -808,6 +831,11 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         user: user,
         isCreating: _isCreating,
         isCreatingBranch: _isCreatingBranch,
+        onOpenNotifications: () => _runDrawerAction(_openNotificationsPage),
+        onOpenStockAlerts: () => _runDrawerAction(_openStockAlertsPage),
+        onOpenSyncStatus: () => _runDrawerAction(_openSyncStatusPage),
+        onOpenApprovalRequests: () =>
+            _runDrawerAction(_openApprovalRequestsPage),
         onCreateBaseData: _isCreating
             ? null
             : () => _runDrawerAction(_createBaseData),
@@ -904,6 +932,18 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         sectionIconBuilder: _branchSectionIcon,
         onSelectSection: _selectBranchSection,
         onOpenBranches: () => _runDrawerAction(_openBranchDirectoryPage),
+        onOpenNotifications: () => _runDrawerAction(_openNotificationsPage),
+        onOpenStockAlerts: () => _runDrawerAction(_openStockAlertsPage),
+        onOpenSyncStatus: () => _runDrawerAction(_openSyncStatusPage),
+        onOpenInventoryAdjustment: user.can(AppPermission.manageInventory)
+            ? () => _runDrawerAction(_openInventoryAdjustmentPage)
+            : null,
+        onOpenApprovalRequests:
+            user.can(AppPermission.approveTransfer) ||
+                user.can(AppPermission.approveReservation)
+            ? () => _runDrawerAction(_openApprovalRequestsPage)
+            : null,
+        onOpenRequestTracking: () => _runDrawerAction(_openRequestTrackingPage),
         onOpenReservationRequests: () =>
             _runDrawerAction(_openReservationRequestPage),
         onOpenTransferRequests: () =>
@@ -4408,6 +4448,10 @@ class _AdminDrawer extends StatelessWidget {
     required this.user,
     required this.isCreating,
     required this.isCreatingBranch,
+    required this.onOpenNotifications,
+    required this.onOpenStockAlerts,
+    required this.onOpenSyncStatus,
+    required this.onOpenApprovalRequests,
     required this.onCreateBaseData,
     required this.onCreateBranch,
     required this.onManageEmployees,
@@ -4418,6 +4462,10 @@ class _AdminDrawer extends StatelessWidget {
   final AppUser user;
   final bool isCreating;
   final bool isCreatingBranch;
+  final VoidCallback onOpenNotifications;
+  final VoidCallback onOpenStockAlerts;
+  final VoidCallback onOpenSyncStatus;
+  final VoidCallback onOpenApprovalRequests;
   final VoidCallback? onCreateBaseData;
   final VoidCallback? onCreateBranch;
   final VoidCallback? onManageEmployees;
@@ -4453,6 +4501,46 @@ class _AdminDrawer extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      Text(
+                        'Monitoreo operativo',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color: Colors.white70,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.notifications_rounded,
+                        title: 'Notificaciones',
+                        onTap: onOpenNotifications,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.notification_important_rounded,
+                        title: 'Alertas de stock',
+                        onTap: onOpenStockAlerts,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.cloud_done_rounded,
+                        title: 'Estado de sincronizacion',
+                        onTap: onOpenSyncStatus,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.fact_check_rounded,
+                        title: 'Bandeja de aprobaciones',
+                        onTap: onOpenApprovalRequests,
+                      ),
+                      const SizedBox(height: 18),
+                      Text(
+                        'Administracion',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color: Colors.white70,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
                       _AdminDrawerTile(
                         icon: Icons.person_add_alt_1_rounded,
                         title: 'Gestion de empleados',
@@ -4549,6 +4637,12 @@ class _BranchDrawer extends StatelessWidget {
     required this.sectionIconBuilder,
     required this.onSelectSection,
     required this.onOpenBranches,
+    required this.onOpenNotifications,
+    required this.onOpenStockAlerts,
+    required this.onOpenSyncStatus,
+    required this.onOpenInventoryAdjustment,
+    required this.onOpenApprovalRequests,
+    required this.onOpenRequestTracking,
     required this.onOpenReservationRequests,
     required this.onOpenTransferRequests,
     required this.onSignOut,
@@ -4561,6 +4655,12 @@ class _BranchDrawer extends StatelessWidget {
   final IconData Function(_BranchDashboardSection section) sectionIconBuilder;
   final Future<void> Function(_BranchDashboardSection section) onSelectSection;
   final VoidCallback onOpenBranches;
+  final VoidCallback onOpenNotifications;
+  final VoidCallback onOpenStockAlerts;
+  final VoidCallback onOpenSyncStatus;
+  final VoidCallback? onOpenInventoryAdjustment;
+  final VoidCallback? onOpenApprovalRequests;
+  final VoidCallback onOpenRequestTracking;
   final VoidCallback onOpenReservationRequests;
   final VoidCallback onOpenTransferRequests;
   final VoidCallback onSignOut;
@@ -4596,6 +4696,14 @@ class _BranchDrawer extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      Text(
+                        'Modulos habilitados',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color: Colors.white70,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
                       ...sections.map(
                         (section) => Padding(
                           padding: const EdgeInsets.only(bottom: 10),
@@ -4607,12 +4715,60 @@ class _BranchDrawer extends StatelessWidget {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 18),
+                      Text(
+                        'Accesos directos',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color: Colors.white70,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
                       _AdminDrawerTile(
                         icon: Icons.store_mall_directory_rounded,
                         title: 'Sucursales',
                         onTap: onOpenBranches,
                       ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.notifications_rounded,
+                        title: 'Notificaciones',
+                        onTap: onOpenNotifications,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.notification_important_rounded,
+                        title: 'Alertas de stock',
+                        onTap: onOpenStockAlerts,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.cloud_done_rounded,
+                        title: 'Estado de sincronizacion',
+                        onTap: onOpenSyncStatus,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.track_changes_rounded,
+                        title: 'Estado de solicitudes',
+                        onTap: onOpenRequestTracking,
+                      ),
+                      if (onOpenApprovalRequests != null) ...[
+                        const SizedBox(height: 10),
+                        _AdminDrawerTile(
+                          icon: Icons.fact_check_rounded,
+                          title: 'Bandeja de aprobaciones',
+                          onTap: onOpenApprovalRequests,
+                        ),
+                      ],
+                      if (onOpenInventoryAdjustment != null) ...[
+                        const SizedBox(height: 10),
+                        _AdminDrawerTile(
+                          icon: Icons.tune_rounded,
+                          title: 'Ajuste de inventario',
+                          onTap: onOpenInventoryAdjustment,
+                        ),
+                      ],
                       const SizedBox(height: 10),
                       _AdminDrawerTile(
                         icon: Icons.bookmark_add_rounded,

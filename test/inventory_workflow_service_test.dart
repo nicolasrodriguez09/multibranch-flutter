@@ -1184,6 +1184,56 @@ void main() {
   );
 
   test(
+    'supervisor traceability includes audited actors and timeline for own branch transfers',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final supervisor = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.secondBranchSeller,
+      );
+      final admin = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.adminUser,
+      );
+
+      final transfer = await service.requestTransfer(
+        actorUser: supervisor,
+        productId: DemoIds.laptopProduct,
+        fromBranchId: DemoIds.branchCenter,
+        toBranchId: DemoIds.branchNorth,
+        quantity: 2,
+        reason: 'Reposicion supervisor',
+      );
+
+      await service.approveTransfer(actorUser: admin, transferId: transfer.id);
+      await service.markTransferInTransit(
+        actorUser: admin,
+        transferId: transfer.id,
+      );
+
+      final detail = await service.fetchTransferTraceability(
+        actorUser: supervisor,
+        transferId: transfer.id,
+      );
+
+      expect(detail.transfer.id, transfer.id);
+      expect(detail.requesterUser?.id, supervisor.id);
+      expect(detail.approverUser, isNull);
+      expect(
+        detail.auditTrail.map((item) => item.action).toList(growable: false),
+        <String>[
+          'transfer_requested',
+          'transfer_approved',
+          'transfer_in_transit',
+        ],
+      );
+      expect(detail.approvalLog?.actorUserId, admin.id);
+      expect(detail.approvalLog?.actorName, admin.fullName);
+      expect(detail.dispatchLog?.actorUserId, admin.id);
+      expect(detail.dispatchLog?.actorName, admin.fullName);
+      expect(detail.requestLog?.metadata['quantity'], '2');
+    },
+  );
+
+  test(
     'transfer operations write technical request logs with response metadata',
     () async {
       await service.seedMasterData(actorUser: sampleData.users.first);

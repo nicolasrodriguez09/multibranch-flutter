@@ -2784,18 +2784,16 @@ class InventoryWorkflowService {
         final requesterFuture =
             actorUser.role == UserRole.admin ||
                 actorUser.id == transfer.requestedBy
-            ? users.fetchUser(transfer.requestedBy)
+            ? _safeFetchUser(transfer.requestedBy)
             : Future<AppUser?>.value(null);
         final approverFuture =
             actorUser.role == UserRole.admin && transfer.approvedBy != null
-            ? users.fetchUser(transfer.approvedBy!)
+            ? _safeFetchUser(transfer.approvedBy!)
             : Future<AppUser?>.value(null);
-        final auditTrailFuture = actorUser.role == UserRole.admin
-            ? system.fetchAuditLogsForEntity(
-                entityId: transfer.id,
-                entityType: 'transfer',
-              )
-            : Future<List<AuditLog>>.value(const <AuditLog>[]);
+        final auditTrailFuture = _safeFetchAuditTrail(
+          entityId: transfer.id,
+          entityType: 'transfer',
+        );
 
         final results = await Future.wait<Object?>([
           requesterFuture,
@@ -2853,14 +2851,12 @@ class InventoryWorkflowService {
         final requesterFuture =
             actorUser.role == UserRole.admin ||
                 actorUser.id == reservation.reservedBy
-            ? users.fetchUser(reservation.reservedBy)
+            ? _safeFetchUser(reservation.reservedBy)
             : Future<AppUser?>.value(null);
-        final auditTrailFuture = actorUser.role == UserRole.admin
-            ? system.fetchAuditLogsForEntity(
-                entityId: reservation.id,
-                entityType: 'reservation',
-              )
-            : Future<List<AuditLog>>.value(const <AuditLog>[]);
+        final auditTrailFuture = _safeFetchAuditTrail(
+          entityId: reservation.id,
+          entityType: 'reservation',
+        );
 
         final results = await Future.wait<Object?>([
           requesterFuture,
@@ -2958,6 +2954,34 @@ class InventoryWorkflowService {
       recentErrors: List<RequestLog>.unmodifiable(recentErrors),
       endpointMetrics: List<EndpointPerformanceMetric>.unmodifiable(metrics),
     );
+  }
+
+  Future<AppUser?> _safeFetchUser(String userId) async {
+    try {
+      return await users.fetchUser(userId);
+    } on FirebaseException catch (error) {
+      if (error.code == 'permission-denied') {
+        return null;
+      }
+      rethrow;
+    }
+  }
+
+  Future<List<AuditLog>> _safeFetchAuditTrail({
+    required String entityId,
+    required String entityType,
+  }) async {
+    try {
+      return await system.fetchAuditLogsForEntity(
+        entityId: entityId,
+        entityType: entityType,
+      );
+    } on FirebaseException catch (error) {
+      if (error.code == 'permission-denied') {
+        return const <AuditLog>[];
+      }
+      rethrow;
+    }
   }
 
   Stream<List<SearchHistoryEntry>> watchRecentSearches({

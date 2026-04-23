@@ -754,6 +754,37 @@ class _RecentReservationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final title = switch (currentUser.role) {
+      UserRole.seller => 'Estado de tus reservas',
+      UserRole.supervisor => 'Reservas de tu sucursal',
+      UserRole.admin => 'Reservas recientes',
+    };
+    final subtitle = switch (currentUser.role) {
+      UserRole.seller =>
+        'Solicitudes y reservas creadas por tu usuario aunque esten en otra sucursal.',
+      UserRole.supervisor =>
+        'Reservas creadas por tu usuario o vinculadas a la operacion de tu sucursal.',
+      UserRole.admin =>
+        'Seguimiento resumido de reservas recientes en el sistema.',
+    };
+    final emptyMessage = switch (currentUser.role) {
+      UserRole.seller => 'Todavia no has creado reservas con este usuario.',
+      UserRole.supervisor =>
+        'No hay reservas recientes asociadas a tu sucursal o a tu usuario.',
+      UserRole.admin => 'Todavia no hay reservas registradas en el sistema.',
+    };
+    final Stream<List<Reservation>> reservationsStream =
+        switch (currentUser.role) {
+          UserRole.seller => service.reservations.watchReservationsByUser(
+            currentUser.id,
+          ),
+          UserRole.supervisor =>
+            service.reservations.watchReservationsForBranchTracking(
+              currentUser.branchId,
+            ),
+          UserRole.admin => service.reservations.watchReservations(),
+        };
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -765,30 +796,28 @@ class _RecentReservationCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Estado de tus reservas',
+            title,
             style: Theme.of(
               context,
             ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 8),
           Text(
-            'Solicitudes y reservas creadas por tu usuario aunque esten en otra sucursal.',
+            subtitle,
             style: Theme.of(
               context,
             ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
           ),
           const SizedBox(height: 14),
           StreamBuilder<List<Reservation>>(
-            stream: service.reservations.watchReservationsByUser(
-              currentUser.id,
-            ),
+            stream: reservationsStream,
             builder: (context, snapshot) {
               final items = (snapshot.data ?? const <Reservation>[])
                   .take(5)
                   .toList(growable: false);
               if (items.isEmpty) {
                 return Text(
-                  'Todavia no has creado reservas con este usuario.',
+                  emptyMessage,
                   style: Theme.of(
                     context,
                   ).textTheme.bodyMedium?.copyWith(color: Colors.white70),

@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_multibranch_proyect/src/app.dart';
 import 'package:flutter_multibranch_proyect/src/features/auth/application/auth_session.dart';
 import 'package:flutter_multibranch_proyect/src/features/auth/application/auth_service.dart';
+import 'package:flutter_multibranch_proyect/src/features/auth/presentation/auth_page.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/application/inventory_workflow_service.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/data/sample_seed_data.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/domain/models.dart';
@@ -24,18 +25,28 @@ void main() {
   testWidgets('renders auth page when there is no signed in user', (
     WidgetTester tester,
   ) async {
+    final firestore = FakeFirebaseFirestore();
+    final auth = MockFirebaseAuth();
+    final authService = AuthService(
+      auth: auth,
+      firestore: firestore,
+      secureSessionStore: InMemorySecureSessionStore(),
+      enableSessionRefreshMonitoring: false,
+    );
+    final inventoryService = InventoryWorkflowService(firestore: firestore);
+
     await tester.pumpWidget(
-      MyApp(
-        firestore: FakeFirebaseFirestore(),
-        auth: MockFirebaseAuth(),
-        secureSessionStore: InMemorySecureSessionStore(),
-        enableSessionRefreshMonitoring: false,
+      MaterialApp(
+        home: AuthPage(
+          authService: authService,
+          inventoryService: inventoryService,
+        ),
       ),
     );
     await tester.pumpAndSettle();
 
     expect(
-      find.text('Conecta y gestiona tu inventario entre sucursales.'),
+      find.textContaining('Conecta y gestiona tu inventario'),
       findsOneWidget,
     );
     expect(find.text('Iniciar Sesion'), findsOneWidget);
@@ -128,7 +139,18 @@ void main() {
     expect(find.text('Crear base de datos inicial'), findsOneWidget);
     expect(find.text('Cerrar sesion'), findsOneWidget);
 
-    await tester.tap(find.text('Gestion de empleados'));
+    await tester.ensureVisible(
+      find.descendant(
+        of: find.byType(Drawer),
+        matching: find.widgetWithText(ListTile, 'Gestion de empleados'),
+      ),
+    );
+    await tester.tap(
+      find.descendant(
+        of: find.byType(Drawer),
+        matching: find.widgetWithText(ListTile, 'Gestion de empleados'),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Empleados registrados'), findsOneWidget);
@@ -752,6 +774,83 @@ void main() {
       expect(find.text('Historial de cambios'), findsOneWidget);
       expect(find.text('Traslado en transito'), findsOneWidget);
       expect(find.text('Solicitud aprobada'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'supervisor can open transfer traceability and confirm reception from request tracking',
+    (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1280, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final firestore = FakeFirebaseFirestore();
+      var currentTime = DateTime.utc(2026, 3, 26, 12, 0);
+      final service = InventoryWorkflowService(
+        firestore: firestore,
+        clock: () => currentTime,
+      );
+      final sampleData = SampleSeedData.build(currentTime);
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final supervisor = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.secondBranchSeller,
+      );
+      final admin = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.adminUser,
+      );
+
+      final transfer = await service.requestTransfer(
+        actorUser: supervisor,
+        productId: DemoIds.laptopProduct,
+        fromBranchId: DemoIds.branchCenter,
+        toBranchId: DemoIds.branchNorth,
+        quantity: 2,
+        reason: 'Recepcion desde seguimiento',
+        notes: 'Validar ingreso en bodega norte',
+      );
+      await service.approveTransfer(actorUser: admin, transferId: transfer.id);
+      currentTime = currentTime.add(const Duration(minutes: 5));
+      await service.markTransferInTransit(
+        actorUser: admin,
+        transferId: transfer.id,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(useMaterial3: true),
+          home: RequestTrackingPage(service: service, currentUser: supervisor),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final enTransitoFilter = find.widgetWithText(ChoiceChip, 'En transito');
+      await tester.ensureVisible(enTransitoFilter);
+      await tester.tap(enTransitoFilter);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(ExpansionTile).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Ver trazabilidad').first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Trazabilidad del traslado'), findsOneWidget);
+      expect(find.text('Actores clave'), findsOneWidget);
+      expect(find.text('Timeline auditado'), findsOneWidget);
+      expect(find.text('Confirmar recepcion'), findsOneWidget);
+      expect(find.textContaining('Recepcion desde seguimiento'), findsWidgets);
+
+      await tester.tap(find.text('Confirmar recepcion'));
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Recibido'), findsWidgets);
+      expect(
+        find.textContaining('El traslado fue recibido correctamente.'),
+        findsOneWidget,
+      );
     },
   );
 
