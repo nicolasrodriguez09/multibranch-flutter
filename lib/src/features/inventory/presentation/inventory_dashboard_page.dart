@@ -79,7 +79,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         return;
       }
       _showStatusMessage(
-        'Base inicial creada. Ya puedes revisar inventarios, solicitudes y sincronizaciones.',
+        'Base inicial creada. Ya puedes revisar inventarios, solicitudes y monitoreo de actualizacion.',
       );
       await _refreshDashboard(isManual: true, forceRefresh: true);
     } catch (error) {
@@ -380,8 +380,8 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
       _BranchDashboardSection.inventory => 'Inventario y alertas',
       _BranchDashboardSection.workflow =>
         role == UserRole.seller
-            ? 'Compromisos y sincronizacion'
-            : 'Solicitudes y sincronizacion',
+            ? 'Compromisos y monitoreo'
+            : 'Solicitudes y monitoreo',
       _BranchDashboardSection.metrics => 'KPIs operativos',
     };
   }
@@ -661,8 +661,8 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
 
   List<Widget> _buildBranchWorkflowSections(AppUser user) {
     final title = user.role == UserRole.seller
-        ? 'Compromisos y sincronizacion'
-        : 'Solicitudes y sincronizacion';
+        ? 'Compromisos y monitoreo'
+        : 'Solicitudes y monitoreo';
     final pendingTitle = user.role == UserRole.seller
         ? 'Compromisos activos'
         : 'Solicitudes pendientes';
@@ -670,8 +670,8 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         ? 'Reservas activas y traslados pendientes vinculados a tus ventas.'
         : 'Reservas activas y traslados que requieren seguimiento de la sucursal.';
     final syncSubtitle = user.role == UserRole.seller
-        ? 'Eventos recientes para validar que la informacion local este al dia.'
-        : 'Trazabilidad reciente de sincronizacion para validar continuidad operativa.';
+        ? 'Eventos recientes para validar que la informacion local siga vigente.'
+        : 'Trazabilidad reciente de actualizacion para validar continuidad operativa.';
 
     return [
       ..._buildBranchSectionShell(user, title),
@@ -699,9 +699,9 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
             onPressed: _openRequestTrackingPage,
           ),
           _WorkflowActionCard(
-            title: 'Estado de sincronizacion',
+            title: 'Estado de actualizacion',
             subtitle:
-                'Revisa la salud de la API y la ultima sincronizacion de cada sucursal.',
+                'Revisa la vigencia del dato y la ultima actualizacion registrada por sucursal.',
             buttonLabel: 'Ver estado',
             icon: Icons.cloud_done_rounded,
             accent: AppPalette.mint,
@@ -739,7 +739,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
           _LatestSyncsPanel(
             service: widget.service,
             branchId: user.branchId,
-            title: 'Ultimas sincronizaciones',
+            title: 'Ultimas actualizaciones',
             subtitle: syncSubtitle,
           ),
         ],
@@ -902,25 +902,16 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
           ),
           Padding(
             padding: const EdgeInsets.only(right: 8),
-            child: _ToolbarButton(
-              icon: _isRefreshing
-                  ? Icons.hourglass_top_rounded
-                  : Icons.sync_rounded,
-              onPressed: _isRefreshing
-                  ? () {}
-                  : () => _refreshDashboard(isManual: true),
+            child: _BranchAppBarMenu(
+              service: widget.service,
+              currentUser: user,
+              isRefreshing: _isRefreshing,
+              onRefresh: () => _refreshDashboard(isManual: true),
+              onOpenApprovalRequests: _openApprovalRequestsPage,
+              onOpenRequestTracking: _openRequestTrackingPage,
+              onOpenSyncStatus: _openSyncStatusPage,
             ),
           ),
-          if (user.can(AppPermission.approveTransfer) ||
-              user.can(AppPermission.approveReservation))
-            Padding(
-              padding: const EdgeInsets.only(right: 16),
-              child: _ApprovalInboxButton(
-                service: widget.service,
-                currentUser: user,
-                onPressed: () => unawaited(_openApprovalRequestsPage()),
-              ),
-            ),
         ],
       ),
       drawer: _BranchDrawer(
@@ -1053,7 +1044,7 @@ class _AdminOperationalHero extends StatelessWidget {
         final logs = snapshot.data ?? const <SyncLog>[];
         final latest = logs.isEmpty ? null : logs.first;
         final syncStatus = latest == null
-            ? 'Sin sincronizaciones registradas'
+            ? 'Sin actualizaciones registradas'
             : '${_formatSyncStatus(latest.status)} | ${latest.recordsProcessed} registros';
 
         return Container(
@@ -1132,7 +1123,7 @@ class _AdminOperationalHero extends StatelessWidget {
                         ),
                         const SizedBox(width: 10),
                         Text(
-                          'Sincronizacion operativa',
+                          'Actualizacion operativa',
                           style: Theme.of(context).textTheme.titleLarge
                               ?.copyWith(
                                 color: Colors.white,
@@ -1144,8 +1135,8 @@ class _AdminOperationalHero extends StatelessWidget {
                     const SizedBox(height: 14),
                     Text(
                       latest == null
-                          ? 'Ultima sincronizacion: Sin registros'
-                          : 'Ultima sincronizacion: ${_formatRelativeTime(latest.createdAt)}',
+                          ? 'Ultima actualizacion: Sin registros'
+                          : 'Ultima actualizacion: ${_formatRelativeTime(latest.createdAt)}',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: Colors.white.withValues(alpha: 0.88),
                       ),
@@ -1352,8 +1343,8 @@ class _BranchOperationalHero extends StatelessWidget {
                                 const SizedBox(height: 14),
                                 Text(
                                   latestSync == null
-                                      ? 'Ultima sincronizacion: Sin registros'
-                                      : 'Ultima sincronizacion: ${_formatRelativeTime(latestSync.createdAt)}',
+                                      ? 'Ultima actualizacion: Sin registros'
+                                      : 'Ultima actualizacion: ${_formatRelativeTime(latestSync.createdAt)}',
                                   style: Theme.of(context).textTheme.bodyMedium
                                       ?.copyWith(
                                         color: Colors.white.withValues(
@@ -1387,7 +1378,7 @@ class _BranchOperationalHero extends StatelessWidget {
                                       vertical: 12,
                                     ),
                                   ),
-                                  child: const Text('Ver sincronizacion'),
+                                  child: const Text('Ver monitoreo'),
                                 ),
                               ],
                             ),
@@ -1704,9 +1695,9 @@ class _OperationalKpiStrip extends StatelessWidget {
         Expanded(
           child: _AdminMetricTile(
             icon: Icons.speed_rounded,
-            title: 'Tiempo\npromedio API',
+            title: 'Tiempo\nmedio datos',
             value: _formatDurationCompact(stats.averageApiResponseTime),
-            helper: 'Basado en sync logs',
+            helper: 'Actualizaciones recientes',
             colors: const [Color(0xFFFF8A24), Color(0xFFE66A11)],
           ),
         ),
@@ -2198,12 +2189,12 @@ class _SyncStatusOverviewPanel extends StatelessWidget {
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return _DashboardPanel(
-            title: 'Estado de sincronizacion',
+            title: 'Estado de actualizacion',
             subtitle:
-                'Salud de la API y de las sucursales para validar si el dato sigue confiable.',
+                'Vigencia del dato y de las sucursales para validar si la informacion sigue confiable.',
             accent: AppPalette.danger,
             child: Text(
-              'No fue posible cargar el estado de sincronizacion.',
+              'No fue posible cargar el estado de actualizacion.',
               style: Theme.of(
                 context,
               ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
@@ -2214,9 +2205,9 @@ class _SyncStatusOverviewPanel extends StatelessWidget {
         final data = snapshot.data;
         if (data == null) {
           return _DashboardPanel(
-            title: 'Estado de sincronizacion',
+            title: 'Estado de actualizacion',
             subtitle:
-                'Salud de la API y de las sucursales para validar si el dato sigue confiable.',
+                'Vigencia del dato y de las sucursales para validar si la informacion sigue confiable.',
             accent: AppPalette.cyan,
             child: const Center(child: CircularProgressIndicator()),
           );
@@ -2262,7 +2253,7 @@ class _SyncStatusOverviewPanel extends StatelessWidget {
             .length;
 
         return _DashboardPanel(
-          title: 'Estado de sincronizacion',
+          title: 'Estado de actualizacion',
           subtitle:
               'Visibilidad rapida para saber si puedes confiar en el dato antes de actuar.',
           accent: accent,
@@ -2270,7 +2261,7 @@ class _SyncStatusOverviewPanel extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'API: ${data.apiStatus.summary} | Al dia: ${data.healthyBranches.length}/${data.branches.length} | Alertas: ${data.warningBranches.length + data.criticalBranches.length}',
+                'Monitor: ${data.apiStatus.summary} | Al dia: ${data.healthyBranches.length}/${data.branches.length} | Alertas: ${data.warningBranches.length + data.criticalBranches.length}',
                 style: Theme.of(
                   context,
                 ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
@@ -2288,7 +2279,7 @@ class _SyncStatusOverviewPanel extends StatelessWidget {
               _InsightList(
                 items: items,
                 emptyMessage:
-                    'No hay sucursales con retraso o fallos de sincronizacion.',
+                    'No hay sucursales con retraso o fallos de actualizacion.',
               ),
               const SizedBox(height: 12),
               Align(
@@ -4201,8 +4192,8 @@ class _AdminRefreshCard extends StatelessWidget {
         final logs = snapshot.data ?? const <SyncLog>[];
         final latest = logs.isEmpty ? null : logs.first;
         final subtitle = latest == null
-            ? 'Sin sincronizaciones registradas'
-            : 'Ultima sincronizacion real: ${_formatClock(latest.createdAt)} | ${_formatSyncStatus(latest.status)}';
+            ? 'Sin actualizaciones registradas'
+            : 'Ultima actualizacion real: ${_formatClock(latest.createdAt)} | ${_formatSyncStatus(latest.status)}';
 
         return Material(
           color: Colors.transparent,
@@ -4443,6 +4434,140 @@ class _ApprovalInboxButton extends StatelessWidget {
   }
 }
 
+enum _BranchAppBarAction { refresh, approvals, requestTracking, syncStatus }
+
+class _BranchAppBarMenu extends StatelessWidget {
+  const _BranchAppBarMenu({
+    required this.service,
+    required this.currentUser,
+    required this.isRefreshing,
+    required this.onRefresh,
+    required this.onOpenApprovalRequests,
+    required this.onOpenRequestTracking,
+    required this.onOpenSyncStatus,
+  });
+
+  final InventoryWorkflowService service;
+  final AppUser currentUser;
+  final bool isRefreshing;
+  final Future<void> Function() onRefresh;
+  final Future<void> Function() onOpenApprovalRequests;
+  final Future<void> Function() onOpenRequestTracking;
+  final Future<void> Function() onOpenSyncStatus;
+
+  bool get _canApprove =>
+      currentUser.can(AppPermission.approveTransfer) ||
+      currentUser.can(AppPermission.approveReservation);
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<ApprovalQueueData>(
+      stream: _canApprove
+          ? service.watchApprovalQueue(actorUser: currentUser)
+          : null,
+      builder: (context, snapshot) {
+        final pendingApprovals = snapshot.data?.totalPending ?? 0;
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            PopupMenuButton<_BranchAppBarAction>(
+              tooltip: 'Mas opciones',
+              icon: const Icon(Icons.more_vert_rounded),
+              onSelected: (action) {
+                switch (action) {
+                  case _BranchAppBarAction.refresh:
+                    if (!isRefreshing) {
+                      unawaited(onRefresh());
+                    }
+                    break;
+                  case _BranchAppBarAction.approvals:
+                    unawaited(onOpenApprovalRequests());
+                    break;
+                  case _BranchAppBarAction.requestTracking:
+                    unawaited(onOpenRequestTracking());
+                    break;
+                  case _BranchAppBarAction.syncStatus:
+                    unawaited(onOpenSyncStatus());
+                    break;
+                }
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem<_BranchAppBarAction>(
+                  value: _BranchAppBarAction.refresh,
+                  enabled: !isRefreshing,
+                  child: _BranchPopupActionLabel(
+                    icon: isRefreshing
+                        ? Icons.hourglass_top_rounded
+                        : Icons.sync_rounded,
+                    label: isRefreshing
+                        ? 'Actualizando datos'
+                        : 'Actualizar datos',
+                  ),
+                ),
+                const PopupMenuItem<_BranchAppBarAction>(
+                  value: _BranchAppBarAction.requestTracking,
+                  child: _BranchPopupActionLabel(
+                    icon: Icons.track_changes_rounded,
+                    label: 'Estado de solicitudes',
+                  ),
+                ),
+                const PopupMenuItem<_BranchAppBarAction>(
+                  value: _BranchAppBarAction.syncStatus,
+                  child: _BranchPopupActionLabel(
+                    icon: Icons.cloud_done_rounded,
+                    label: 'Estado de actualizacion',
+                  ),
+                ),
+                if (_canApprove)
+                  PopupMenuItem<_BranchAppBarAction>(
+                    value: _BranchAppBarAction.approvals,
+                    child: _BranchPopupActionLabel(
+                      icon: Icons.fact_check_rounded,
+                      label: pendingApprovals > 0
+                          ? 'Aprobaciones ($pendingApprovals)'
+                          : 'Bandeja de aprobaciones',
+                    ),
+                  ),
+              ],
+            ),
+            if (pendingApprovals > 0)
+              Positioned(
+                top: 2,
+                right: 2,
+                child: Container(
+                  width: 9,
+                  height: 9,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFFF4C63),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _BranchPopupActionLabel extends StatelessWidget {
+  const _BranchPopupActionLabel({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 20),
+        const SizedBox(width: 12),
+        Flexible(child: Text(label)),
+      ],
+    );
+  }
+}
+
 class _AdminDrawer extends StatelessWidget {
   const _AdminDrawer({
     required this.user,
@@ -4523,7 +4648,7 @@ class _AdminDrawer extends StatelessWidget {
                       const SizedBox(height: 10),
                       _AdminDrawerTile(
                         icon: Icons.cloud_done_rounded,
-                        title: 'Estado de sincronizacion',
+                        title: 'Estado de actualizacion',
                         onTap: onOpenSyncStatus,
                       ),
                       const SizedBox(height: 10),
@@ -4696,13 +4821,7 @@ class _BranchDrawer extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Modulos habilitados',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: Colors.white70,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                      const _BranchDrawerSectionLabel(text: 'Navegacion'),
                       const SizedBox(height: 10),
                       ...sections.map(
                         (section) => Padding(
@@ -4715,85 +4834,108 @@ class _BranchDrawer extends StatelessWidget {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 18),
-                      Text(
-                        'Accesos directos',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: Colors.white70,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
                       const SizedBox(height: 10),
-                      _AdminDrawerTile(
+                      _BranchDrawerTile(
                         icon: Icons.store_mall_directory_rounded,
                         title: 'Sucursales',
+                        isSelected: false,
                         onTap: onOpenBranches,
                       ),
+                      const SizedBox(height: 18),
+                      const _BranchDrawerSectionLabel(text: 'Operacion'),
                       const SizedBox(height: 10),
-                      _AdminDrawerTile(
-                        icon: Icons.notifications_rounded,
-                        title: 'Notificaciones',
-                        onTap: onOpenNotifications,
-                      ),
-                      const SizedBox(height: 10),
-                      _AdminDrawerTile(
-                        icon: Icons.notification_important_rounded,
-                        title: 'Alertas de stock',
-                        onTap: onOpenStockAlerts,
-                      ),
-                      const SizedBox(height: 10),
-                      _AdminDrawerTile(
-                        icon: Icons.cloud_done_rounded,
-                        title: 'Estado de sincronizacion',
-                        onTap: onOpenSyncStatus,
-                      ),
-                      const SizedBox(height: 10),
-                      _AdminDrawerTile(
+                      _BranchDrawerTile(
                         icon: Icons.track_changes_rounded,
                         title: 'Estado de solicitudes',
+                        isSelected: false,
                         onTap: onOpenRequestTracking,
                       ),
                       if (onOpenApprovalRequests != null) ...[
                         const SizedBox(height: 10),
-                        _AdminDrawerTile(
+                        _BranchDrawerTile(
                           icon: Icons.fact_check_rounded,
                           title: 'Bandeja de aprobaciones',
-                          onTap: onOpenApprovalRequests,
+                          isSelected: false,
+                          onTap: onOpenApprovalRequests!,
                         ),
                       ],
                       if (onOpenInventoryAdjustment != null) ...[
                         const SizedBox(height: 10),
-                        _AdminDrawerTile(
+                        _BranchDrawerTile(
                           icon: Icons.tune_rounded,
                           title: 'Ajuste de inventario',
-                          onTap: onOpenInventoryAdjustment,
+                          isSelected: false,
+                          onTap: onOpenInventoryAdjustment!,
                         ),
                       ],
                       const SizedBox(height: 10),
-                      _AdminDrawerTile(
+                      _BranchDrawerTile(
                         icon: Icons.bookmark_add_rounded,
                         title: 'Reservar producto',
+                        isSelected: false,
                         onTap: onOpenReservationRequests,
                       ),
                       const SizedBox(height: 10),
-                      _AdminDrawerTile(
+                      _BranchDrawerTile(
                         icon: Icons.local_shipping_rounded,
                         title: 'Solicitar traslado',
+                        isSelected: false,
                         onTap: onOpenTransferRequests,
+                      ),
+                      const SizedBox(height: 18),
+                      const _BranchDrawerSectionLabel(text: 'Monitoreo'),
+                      const SizedBox(height: 10),
+                      _BranchDrawerTile(
+                        icon: Icons.notification_important_rounded,
+                        title: 'Alertas de stock',
+                        isSelected: false,
+                        onTap: onOpenStockAlerts,
+                      ),
+                      const SizedBox(height: 10),
+                      _BranchDrawerTile(
+                        icon: Icons.cloud_done_rounded,
+                        title: 'Estado de actualizacion',
+                        isSelected: false,
+                        onTap: onOpenSyncStatus,
+                      ),
+                      const SizedBox(height: 10),
+                      _BranchDrawerTile(
+                        icon: Icons.notifications_rounded,
+                        title: 'Notificaciones',
+                        isSelected: false,
+                        onTap: onOpenNotifications,
                       ),
                     ],
                   ),
                 ),
               ),
               const SizedBox(height: 12),
-              _AdminDrawerTile(
+              _BranchDrawerTile(
                 icon: Icons.logout_rounded,
                 title: 'Cerrar sesion',
+                isSelected: false,
                 onTap: onSignOut,
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _BranchDrawerSectionLabel extends StatelessWidget {
+  const _BranchDrawerSectionLabel({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+        color: Colors.white70,
+        fontWeight: FontWeight.w700,
       ),
     );
   }
@@ -4815,25 +4957,25 @@ class _BranchDrawerTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: isSelected ? const Color(0xFF173660) : const Color(0xFF0E2442),
-      borderRadius: BorderRadius.circular(16),
+      color: isSelected
+          ? AppPalette.amber.withValues(alpha: 0.16)
+          : Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
       child: ListTile(
         onTap: onTap,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        dense: true,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         leading: Icon(
           icon,
           color: isSelected ? AppPalette.amber : Colors.white,
         ),
         title: Text(
           title,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            color: Colors.white,
-            fontWeight: FontWeight.w700,
+          style: TextStyle(
+            color: isSelected ? AppPalette.amber : Colors.white,
+            fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
           ),
         ),
-        trailing: isSelected
-            ? const Icon(Icons.check_rounded, color: AppPalette.amber)
-            : const Icon(Icons.chevron_right_rounded, color: Colors.white70),
       ),
     );
   }
@@ -5042,7 +5184,7 @@ class _LatestSyncsPanel extends StatelessWidget {
   const _LatestSyncsPanel({
     required this.service,
     required this.branchId,
-    this.title = 'Ultimas sincronizaciones',
+    this.title = 'Ultimas actualizaciones',
     this.subtitle = 'Eventos recientes registrados para esta sucursal.',
   });
 
@@ -5078,7 +5220,7 @@ class _LatestSyncsPanel extends StatelessWidget {
           child: _InsightList(
             items: items,
             emptyMessage:
-                'No hay sincronizaciones registradas para esta sucursal.',
+                'No hay actualizaciones registradas para esta sucursal.',
           ),
         );
       },

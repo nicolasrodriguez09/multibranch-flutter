@@ -100,6 +100,16 @@ class CatalogRepository {
     return Branch.fromFirestore(snapshot.id, data);
   }
 
+  Stream<Branch?> watchBranch(String branchId) {
+    return _branches.doc(branchId).snapshots().map((snapshot) {
+      final data = snapshot.data();
+      if (data == null) {
+        return null;
+      }
+      return Branch.fromFirestore(snapshot.id, data);
+    });
+  }
+
   Future<Product?> fetchProduct(String productId) async {
     final snapshot = await _products.doc(productId).get();
     final data = snapshot.data();

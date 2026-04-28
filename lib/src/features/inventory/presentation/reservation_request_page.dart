@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../../core/app_theme.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
+import 'branch_panel_drawer.dart';
 
 class ReservationRequestPage extends StatefulWidget {
   const ReservationRequestPage({
@@ -203,6 +204,11 @@ class _ReservationRequestPageState extends State<ReservationRequestPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      drawer: BranchPanelDrawer(
+        service: widget.service,
+        currentUser: widget.currentUser,
+        currentDestination: BranchPanelDestination.reservationRequest,
+      ),
       appBar: AppBar(
         title: const Text('Solicitar reserva'),
         actions: [

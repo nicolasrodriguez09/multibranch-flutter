@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/app_theme.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
+import 'branch_panel_drawer.dart';
 import 'request_tracking_traceability_dialogs.dart';
 
 enum _RequestTypeFilter { all, reservations, transfers }
@@ -139,6 +140,11 @@ class _RequestTrackingPageState extends State<RequestTrackingPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      drawer: BranchPanelDrawer(
+        service: widget.service,
+        currentUser: widget.currentUser,
+        currentDestination: BranchPanelDestination.requestTracking,
+      ),
       appBar: AppBar(
         title: const Text('Estado de solicitudes'),
         actions: [

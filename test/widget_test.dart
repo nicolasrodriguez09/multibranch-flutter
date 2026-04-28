@@ -87,7 +87,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Dashboard Administrativo'), findsOneWidget);
-    expect(find.text('Sincronizacion operativa'), findsOneWidget);
+    expect(find.text('Actualizacion operativa'), findsOneWidget);
     expect(find.text('Metricas'), findsOneWidget);
     expect(find.text('Control administrativo'), findsNothing);
     expect(find.text('Acciones administrativas'), findsNothing);
@@ -129,7 +129,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byType(Drawer),
-        matching: find.widgetWithText(ListTile, 'Estado de sincronizacion'),
+        matching: find.widgetWithText(ListTile, 'Estado de actualizacion'),
       ),
       findsOneWidget,
     );
@@ -322,7 +322,7 @@ void main() {
     expect(find.text('Consultas sin stock'), findsNothing);
     await tester.pumpAndSettle();
     expect(find.text('Productos mas consultados'), findsNothing);
-    expect(find.text('Ultimas sincronizaciones'), findsNothing);
+    expect(find.text('Ultimas actualizaciones'), findsNothing);
     expect(find.text('Crear base inicial'), findsNothing);
     expect(find.text('Ingresar nuevo empleado'), findsNothing);
     expect(find.text('Matriz de permisos'), findsNothing);
@@ -333,8 +333,8 @@ void main() {
 
     expect(find.text('Menu de ventas'), findsOneWidget);
     expect(find.text('Inventario y alertas'), findsOneWidget);
-    expect(find.text('Compromisos y sincronizacion'), findsOneWidget);
-    expect(find.text('Modulos habilitados'), findsOneWidget);
+    expect(find.text('Compromisos y monitoreo'), findsOneWidget);
+    expect(find.text('Navegacion'), findsOneWidget);
     expect(find.text('Sucursales'), findsOneWidget);
     expect(
       find.descendant(
@@ -353,7 +353,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byType(Drawer),
-        matching: find.widgetWithText(ListTile, 'Estado de sincronizacion'),
+        matching: find.widgetWithText(ListTile, 'Estado de actualizacion'),
       ),
       findsOneWidget,
     );
@@ -498,7 +498,7 @@ void main() {
       expect(find.text('Solicitar traslado'), findsOneWidget);
       expect(find.text('Formulario de solicitud'), findsOneWidget);
       expect(
-        find.textContaining('Sin stock local para Samsung A55'),
+        find.textContaining('Sin stock en tu sede para Samsung A55'),
         findsOneWidget,
       );
 
@@ -630,8 +630,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Estado de sincronizacion'), findsOneWidget);
-    expect(find.text('API de sincronizacion'), findsOneWidget);
+    expect(find.text('Estado de actualizacion'), findsOneWidget);
+    expect(find.text('Monitoreo de actualizacion de datos'), findsOneWidget);
     expect(find.text('Alertas de monitoreo'), findsOneWidget);
     expect(find.text('Solicitar reintento'), findsWidgets);
     await tester.scrollUntilVisible(
@@ -642,12 +642,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Reglas de fallo'), findsOneWidget);
     await tester.scrollUntilVisible(
-      find.text('Ultima sincronizacion por sucursal'),
+      find.text('Ultima actualizacion por sucursal'),
       220,
       scrollable: find.byType(Scrollable).first,
     );
     await tester.pumpAndSettle();
-    expect(find.text('Ultima sincronizacion por sucursal'), findsOneWidget);
+    expect(find.text('Ultima actualizacion por sucursal'), findsOneWidget);
     expect(find.text('Sucursal Norte'), findsWidgets);
     expect(find.text('Con fallo'), findsWidgets);
   });
@@ -1298,8 +1298,8 @@ void main() {
       expect(find.text('Menu de sucursal'), findsOneWidget);
       expect(find.text('KPIs operativos'), findsOneWidget);
       expect(find.text('Inventario y alertas'), findsOneWidget);
-      expect(find.text('Solicitudes y sincronizacion'), findsWidgets);
-      expect(find.text('Modulos habilitados'), findsOneWidget);
+      expect(find.text('Solicitudes y monitoreo'), findsWidgets);
+      expect(find.text('Navegacion'), findsOneWidget);
       expect(
         find.descendant(
           of: find.byType(Drawer),
@@ -1317,7 +1317,7 @@ void main() {
       expect(
         find.descendant(
           of: find.byType(Drawer),
-          matching: find.widgetWithText(ListTile, 'Estado de sincronizacion'),
+          matching: find.widgetWithText(ListTile, 'Estado de actualizacion'),
         ),
         findsOneWidget,
       );
@@ -1361,15 +1361,12 @@ void main() {
       await tester.tap(
         find.descendant(
           of: find.byType(Drawer),
-          matching: find.widgetWithText(
-            ListTile,
-            'Solicitudes y sincronizacion',
-          ),
+          matching: find.widgetWithText(ListTile, 'Solicitudes y monitoreo'),
         ),
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Solicitudes y sincronizacion'), findsWidgets);
+      expect(find.text('Solicitudes y monitoreo'), findsWidgets);
       expect(find.text('Bandeja de aprobaciones'), findsWidgets);
     },
   );

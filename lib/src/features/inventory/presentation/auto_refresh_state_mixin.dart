@@ -95,6 +95,7 @@ mixin AutoRefreshStateMixin<T extends StatefulWidget> on State<T> {
     return results.any((item) => item != ConnectivityResult.none);
   }
 
+  @override
   void dispose() {
     _autoRefreshTimer?.cancel();
     _lifecycleListener?.dispose();

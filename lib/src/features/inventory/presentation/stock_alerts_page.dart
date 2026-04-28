@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../core/app_theme.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
+import 'branch_panel_drawer.dart';
 
 enum _StockAlertFilter { all, unread, critical, warning }
 
@@ -138,6 +139,11 @@ class _StockAlertsPageState extends State<StockAlertsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      drawer: BranchPanelDrawer(
+        service: widget.service,
+        currentUser: widget.currentUser,
+        currentDestination: BranchPanelDestination.stockAlerts,
+      ),
       appBar: AppBar(
         title: const Text('Alertas de stock'),
         actions: [

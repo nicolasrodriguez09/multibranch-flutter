@@ -6,6 +6,7 @@ import '../../../core/app_theme.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
 import 'auto_refresh_state_mixin.dart';
+import 'branch_panel_drawer.dart';
 import 'branch_location_resolver.dart';
 
 enum _BranchAvailabilityFilter { all, withStock, withoutStock }
@@ -406,6 +407,11 @@ class _BranchDirectoryPageState extends State<BranchDirectoryPage>
     }
 
     return Scaffold(
+      drawer: BranchPanelDrawer(
+        service: widget.service,
+        currentUser: widget.currentUser,
+        currentDestination: BranchPanelDestination.branches,
+      ),
       appBar: AppBar(
         title: const Text('Sucursales'),
         actions: [

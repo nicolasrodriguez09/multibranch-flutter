@@ -42,6 +42,16 @@ service cloud.firestore {
       return hasUserProfile() && (isAdmin() || hasSameBranch(branchId) || isSeller() || isSupervisor());
     }
 
+    function canCreateOwnSuccessfulSyncLog(data) {
+      return isSupervisor()
+        && data.branchId is string
+        && hasSameBranch(data.branchId)
+        && data.branchName is string
+        && data.type == 'inventory'
+        && (data.status == 'success' || data.status == 'completed' || data.status == 'ok')
+        && data.recordsProcessed is int;
+    }
+
     function canManageInventory(branchId) {
       return isAdmin() || (isSupervisor() && hasSameBranch(branchId));
     }
@@ -285,8 +295,9 @@ service cloud.firestore {
     }
 
     match /sync_logs/{syncId} {
-      allow read: if hasUserProfile();
-      allow write: if isAdmin();
+      allow read: if signedIn();
+      allow create: if isAdmin() || canCreateOwnSuccessfulSyncLog(request.resource.data);
+      allow update, delete: if isAdmin();
     }
 
     match /stock_alert_reads/{readId} {
@@ -329,6 +340,14 @@ service cloud.firestore {
       allow create, update: if signedIn()
         && (request.resource.data.userId == request.auth.uid || isAdmin());
       allow delete: if signedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    match /request_logs/{requestId} {
+      allow read: if isAdmin();
+      allow create: if hasUserProfile()
+        && request.resource.data.actorUserId == request.auth.uid
+        && request.resource.data.actorRole == currentUser().role;
+      allow update, delete: if isAdmin();
     }
   }
 }

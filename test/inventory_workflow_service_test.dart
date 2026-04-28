@@ -163,6 +163,20 @@ void main() {
 
       await service.system.addSyncLog(
         SyncLog(
+          id: DemoIds.syncNorthInventory,
+          branchId: DemoIds.branchNorth,
+          branchName: 'Sucursal Norte',
+          type: 'inventory',
+          status: 'success',
+          recordsProcessed: 24,
+          startedAt: now.subtract(const Duration(hours: 14, minutes: 5)),
+          finishedAt: now.subtract(const Duration(hours: 14)),
+          message: 'Actualizacion completada.',
+          createdAt: now.subtract(const Duration(hours: 14)),
+        ),
+      );
+      await service.system.addSyncLog(
+        SyncLog(
           id: 'sync_failed_burst_1',
           branchId: DemoIds.branchNorth,
           branchName: 'Sucursal Norte',
@@ -250,6 +264,45 @@ void main() {
 
     expect(syncLogs.first.status, 'retry_requested');
     expect(syncLogs.first.message, contains('Reintentar'));
+  });
+
+  test('supervisor can refresh own branch data freshness', () async {
+    await service.seedMasterData(actorUser: sampleData.users.first);
+    final supervisor = sampleData.users.firstWhere(
+      (user) => user.role == UserRole.supervisor,
+    );
+    final seller = sampleData.users.firstWhere(
+      (user) => user.role == UserRole.seller,
+    );
+
+    now = now.add(const Duration(hours: 13));
+    final staleOverview = await service.fetchSyncStatusOverview(
+      actorUser: supervisor,
+    );
+
+    final staleSupervisorBranch = staleOverview.statusForBranch(
+      supervisor.branchId,
+    );
+
+    expect(staleOverview.branches.length, greaterThan(1));
+    expect(staleSupervisorBranch, isNotNull);
+    expect(staleSupervisorBranch!.isWarning, isTrue);
+
+    final syncLog = await service.refreshOwnBranchData(actorUser: supervisor);
+    final refreshedOverview = await service.fetchSyncStatusOverview(
+      actorUser: supervisor,
+    );
+
+    expect(syncLog.branchId, supervisor.branchId);
+    expect(syncLog.status, 'success');
+    expect(
+      refreshedOverview.statusForBranch(supervisor.branchId)!.summary,
+      'Al dia',
+    );
+    await expectLater(
+      service.refreshOwnBranchData(actorUser: seller),
+      throwsA(isA<InventoryException>()),
+    );
   });
 
   test(

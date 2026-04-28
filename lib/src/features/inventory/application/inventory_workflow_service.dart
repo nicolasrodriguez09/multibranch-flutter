@@ -792,7 +792,9 @@ class InventoryWorkflowService {
 
   static const Duration _greenDataThreshold = Duration(minutes: 15);
   static const Duration _yellowDataThreshold = Duration(minutes: 30);
-  static const Duration _redDataThreshold = Duration(minutes: 60);
+  static const Duration _greenSyncThreshold = Duration(hours: 4);
+  static const Duration _yellowSyncThreshold = Duration(hours: 12);
+  static const Duration _redSyncThreshold = Duration(hours: 24);
   static const Duration _syncStatusTick = Duration(minutes: 1);
   static const Duration _syncFailureBurstWindow = Duration(hours: 2);
   static const int _syncStatusLogLimit = 180;
@@ -1359,7 +1361,7 @@ class InventoryWorkflowService {
     }
 
     throw const InventoryException(
-      'Solo el administrador puede registrar errores o solicitar reintentos de sincronizacion.',
+      'Solo el administrador puede registrar errores o solicitar reintentos de actualizacion.',
     );
   }
 
@@ -3487,6 +3489,79 @@ class InventoryWorkflowService {
     return controller.stream;
   }
 
+  Future<SyncLog> refreshOwnBranchData({required AppUser actorUser}) async {
+    return _trackOperation(
+      actorUser: actorUser,
+      operation: 'sync.refresh_own_branch',
+      branchId: actorUser.branchId,
+      entityType: 'sync',
+      requestSummary: {'branchId': actorUser.branchId, 'type': 'inventory'},
+      responseSummaryBuilder: (syncLog) => {
+        'syncLogId': syncLog.id,
+        'status': syncLog.status,
+        'recordsProcessed': '${syncLog.recordsProcessed}',
+      },
+      branchIdBuilder: (syncLog) => syncLog.branchId,
+      branchNameBuilder: (syncLog) => syncLog.branchName,
+      entityIdBuilder: (syncLog) => syncLog.id,
+      entityLabelBuilder: (syncLog) => syncLog.branchName,
+      action: () async {
+        _ensurePermission(actorUser, AppPermission.viewSyncStatus);
+        if (actorUser.role != UserRole.supervisor &&
+            actorUser.role != UserRole.admin) {
+          throw const InventoryException(
+            'Solo supervisores o administradores pueden actualizar la sede.',
+          );
+        }
+
+        final branch = await catalog.fetchBranch(actorUser.branchId);
+        if (branch == null) {
+          throw const InventoryException('La sucursal no existe.');
+        }
+
+        final inventory = await inventories.fetchBranchInventory(branch.id);
+        final now = _clock();
+        final syncRef = _syncLogsCollection.doc();
+        final auditLogRef = _auditLogsCollection.doc();
+        final syncLog = SyncLog(
+          id: syncRef.id,
+          branchId: branch.id,
+          branchName: branch.name,
+          type: 'inventory',
+          status: 'success',
+          recordsProcessed: inventory.length,
+          startedAt: now,
+          finishedAt: now,
+          message: 'Actualizacion de sede confirmada por supervisor.',
+          createdAt: now,
+        );
+        final auditLog = _buildAuditLog(
+          actorUser: actorUser,
+          action: 'branch_data_refreshed',
+          entityType: 'sync',
+          entityId: syncLog.id,
+          entityLabel: branch.name,
+          message: 'Actualizo la vigencia de datos de',
+          metadata: {
+            'branchId': branch.id,
+            'branchName': branch.name,
+            'syncType': syncLog.type,
+            'status': syncLog.status,
+            'recordsProcessed': '${syncLog.recordsProcessed}',
+          },
+          branchId: branch.id,
+          branchName: branch.name,
+        );
+
+        final batch = _firestore.batch();
+        batch.set(syncRef, syncLog.toFirestore());
+        batch.set(auditLogRef, auditLog.toFirestore());
+        await batch.commit();
+        return syncLog;
+      },
+    );
+  }
+
   Future<SyncLog> registerSyncError({
     required AppUser actorUser,
     required String branchId,
@@ -3548,7 +3623,7 @@ class InventoryWorkflowService {
           entityType: 'sync',
           entityId: syncLog.id,
           entityLabel: branch.name,
-          message: 'Registro un evento de error de sincronizacion para',
+          message: 'Registro un evento de error de actualizacion para',
           metadata: {
             'branchId': branch.id,
             'branchName': branch.name,
@@ -3631,7 +3706,7 @@ class InventoryWorkflowService {
           entityType: 'sync',
           entityId: syncLog.id,
           entityLabel: branch.name,
-          message: 'Solicito un reintento de sincronizacion para',
+          message: 'Solicito un reintento de actualizacion para',
           metadata: {
             'branchId': branch.id,
             'branchName': branch.name,
@@ -5566,7 +5641,7 @@ class InventoryWorkflowService {
         severity: SyncStatusSeverity.critical,
         summary: 'Con fallo',
         detail: latestLog.message.trim().isEmpty
-            ? 'La ultima sincronizacion reporto un error y requiere revision.'
+            ? 'La ultima actualizacion reporto un error y requiere revision.'
             : latestLog.message.trim(),
       );
     }
@@ -5594,7 +5669,7 @@ class InventoryWorkflowService {
         age: age,
         severity: SyncStatusSeverity.warning,
         summary: 'En proceso',
-        detail: 'Hay una sincronizacion en curso para esta sucursal.',
+        detail: 'Hay una actualizacion en curso para esta sucursal.',
       );
     }
 
@@ -5606,11 +5681,11 @@ class InventoryWorkflowService {
         age: null,
         severity: SyncStatusSeverity.critical,
         summary: 'Sin registro',
-        detail: 'No existe una ultima sincronizacion registrada.',
+        detail: 'No existe una ultima actualizacion registrada.',
       );
     }
 
-    if (age! <= _greenDataThreshold) {
+    if (age! <= _greenSyncThreshold) {
       return SyncBranchStatus(
         branch: branch,
         latestLog: latestLog,
@@ -5618,19 +5693,24 @@ class InventoryWorkflowService {
         age: age,
         severity: SyncStatusSeverity.healthy,
         summary: 'Al dia',
-        detail: 'Los datos de esta sucursal se ven consistentes y recientes.',
+        detail:
+            'Los datos de esta sucursal se ven recientes dentro de la ventana operativa.',
       );
     }
 
-    if (age <= _yellowDataThreshold) {
+    if (age <= _redSyncThreshold) {
       return SyncBranchStatus(
         branch: branch,
         latestLog: latestLog,
         lastSyncAt: lastSyncAt,
         age: age,
         severity: SyncStatusSeverity.warning,
-        summary: 'Con retraso',
-        detail: 'La sucursal sigue operativa, pero conviene validar el dato.',
+        summary: age <= _yellowSyncThreshold
+            ? 'Con retraso'
+            : 'Requiere validacion',
+        detail: age <= _yellowSyncThreshold
+            ? 'La sucursal sigue operativa, pero conviene validar el dato pronto.'
+            : 'La ultima actualizacion ya esta fuera de la ventana recomendada y requiere revision.',
       );
     }
 
@@ -5640,10 +5720,9 @@ class InventoryWorkflowService {
       lastSyncAt: lastSyncAt,
       age: age,
       severity: SyncStatusSeverity.critical,
-      summary: age <= _redDataThreshold ? 'Desactualizada' : 'Muy atrasada',
-      detail: age <= _redDataThreshold
-          ? 'La sincronizacion ya supero el umbral recomendado.'
-          : 'La sucursal lleva demasiado tiempo sin sincronizar.',
+      summary: 'Muy atrasada',
+      detail:
+          'La sucursal lleva mas de 24 horas sin una actualizacion confiable.',
     );
   }
 
@@ -5662,7 +5741,8 @@ class InventoryWorkflowService {
       return const SyncApiStatus(
         severity: SyncStatusSeverity.unknown,
         summary: 'Sin señal',
-        detail: 'Todavia no hay eventos de sincronizacion para evaluar la API.',
+        detail:
+            'Todavia no hay eventos de actualizacion para evaluar el monitoreo.',
         latestLog: null,
         averageResponseTime: Duration.zero,
         lastUpdatedAt: null,
@@ -5677,7 +5757,7 @@ class InventoryWorkflowService {
         severity: SyncStatusSeverity.critical,
         summary: 'Con fallas',
         detail: latestLog.message.trim().isEmpty
-            ? 'El ultimo evento de sincronizacion reporto error.'
+            ? 'El ultimo evento de actualizacion reporto error.'
             : latestLog.message.trim(),
         latestLog: latestLog,
         averageResponseTime: averageResponseTime,
@@ -5690,7 +5770,7 @@ class InventoryWorkflowService {
         severity: SyncStatusSeverity.warning,
         summary: 'Reintento pendiente',
         detail: latestLog.message.trim().isEmpty
-            ? 'Hay un reintento manual de sincronizacion pendiente de ejecucion.'
+            ? 'Hay un reintento manual de actualizacion pendiente de ejecucion.'
             : latestLog.message.trim(),
         latestLog: latestLog,
         averageResponseTime: averageResponseTime,
@@ -5698,12 +5778,12 @@ class InventoryWorkflowService {
       );
     }
 
-    if (latestAge > _redDataThreshold) {
+    if (latestAge > _redSyncThreshold) {
       return SyncApiStatus(
         severity: SyncStatusSeverity.critical,
         summary: 'Sin respuesta reciente',
         detail:
-            'No hay actividad de sincronizacion dentro del umbral esperado.',
+            'No hay actividad reciente de actualizacion dentro de las ultimas 24 horas.',
         latestLog: latestLog,
         averageResponseTime: averageResponseTime,
         lastUpdatedAt: latestLog.createdAt,
@@ -5717,8 +5797,8 @@ class InventoryWorkflowService {
         severity: SyncStatusSeverity.warning,
         summary: 'Con alertas',
         detail: averageResponseTime > const Duration(seconds: 15)
-            ? 'La API responde, pero con latencia superior a la esperada.'
-            : 'Se detectaron sucursales con retraso o incidencias de sincronizacion.',
+            ? 'El proceso central responde, pero con latencia superior a la esperada.'
+            : 'Se detectaron sucursales con retraso o incidencias de actualizacion.',
         latestLog: latestLog,
         averageResponseTime: averageResponseTime,
         lastUpdatedAt: latestLog.createdAt,
@@ -5728,7 +5808,8 @@ class InventoryWorkflowService {
     return SyncApiStatus(
       severity: SyncStatusSeverity.healthy,
       summary: 'Operativa',
-      detail: 'La sincronizacion responde dentro de los parametros esperados.',
+      detail:
+          'La actualizacion de datos se comporta dentro de los parametros esperados.',
       latestLog: latestLog,
       averageResponseTime: averageResponseTime,
       lastUpdatedAt: latestLog.createdAt,
@@ -5760,12 +5841,12 @@ class InventoryWorkflowService {
     }
     if (warningBranches.isNotEmpty) {
       warnings.add(
-        '${warningBranches.length} sucursal(es) con retraso moderado que conviene revisar.',
+        '${warningBranches.length} sucursal(es) con retraso operativo que conviene revisar.',
       );
     }
     if (missingSync > 0) {
       warnings.add(
-        '$missingSync sucursal(es) no tienen registro de ultima sincronizacion.',
+        '$missingSync sucursal(es) no tienen registro de ultima actualizacion.',
       );
     }
     final retryRequested = branchStatuses.where((item) {
@@ -5774,7 +5855,7 @@ class InventoryWorkflowService {
     }).length;
     if (retryRequested > 0) {
       warnings.add(
-        '$retryRequested sucursal(es) tienen un reintento de sincronizacion solicitado.',
+        '$retryRequested sucursal(es) tienen un reintento de actualizacion solicitado.',
       );
     }
 
@@ -5804,11 +5885,11 @@ class InventoryWorkflowService {
           recentFailureCount >= _syncFailureBurstThreshold) {
         final focusLog = latestFailureLog ?? branchStatus.latestLog;
         final title = recentFailureCount >= _syncFailureBurstThreshold
-            ? 'Racha de fallos de sincronizacion'
-            : 'Fallo de sincronizacion';
+            ? 'Racha de fallos de actualizacion'
+            : 'Fallo de actualizacion';
         final summary = recentFailureCount >= _syncFailureBurstThreshold
             ? '${branchStatus.branch.name} acumula $recentFailureCount fallos en las ultimas ${_describeDuration(_syncFailureBurstWindow)}.'
-            : '${branchStatus.branch.name} reporto un error de sincronizacion y requiere revision.';
+            : '${branchStatus.branch.name} reporto un error de actualizacion y requiere revision.';
 
         alerts.add(
           SyncMonitoringAlert(
@@ -5865,16 +5946,16 @@ class InventoryWorkflowService {
       final isStale =
           branchStatus.lastSyncAt == null ||
           (branchStatus.age != null &&
-              branchStatus.age! > _yellowDataThreshold);
+              branchStatus.age! > _yellowSyncThreshold);
       if (isStale) {
         final severity =
             branchStatus.lastSyncAt == null ||
                 (branchStatus.age != null &&
-                    branchStatus.age! > _redDataThreshold)
+                    branchStatus.age! > _redSyncThreshold)
             ? SyncStatusSeverity.critical
             : SyncStatusSeverity.warning;
         final summary = branchStatus.lastSyncAt == null
-            ? '${branchStatus.branch.name} no tiene una ultima sincronizacion registrada.'
+            ? '${branchStatus.branch.name} no tiene una ultima actualizacion registrada.'
             : '${branchStatus.branch.name} lleva ${_describeDuration(branchStatus.age!)} sin actualizarse.';
 
         alerts.add(
@@ -5885,16 +5966,16 @@ class InventoryWorkflowService {
             kind: SyncMonitoringAlertKind.staleData,
             severity: severity,
             title: severity == SyncStatusSeverity.critical
-                ? 'Sucursal sin sincronizacion reciente'
-                : 'Sucursal con retraso de sincronizacion',
+                ? 'Sucursal sin actualizacion reciente'
+                : 'Sucursal con retraso de actualizacion',
             summary: summary,
             technicalDetail: _buildSyncMonitoringTechnicalDetail(
               branchStatus: branchStatus,
               latestLog: branchStatus.latestLog,
               recentFailureCount: recentFailureCount,
               prefix: branchStatus.lastSyncAt == null
-                  ? 'No existe un punto de sincronizacion reciente para validar la sucursal.'
-                  : 'La sucursal supero el TTL de sincronizacion recomendado.',
+                  ? 'No existe un punto de actualizacion reciente para validar la sucursal.'
+                  : 'La sucursal supero la ventana de actualizacion recomendada.',
             ),
             triggeredAt:
                 branchStatus.lastSyncAt ?? branchStatus.branch.updatedAt,
@@ -5948,9 +6029,10 @@ class InventoryWorkflowService {
   List<String> _syncFailureRules() {
     return const <String>[
       'Fallo critico: el ultimo evento tecnico llega con estado failed, error o timeout.',
-      'Retraso moderado: la sucursal supera 30 minutos sin una sincronizacion reciente.',
-      'Desactualizacion critica: la sucursal supera 60 minutos sin actualizar o no tiene registro.',
-      'Racha de fallos: dos o mas errores de sincronizacion en una ventana de 2 horas.',
+      'Retraso operativo: despues de 4 horas sin actualizacion reciente, la sucursal pasa a estado de advertencia.',
+      'Monitoreo reforzado: despues de 12 horas sin actualizar, la sucursal entra en alertas activas.',
+      'Desactualizacion critica: una sucursal se considera critica si supera 24 horas sin actualizar o no tiene registro.',
+      'Racha de fallos: dos o mas errores de actualizacion en una ventana de 2 horas.',
       'Reintento pendiente: un administrador dejo registrado un retry_requested para la sucursal.',
     ];
   }

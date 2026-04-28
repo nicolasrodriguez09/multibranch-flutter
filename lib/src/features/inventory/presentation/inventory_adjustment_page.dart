@@ -5,6 +5,7 @@ import '../../../core/app_theme.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
 import '../domain/role_permissions.dart';
+import 'branch_panel_drawer.dart';
 
 class InventoryAdjustmentPage extends StatefulWidget {
   const InventoryAdjustmentPage({
@@ -105,6 +106,11 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage> {
   Widget build(BuildContext context) {
     if (!widget.currentUser.can(AppPermission.manageInventory)) {
       return Scaffold(
+        drawer: BranchPanelDrawer(
+          service: widget.service,
+          currentUser: widget.currentUser,
+          currentDestination: BranchPanelDestination.inventoryAdjustment,
+        ),
         appBar: AppBar(title: const Text('Ajuste de inventario')),
         body: const Center(
           child: Padding(
@@ -119,6 +125,11 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage> {
     }
 
     return Scaffold(
+      drawer: BranchPanelDrawer(
+        service: widget.service,
+        currentUser: widget.currentUser,
+        currentDestination: BranchPanelDestination.inventoryAdjustment,
+      ),
       appBar: AppBar(
         title: const Text('Ajuste de inventario'),
         actions: [

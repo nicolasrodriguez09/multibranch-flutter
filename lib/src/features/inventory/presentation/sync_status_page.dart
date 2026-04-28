@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../core/app_theme.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
+import 'branch_panel_drawer.dart';
 
 class SyncStatusPage extends StatefulWidget {
   const SyncStatusPage({
@@ -23,9 +24,12 @@ class SyncStatusPage extends StatefulWidget {
 class _SyncStatusPageState extends State<SyncStatusPage> {
   late final Stream<SyncStatusOverview> _syncStatusStream;
   bool _isRefreshing = false;
+  bool _isRefreshingBranch = false;
   String? _busyMonitoringAlertId;
 
   bool get _canManageMonitoring => widget.currentUser.role == UserRole.admin;
+  bool get _canRefreshOwnBranch =>
+      widget.currentUser.role == UserRole.supervisor;
 
   @override
   void initState() {
@@ -52,7 +56,7 @@ class _SyncStatusPageState extends State<SyncStatusPage> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Estado de sincronizacion actualizado.')),
+        const SnackBar(content: Text('Estado de actualizacion actualizado.')),
       );
     } catch (error) {
       if (!mounted) {
@@ -65,6 +69,39 @@ class _SyncStatusPageState extends State<SyncStatusPage> {
       if (mounted) {
         setState(() {
           _isRefreshing = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _refreshOwnBranchData() async {
+    if (_isRefreshingBranch) {
+      return;
+    }
+
+    setState(() {
+      _isRefreshingBranch = true;
+    });
+
+    try {
+      await widget.service.refreshOwnBranchData(actorUser: widget.currentUser);
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sede actualizada correctamente.')),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No fue posible actualizar la sede: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRefreshingBranch = false;
         });
       }
     }
@@ -148,7 +185,7 @@ class _SyncStatusPageState extends State<SyncStatusPage> {
                 TextField(
                   controller: typeController,
                   decoration: const InputDecoration(
-                    labelText: 'Tipo de sincronizacion',
+                    labelText: 'Tipo de actualizacion',
                     hintText: 'inventory',
                   ),
                 ),
@@ -159,7 +196,8 @@ class _SyncStatusPageState extends State<SyncStatusPage> {
                   maxLines: 6,
                   decoration: const InputDecoration(
                     labelText: 'Detalle tecnico',
-                    hintText: 'Timeout, error de esquema, API no responde...',
+                    hintText:
+                        'Timeout, error de esquema, proceso central no responde...',
                   ),
                 ),
               ],
@@ -266,9 +304,18 @@ class _SyncStatusPageState extends State<SyncStatusPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isAdmin = widget.currentUser.role == UserRole.admin;
+
     return Scaffold(
+      drawer: BranchPanelDrawer(
+        service: widget.service,
+        currentUser: widget.currentUser,
+        currentDestination: BranchPanelDestination.syncStatus,
+      ),
       appBar: AppBar(
-        title: const Text('Estado de sincronizacion'),
+        title: Text(
+          isAdmin ? 'Estado de actualizacion' : 'Confiabilidad del inventario',
+        ),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
@@ -331,6 +378,9 @@ class _SyncStatusPageState extends State<SyncStatusPage> {
                       data: data,
                       currentUser: widget.currentUser,
                       currentBranchStatus: currentBranchStatus,
+                      canRefreshOwnBranch: _canRefreshOwnBranch,
+                      isRefreshingBranch: _isRefreshingBranch,
+                      onRefreshOwnBranch: _refreshOwnBranchData,
                     ),
                     if (_canManageMonitoring) ...[
                       const SizedBox(height: 16),
@@ -367,6 +417,7 @@ class _SyncStatusPageState extends State<SyncStatusPage> {
                     _BranchStatusList(
                       branches: data.branches,
                       currentBranchId: widget.currentUser.branchId,
+                      showTechnicalDetails: isAdmin,
                     ),
                   ],
                 ),
@@ -459,16 +510,29 @@ class _StatusHero extends StatelessWidget {
     required this.data,
     required this.currentUser,
     required this.currentBranchStatus,
+    required this.canRefreshOwnBranch,
+    required this.isRefreshingBranch,
+    required this.onRefreshOwnBranch,
   });
 
   final SyncStatusOverview data;
   final AppUser currentUser;
   final SyncBranchStatus? currentBranchStatus;
+  final bool canRefreshOwnBranch;
+  final bool isRefreshingBranch;
+  final Future<void> Function() onRefreshOwnBranch;
 
   @override
   Widget build(BuildContext context) {
-    final severity = data.apiStatus.severity;
+    final isAdmin = currentUser.role == UserRole.admin;
+    final focusedStatus = isAdmin ? null : currentBranchStatus;
+    final severity = focusedStatus?.severity ?? data.apiStatus.severity;
     final accent = _severityColor(severity);
+    final title = isAdmin
+        ? 'Monitoreo de actualizacion de datos'
+        : 'Confiabilidad del inventario';
+    final detail = focusedStatus?.detail ?? data.apiStatus.detail;
+    final summary = focusedStatus?.summary ?? data.apiStatus.summary;
 
     return Container(
       decoration: BoxDecoration(
@@ -513,14 +577,14 @@ class _StatusHero extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'API de sincronizacion',
+                        title,
                         style: Theme.of(context).textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w800,
                         ),
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        data.apiStatus.detail,
+                        detail,
                         style: Theme.of(
                           context,
                         ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
@@ -528,10 +592,7 @@ class _StatusHero extends StatelessWidget {
                     ],
                   ),
                 ),
-                _SeverityBadge(
-                  label: data.apiStatus.summary,
-                  severity: severity,
-                ),
+                _SeverityBadge(label: summary, severity: severity),
               ],
             ),
             const SizedBox(height: 18),
@@ -539,16 +600,27 @@ class _StatusHero extends StatelessWidget {
               spacing: 10,
               runSpacing: 10,
               children: [
-                _MetricBadge(
-                  label: 'Ultimo evento',
-                  value: _formatRelativeTime(data.apiStatus.lastUpdatedAt),
-                ),
-                _MetricBadge(
-                  label: 'Tiempo medio',
-                  value: _formatDurationCompact(
-                    data.apiStatus.averageResponseTime,
+                if (isAdmin) ...[
+                  _MetricBadge(
+                    label: 'Ultimo evento',
+                    value: _formatRelativeTime(data.apiStatus.lastUpdatedAt),
                   ),
-                ),
+                  _MetricBadge(
+                    label: 'Tiempo medio',
+                    value: _formatDurationCompact(
+                      data.apiStatus.averageResponseTime,
+                    ),
+                  ),
+                ] else ...[
+                  _MetricBadge(
+                    label: 'Tu estado',
+                    value: currentBranchStatus?.summary ?? 'Sin datos',
+                  ),
+                  _MetricBadge(
+                    label: 'Ultima sucursal',
+                    value: _formatRelativeTime(currentBranchStatus?.lastSyncAt),
+                  ),
+                ],
                 _MetricBadge(
                   label: 'Sucursales al dia',
                   value:
@@ -598,6 +670,25 @@ class _StatusHero extends StatelessWidget {
                       severity: currentBranchStatus!.severity,
                     ),
                   ],
+                ),
+              ),
+            ],
+            if (canRefreshOwnBranch && currentBranchStatus != null) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: isRefreshingBranch
+                      ? null
+                      : () => unawaited(onRefreshOwnBranch()),
+                  icon: isRefreshingBranch
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh_rounded),
+                  label: const Text('Actualizar mi sede'),
                 ),
               ),
             ],
@@ -675,7 +766,7 @@ class _MonitoringAlertsCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Vista exclusiva de administracion para anticipar fallos de sincronizacion.',
+                      'Vista exclusiva de administracion para anticipar fallos en la actualizacion de datos.',
                       style: Theme.of(
                         context,
                       ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
@@ -884,7 +975,7 @@ class _FailureRulesCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            'Estas reglas disparan el modulo de monitoreo cuando una sucursal deja de ser confiable.',
+            'Estas reglas disparan el monitoreo cuando una sucursal deja de tener datos confiables.',
             style: Theme.of(
               context,
             ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
@@ -1026,7 +1117,7 @@ class _AttentionBranchesCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Sucursales con fallo o retraso',
+            'Sucursales con alertas o atraso',
             style: Theme.of(
               context,
             ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
@@ -1108,7 +1199,7 @@ class _AttentionBranchRow extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Ultima sincronizacion: ${_formatDateTime(branch.lastSyncAt)}',
+                  'Ultima actualizacion: ${_formatDateTime(branch.lastSyncAt)}',
                   style: Theme.of(
                     context,
                   ).textTheme.bodySmall?.copyWith(color: Colors.white60),
@@ -1126,10 +1217,12 @@ class _BranchStatusList extends StatelessWidget {
   const _BranchStatusList({
     required this.branches,
     required this.currentBranchId,
+    required this.showTechnicalDetails,
   });
 
   final List<SyncBranchStatus> branches;
   final String currentBranchId;
+  final bool showTechnicalDetails;
 
   @override
   Widget build(BuildContext context) {
@@ -1144,14 +1237,18 @@ class _BranchStatusList extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Ultima sincronizacion por sucursal',
+            showTechnicalDetails
+                ? 'Ultima actualizacion por sucursal'
+                : 'Confiabilidad por sucursal',
             style: Theme.of(
               context,
             ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 6),
           Text(
-            'Cada fila resume el estado util para decidir si la informacion sigue siendo confiable.',
+            showTechnicalDetails
+                ? 'Cada fila resume el estado util para decidir si la informacion sigue siendo confiable.'
+                : 'Estado operativo de cada sede para validar disponibilidad antes de comprometer stock.',
             style: Theme.of(
               context,
             ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
@@ -1163,6 +1260,7 @@ class _BranchStatusList extends StatelessWidget {
               child: _BranchStatusTile(
                 branch: item,
                 isCurrentBranch: item.branch.id == currentBranchId,
+                showTechnicalDetails: showTechnicalDetails,
               ),
             ),
           ),
@@ -1176,10 +1274,12 @@ class _BranchStatusTile extends StatelessWidget {
   const _BranchStatusTile({
     required this.branch,
     required this.isCurrentBranch,
+    required this.showTechnicalDetails,
   });
 
   final SyncBranchStatus branch;
   final bool isCurrentBranch;
+  final bool showTechnicalDetails;
 
   @override
   Widget build(BuildContext context) {
@@ -1271,15 +1371,15 @@ class _BranchStatusTile extends StatelessWidget {
               _MetaChip(
                 icon: Icons.schedule_rounded,
                 label:
-                    'Ultima: ${_formatDateTime(branch.lastSyncAt)} (${_formatRelativeTime(branch.lastSyncAt)})',
+                    'Actualizacion: ${_formatDateTime(branch.lastSyncAt)} (${_formatRelativeTime(branch.lastSyncAt)})',
               ),
-              if (latestLog != null)
+              if (showTechnicalDetails && latestLog != null)
                 _MetaChip(
                   icon: Icons.sync_alt_rounded,
                   label:
                       '${_formatSyncType(latestLog.type)} | ${_formatRawSyncStatus(latestLog.status)}',
                 ),
-              if (latestLog != null)
+              if (showTechnicalDetails && latestLog != null)
                 _MetaChip(
                   icon: Icons.dns_rounded,
                   label: '${latestLog.recordsProcessed} registros',

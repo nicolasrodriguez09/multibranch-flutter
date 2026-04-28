@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../../core/app_theme.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
+import 'branch_panel_drawer.dart';
 
 class TransferRequestPage extends StatefulWidget {
   const TransferRequestPage({
@@ -29,6 +30,7 @@ class _TransferRequestPageState extends State<TransferRequestPage> {
   late final TextEditingController _notesController;
 
   Future<ProductDetailData>? _productDetailFuture;
+  late Future<SyncStatusOverview?> _syncStatusFuture;
   String? _selectedProductId;
   String? _selectedSourceBranchId;
   bool _isSubmitting = false;
@@ -41,6 +43,7 @@ class _TransferRequestPageState extends State<TransferRequestPage> {
     _notesController = TextEditingController();
     _selectedProductId = widget.initialProductId;
     _catalogFuture = _loadCatalog();
+    _syncStatusFuture = _loadSyncStatus();
     if (_selectedProductId != null && _selectedProductId!.isNotEmpty) {
       _productDetailFuture = _loadProductDetail(_selectedProductId!);
     }
@@ -58,6 +61,16 @@ class _TransferRequestPageState extends State<TransferRequestPage> {
     return widget.service.fetchTransferRequestCatalog(
       actorUser: widget.currentUser,
     );
+  }
+
+  Future<SyncStatusOverview?> _loadSyncStatus() async {
+    try {
+      return await widget.service.fetchSyncStatusOverview(
+        actorUser: widget.currentUser,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<ProductDetailData> _loadProductDetail(
@@ -93,6 +106,7 @@ class _TransferRequestPageState extends State<TransferRequestPage> {
 
     setState(() {
       _catalogFuture = _loadCatalog();
+      _syncStatusFuture = _loadSyncStatus();
       _productDetailFuture = _loadProductDetail(productId, forceRefresh: true);
     });
   }
@@ -222,6 +236,11 @@ class _TransferRequestPageState extends State<TransferRequestPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      drawer: BranchPanelDrawer(
+        service: widget.service,
+        currentUser: widget.currentUser,
+        currentDestination: BranchPanelDestination.transferRequest,
+      ),
       appBar: AppBar(
         title: const Text('Solicitar traslado'),
         actions: [
@@ -298,32 +317,44 @@ class _TransferRequestPageState extends State<TransferRequestPage> {
                         }
 
                         final detail = detailSnapshot.requireData;
-                        final selectedSource = _selectedSource(detail);
-                        return Column(
-                          children: [
-                            _TransferStockContextCard(
-                              detail: detail,
-                              selectedSource: selectedSource,
-                            ),
-                            const SizedBox(height: 16),
-                            _TransferRequestFormCard(
-                              formKey: _formKey,
-                              detail: detail,
-                              selectedSourceBranchId: _effectiveSourceBranchId(
-                                detail,
-                              ),
-                              quantityController: _quantityController,
-                              reasonController: _reasonController,
-                              notesController: _notesController,
-                              isSubmitting: _isSubmitting,
-                              onChangedSource: (value) {
-                                setState(() {
-                                  _selectedSourceBranchId = value;
-                                });
-                              },
-                              onSubmit: () => _submit(detail),
-                            ),
-                          ],
+                        return FutureBuilder<SyncStatusOverview?>(
+                          future: _syncStatusFuture,
+                          builder: (context, syncSnapshot) {
+                            final syncStatuses = {
+                              for (final status
+                                  in syncSnapshot.data?.branches ??
+                                      const <SyncBranchStatus>[])
+                                status.branch.id: status,
+                            };
+                            final selectedSource = _selectedSource(detail);
+                            return Column(
+                              children: [
+                                _TransferStockContextCard(
+                                  detail: detail,
+                                  selectedSource: selectedSource,
+                                  syncStatuses: syncStatuses,
+                                ),
+                                const SizedBox(height: 16),
+                                _TransferRequestFormCard(
+                                  formKey: _formKey,
+                                  detail: detail,
+                                  syncStatuses: syncStatuses,
+                                  selectedSourceBranchId:
+                                      _effectiveSourceBranchId(detail),
+                                  quantityController: _quantityController,
+                                  reasonController: _reasonController,
+                                  notesController: _notesController,
+                                  isSubmitting: _isSubmitting,
+                                  onChangedSource: (value) {
+                                    setState(() {
+                                      _selectedSourceBranchId = value;
+                                    });
+                                  },
+                                  onSubmit: () => _submit(detail),
+                                ),
+                              ],
+                            );
+                          },
                         );
                       },
                     ),
@@ -354,10 +385,10 @@ class _TransferRequestHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final stockLabel = selectedCatalogItem == null
-        ? 'Selecciona un producto para validar disponibilidad en otras sucursales.'
+        ? 'Selecciona un producto para validar disponibilidad en otras sedes.'
         : selectedCatalogItem!.isOutOfStock
-        ? 'Sin stock local para ${selectedCatalogItem!.product.name}.'
-        : 'Stock local actual: ${selectedCatalogItem!.currentAvailableStock} unidad(es).';
+        ? 'Sin stock en tu sede para ${selectedCatalogItem!.product.name}.'
+        : 'Stock en tu sede: ${selectedCatalogItem!.currentAvailableStock} unidad(es).';
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -457,10 +488,12 @@ class _TransferStockContextCard extends StatelessWidget {
   const _TransferStockContextCard({
     required this.detail,
     required this.selectedSource,
+    required this.syncStatuses,
   });
 
   final ProductDetailData detail;
   final ProductBranchSuggestion? selectedSource;
+  final Map<String, SyncBranchStatus> syncStatuses;
 
   @override
   Widget build(BuildContext context) {
@@ -490,31 +523,37 @@ class _TransferStockContextCard extends StatelessWidget {
             runSpacing: 10,
             children: [
               _TransferMetricChip(
-                label: 'Disponible local',
+                label: 'Disponible en tu sede',
                 value: '$currentAvailable',
                 accent: currentAvailable <= 0
                     ? AppPalette.danger
                     : AppPalette.blueSoft,
               ),
               _TransferMetricChip(
-                label: 'En camino',
+                label: 'En camino a tu sede',
                 value: '$incomingStock',
                 accent: AppPalette.amber,
               ),
               _TransferMetricChip(
-                label: 'Sucursales origen',
+                label: 'Sedes con stock',
                 value: '${detail.branchSuggestions.length}',
                 accent: hasSources ? AppPalette.mint : AppPalette.danger,
               ),
             ],
           ),
+          if (selectedSource != null) ...[
+            const SizedBox(height: 12),
+            _TransferReliabilityChip(
+              status: syncStatuses[selectedSource!.branch.id],
+            ),
+          ],
           const SizedBox(height: 14),
           Text(
             hasSources
                 ? selectedSource == null
-                      ? 'Selecciona una sucursal origen para revisar la disponibilidad y el tiempo estimado.'
-                      : 'Origen sugerido: ${selectedSource!.branch.name} | ${selectedSource!.availableStock} disponibles | ${selectedSource!.distanceKm.toStringAsFixed(1)} km | ETA ${selectedSource!.etaLabel}'
-                : 'No hay stock disponible en otras sucursales para este producto.',
+                      ? 'Selecciona la sede origen desde donde saldria el producto.'
+                      : 'Sede origen seleccionada: ${selectedSource!.branch.name} | ${selectedSource!.availableStock} disponibles para enviar | ${_formatSourceReliability(syncStatuses[selectedSource!.branch.id])} | ${selectedSource!.distanceKm.toStringAsFixed(1)} km | ETA ${selectedSource!.etaLabel}'
+                : 'No hay stock disponible en otras sedes para enviar este producto.',
             style: Theme.of(
               context,
             ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
@@ -529,6 +568,7 @@ class _TransferRequestFormCard extends StatelessWidget {
   const _TransferRequestFormCard({
     required this.formKey,
     required this.detail,
+    required this.syncStatuses,
     required this.selectedSourceBranchId,
     required this.quantityController,
     required this.reasonController,
@@ -540,6 +580,7 @@ class _TransferRequestFormCard extends StatelessWidget {
 
   final GlobalKey<FormState> formKey;
   final ProductDetailData detail;
+  final Map<String, SyncBranchStatus> syncStatuses;
   final String? selectedSourceBranchId;
   final TextEditingController quantityController;
   final TextEditingController reasonController;
@@ -575,7 +616,7 @@ class _TransferRequestFormCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Selecciona la sucursal origen, la cantidad y el motivo comercial del traslado.',
+              'Selecciona desde que sede saldra el producto, la cantidad y el motivo comercial del traslado hacia tu sede.',
               style: Theme.of(
                 context,
               ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
@@ -587,13 +628,15 @@ class _TransferRequestFormCard extends StatelessWidget {
               ),
               initialValue: effectiveSelectedSourceBranchId,
               isExpanded: true,
-              decoration: const InputDecoration(labelText: 'Sucursal origen'),
+              decoration: const InputDecoration(
+                labelText: 'Sede origen (desde donde saldra)',
+              ),
               items: sourceSuggestions
                   .map(
                     (item) => DropdownMenuItem<String>(
                       value: item.branch.id,
                       child: Text(
-                        '${item.branch.name} | ${item.availableStock} disp. | ${item.distanceKm.toStringAsFixed(1)} km | ETA ${item.etaLabel}',
+                        '${item.branch.name} | ${item.availableStock} disp. | ${_formatSourceReliability(syncStatuses[item.branch.id])} | ${item.distanceKm.toStringAsFixed(1)} km | ETA ${item.etaLabel}',
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -604,7 +647,7 @@ class _TransferRequestFormCard extends StatelessWidget {
                 if (sourceSuggestions.isNotEmpty &&
                     ((value ?? effectiveSelectedSourceBranchId) == null ||
                         (value ?? effectiveSelectedSourceBranchId)!.isEmpty)) {
-                  return 'Selecciona una sucursal origen.';
+                  return 'Selecciona la sede origen.';
                 }
                 return null;
               },
@@ -958,6 +1001,59 @@ class _TransferMetricChip extends StatelessWidget {
       ),
     );
   }
+}
+
+class _TransferReliabilityChip extends StatelessWidget {
+  const _TransferReliabilityChip({required this.status});
+
+  final SyncBranchStatus? status;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = _formatSourceReliability(status);
+    final accent = _sourceReliabilityColor(status);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: accent.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.verified_outlined, size: 18, color: accent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Confiabilidad del origen: $label',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _formatSourceReliability(SyncBranchStatus? status) {
+  if (status == null) {
+    return 'sin estado';
+  }
+  return status.summary;
+}
+
+Color _sourceReliabilityColor(SyncBranchStatus? status) {
+  return switch (status?.severity) {
+    SyncStatusSeverity.healthy => AppPalette.mint,
+    SyncStatusSeverity.warning => AppPalette.amber,
+    SyncStatusSeverity.critical => AppPalette.danger,
+    SyncStatusSeverity.unknown || null => AppPalette.blueSoft,
+  };
 }
 
 String _formatTransferStatus(TransferStatus status) {

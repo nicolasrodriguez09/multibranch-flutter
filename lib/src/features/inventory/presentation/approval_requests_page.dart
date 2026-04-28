@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/app_theme.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
+import 'branch_panel_drawer.dart';
 
 class ApprovalRequestsPage extends StatefulWidget {
   const ApprovalRequestsPage({
@@ -175,6 +176,11 @@ class _ApprovalRequestsPageState extends State<ApprovalRequestsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      drawer: BranchPanelDrawer(
+        service: widget.service,
+        currentUser: widget.currentUser,
+        currentDestination: BranchPanelDestination.approvals,
+      ),
       appBar: AppBar(
         title: const Text('Bandeja de aprobaciones'),
         actions: [
@@ -256,6 +262,7 @@ class _ApprovalRequestsPageState extends State<ApprovalRequestsPage> {
                           'Solicitudes que deben validarse antes de comprometer stock real.',
                       emptyMessage:
                           'No hay reservas pendientes dentro del alcance actual.',
+                      hasItems: data.pendingReservations.isNotEmpty,
                       child: Column(
                         children: data.pendingReservations
                             .map(
@@ -279,7 +286,6 @@ class _ApprovalRequestsPageState extends State<ApprovalRequestsPage> {
                             )
                             .toList(growable: false),
                       ),
-                      hasItems: data.pendingReservations.isNotEmpty,
                     ),
                     const SizedBox(height: 16),
                     _ApprovalSectionCard(
@@ -288,6 +294,7 @@ class _ApprovalRequestsPageState extends State<ApprovalRequestsPage> {
                           'Solicitudes entre sucursales que requieren decision del supervisor origen.',
                       emptyMessage:
                           'No hay traslados pendientes dentro del alcance actual.',
+                      hasItems: data.pendingTransfers.isNotEmpty,
                       child: Column(
                         children: data.pendingTransfers
                             .map(
@@ -311,7 +318,6 @@ class _ApprovalRequestsPageState extends State<ApprovalRequestsPage> {
                             )
                             .toList(growable: false),
                       ),
-                      hasItems: data.pendingTransfers.isNotEmpty,
                     ),
                   ],
                 );
