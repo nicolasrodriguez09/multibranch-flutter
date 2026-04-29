@@ -458,6 +458,13 @@ class _TransferProductSelectorCard extends StatelessWidget {
             ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 8),
+          Text(
+            'Los productos sin stock local aparecen primero para solicitar apoyo de otra sede con menos friccion.',
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+          ),
+          const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             key: ValueKey<String?>('product_$selectedProductId'),
             initialValue: selectedProductId,
@@ -541,6 +548,10 @@ class _TransferStockContextCard extends StatelessWidget {
               ),
             ],
           ),
+          if (currentAvailable > 0) ...[
+            const SizedBox(height: 12),
+            _TransferLocalStockNotice(availableStock: currentAvailable),
+          ],
           if (selectedSource != null) ...[
             const SizedBox(height: 12),
             _TransferReliabilityChip(
@@ -557,6 +568,39 @@ class _TransferStockContextCard extends StatelessWidget {
             style: Theme.of(
               context,
             ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TransferLocalStockNotice extends StatelessWidget {
+  const _TransferLocalStockNotice({required this.availableStock});
+
+  final int availableStock;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppPalette.amber.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppPalette.amber.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline_rounded, color: AppPalette.amber),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Tu sede tiene $availableStock unidad(es) disponibles. Solicita traslado solo si necesitas reforzar stock o cubrir una venta superior a lo disponible.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+            ),
           ),
         ],
       ),

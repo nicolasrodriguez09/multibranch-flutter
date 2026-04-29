@@ -12,6 +12,8 @@ import 'inventory_adjustment_page.dart';
 import 'notifications_page.dart';
 import 'request_tracking_page.dart';
 import 'reservation_request_page.dart';
+import 'sales_register_page.dart';
+import 'sales_report_page.dart';
 import 'stock_alerts_page.dart';
 import 'sync_status_page.dart';
 import 'transfer_request_page.dart';
@@ -24,6 +26,8 @@ enum BranchPanelDestination {
   syncStatus,
   approvals,
   inventoryAdjustment,
+  salesRegister,
+  salesReport,
   requestTracking,
   reservationRequest,
   transferRequest,
@@ -92,6 +96,14 @@ class BranchPanelDrawer extends StatelessWidget {
         service: service,
         currentUser: currentUser,
       ),
+      BranchPanelDestination.salesRegister => SalesRegisterPage(
+        service: service,
+        currentUser: currentUser,
+      ),
+      BranchPanelDestination.salesReport => SalesReportPage(
+        service: service,
+        currentUser: currentUser,
+      ),
       BranchPanelDestination.requestTracking => RequestTrackingPage(
         service: service,
         currentUser: currentUser,
@@ -114,6 +126,8 @@ class BranchPanelDrawer extends StatelessWidget {
         currentUser.can(AppPermission.approveTransfer) ||
         currentUser.can(AppPermission.approveReservation);
     final canAdjust = currentUser.can(AppPermission.manageInventory);
+    final canRegisterSale = currentUser.can(AppPermission.registerSale);
+    final canViewSales = currentUser.can(AppPermission.viewBranchSales);
 
     return Drawer(
       backgroundColor: const Color(0xFF09192E),
@@ -167,6 +181,34 @@ class BranchPanelDrawer extends StatelessWidget {
                       ),
                       const SizedBox(height: 18),
                       _DrawerSectionLabel(text: 'Operacion'),
+                      if (canRegisterSale) ...[
+                        const SizedBox(height: 10),
+                        _DrawerTile(
+                          icon: Icons.point_of_sale_rounded,
+                          title: 'Registrar venta',
+                          selected:
+                              currentDestination ==
+                              BranchPanelDestination.salesRegister,
+                          onTap: () => _open(
+                            context,
+                            BranchPanelDestination.salesRegister,
+                          ),
+                        ),
+                      ],
+                      if (canViewSales) ...[
+                        const SizedBox(height: 10),
+                        _DrawerTile(
+                          icon: Icons.receipt_long_rounded,
+                          title: 'Ventas de sucursal',
+                          selected:
+                              currentDestination ==
+                              BranchPanelDestination.salesReport,
+                          onTap: () => _open(
+                            context,
+                            BranchPanelDestination.salesReport,
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 10),
                       _DrawerTile(
                         icon: Icons.track_changes_rounded,
@@ -205,10 +247,16 @@ class BranchPanelDrawer extends StatelessWidget {
                           ),
                         ),
                       ],
+                      if (currentUser.role == UserRole.seller) ...[
+                        const SizedBox(height: 18),
+                        _DrawerSectionLabel(text: 'Conseguir producto'),
+                      ],
                       const SizedBox(height: 10),
                       _DrawerTile(
                         icon: Icons.bookmark_add_rounded,
-                        title: 'Reservar producto',
+                        title: currentUser.role == UserRole.seller
+                            ? 'Apartar en otra sede'
+                            : 'Reservar producto',
                         selected:
                             currentDestination ==
                             BranchPanelDestination.reservationRequest,
@@ -220,7 +268,9 @@ class BranchPanelDrawer extends StatelessWidget {
                       const SizedBox(height: 10),
                       _DrawerTile(
                         icon: Icons.local_shipping_rounded,
-                        title: 'Solicitar traslado',
+                        title: currentUser.role == UserRole.seller
+                            ? 'Traer a mi sede'
+                            : 'Solicitar traslado',
                         selected:
                             currentDestination ==
                             BranchPanelDestination.transferRequest,
@@ -244,7 +294,9 @@ class BranchPanelDrawer extends StatelessWidget {
                       const SizedBox(height: 10),
                       _DrawerTile(
                         icon: Icons.cloud_done_rounded,
-                        title: 'Estado de actualizacion',
+                        title: currentUser.role == UserRole.seller
+                            ? 'Confiabilidad del inventario'
+                            : 'Estado de actualizacion',
                         selected:
                             currentDestination ==
                             BranchPanelDestination.syncStatus,

@@ -463,6 +463,13 @@ class _ReservationProductSelector extends StatelessWidget {
             ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 8),
+          Text(
+            'Los productos sin stock local aparecen primero para priorizar ventas que requieren apoyo de otra sede.',
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+          ),
+          const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             key: ValueKey<String?>('reservation_product_$selectedProductId'),
             initialValue: selectedProductId,
@@ -547,6 +554,10 @@ class _ReservationStockContextCard extends StatelessWidget {
               ),
             ],
           ),
+          if (currentAvailable > 0) ...[
+            const SizedBox(height: 12),
+            _ReservationLocalStockNotice(availableStock: currentAvailable),
+          ],
           const SizedBox(height: 14),
           Text(
             hasSources
@@ -557,6 +568,39 @@ class _ReservationStockContextCard extends StatelessWidget {
             style: Theme.of(
               context,
             ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReservationLocalStockNotice extends StatelessWidget {
+  const _ReservationLocalStockNotice({required this.availableStock});
+
+  final int availableStock;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppPalette.amber.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppPalette.amber.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline_rounded, color: AppPalette.amber),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Tu sede tiene $availableStock unidad(es) disponibles. Usa la reserva solo si necesitas apartar stock en otra sede para ese cliente.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+            ),
           ),
         ],
       ),

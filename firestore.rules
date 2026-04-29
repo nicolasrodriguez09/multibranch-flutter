@@ -93,10 +93,74 @@ service cloud.firestore {
       return isAdmin() || ((isSeller() || isSupervisor()) && hasSameBranch(branchId));
     }
 
+    function canRegisterSale(branchId) {
+      return isAdmin() || ((isSeller() || isSupervisor()) && hasSameBranch(branchId));
+    }
+
+    function canReadSale(data) {
+      return isAdmin()
+        || (isSupervisor() && hasSameBranch(data.branchId))
+        || (signedIn() && data.sellerId == request.auth.uid);
+    }
+
     function validInventoryDerivedFields(data) {
       return data.availableStock == data.stock - data.reservedStock
         && data.isLowStock == (data.availableStock <= data.minimumStock)
         && data.updatedBy == request.auth.uid;
+    }
+
+    function sameInventoryCatalogScope(data, existing) {
+      return data.branchId == existing.branchId
+        && data.branchName == existing.branchName
+        && data.productId == existing.productId
+        && data.productName == existing.productName
+        && data.sku == existing.sku
+        && data.minimumStock == existing.minimumStock
+        && data.isActive == existing.isActive
+        && data.lastSyncAt == existing.lastSyncAt;
+    }
+
+    function canRecordIncomingTransferInventory(data, existing) {
+      return isSupervisor()
+        && sameInventoryCatalogScope(data, existing)
+        && data.stock == existing.stock
+        && data.reservedStock == existing.reservedStock
+        && data.availableStock == existing.availableStock
+        && data.incomingStock > existing.incomingStock;
+    }
+
+    function canCreateIncomingTransferInventory(data) {
+      return isSupervisor()
+        && data.branchId is string
+        && data.branchName is string
+        && data.productId is string
+        && data.productName is string
+        && data.sku is string
+        && data.stock == 0
+        && data.reservedStock == 0
+        && data.availableStock == 0
+        && data.incomingStock > 0
+        && data.minimumStock == 0
+        && data.isActive == true;
+    }
+
+    function canReceiveIncomingTransferInventory(data, existing) {
+      return (isSeller() || isSupervisor())
+        && hasSameBranch(existing.branchId)
+        && sameInventoryCatalogScope(data, existing)
+        && data.reservedStock == existing.reservedStock
+        && data.stock > existing.stock
+        && data.incomingStock < existing.incomingStock
+        && data.stock - existing.stock == existing.incomingStock - data.incomingStock;
+    }
+
+    function canRegisterSaleInventory(data, existing) {
+      return (isSeller() || isSupervisor())
+        && hasSameBranch(existing.branchId)
+        && sameInventoryCatalogScope(data, existing)
+        && data.reservedStock == existing.reservedStock
+        && data.incomingStock == existing.incomingStock
+        && data.stock < existing.stock;
     }
 
     function sameTransferScope(data, existing) {
@@ -163,6 +227,11 @@ service cloud.firestore {
         );
     }
 
+    function canReadSaleAudit(entityId) {
+      return exists(/databases/$(database)/documents/sales/$(entityId))
+        && canReadSale(get(/databases/$(database)/documents/sales/$(entityId)).data);
+    }
+
     function canReadAuditLog(data) {
       return isAdmin()
         || (
@@ -172,6 +241,10 @@ service cloud.firestore {
         || (
           data.entityType == 'reservation'
           && canReadReservationAudit(data.entityId)
+        )
+        || (
+          data.entityType == 'sale'
+          && canReadSaleAudit(data.entityId)
         );
     }
 
@@ -206,14 +279,35 @@ service cloud.firestore {
     match /inventories/{inventoryId} {
       allow read: if canReadInventory(resource.data.branchId);
       allow create: if signedIn()
-        && canManageInventory(request.resource.data.branchId)
-        && validInventoryDerivedFields(request.resource.data);
+        && validInventoryDerivedFields(request.resource.data)
+        && (
+          canManageInventory(request.resource.data.branchId)
+          || canCreateIncomingTransferInventory(request.resource.data)
+        );
       allow update: if signedIn()
-        && canManageInventory(request.resource.data.branchId)
         && validInventoryDerivedFields(request.resource.data)
         && request.resource.data.branchId == resource.data.branchId
-        && request.resource.data.productId == resource.data.productId;
+        && request.resource.data.productId == resource.data.productId
+        && (
+          canManageInventory(request.resource.data.branchId)
+          || canRecordIncomingTransferInventory(request.resource.data, resource.data)
+          || canReceiveIncomingTransferInventory(request.resource.data, resource.data)
+          || canRegisterSaleInventory(request.resource.data, resource.data)
+        );
       allow delete: if isAdmin();
+    }
+
+    match /sales/{saleId} {
+      allow read: if canReadSale(resource.data);
+      allow create: if hasUserProfile()
+        && request.resource.data.sellerId == request.auth.uid
+        && canRegisterSale(request.resource.data.branchId)
+        && request.resource.data.quantity is int
+        && request.resource.data.quantity > 0
+        && request.resource.data.unitPrice is number
+        && request.resource.data.unitPrice > 0
+        && request.resource.data.totalPrice == request.resource.data.unitPrice * request.resource.data.quantity;
+      allow update, delete: if isAdmin();
     }
 
     match /transfers/{transferId} {

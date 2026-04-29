@@ -572,6 +572,52 @@ class TransferRepository {
   }
 }
 
+class SalesRepository {
+  SalesRepository(this._firestore);
+
+  final FirebaseFirestore _firestore;
+
+  CollectionReference<Map<String, dynamic>> get _collection =>
+      _firestore.collection(FirestoreCollections.sales);
+
+  Stream<List<SaleRecord>> watchSales() {
+    return _collection
+        .orderBy('soldAt', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => SaleRecord.fromFirestore(doc.id, doc.data()))
+              .toList(),
+        );
+  }
+
+  Stream<List<SaleRecord>> watchSalesByBranch(String branchId) {
+    return _collection.where('branchId', isEqualTo: branchId).snapshots().map((
+      snapshot,
+    ) {
+      final items =
+          snapshot.docs
+              .map((doc) => SaleRecord.fromFirestore(doc.id, doc.data()))
+              .toList(growable: false)
+            ..sort((left, right) => right.soldAt.compareTo(left.soldAt));
+      return items;
+    });
+  }
+
+  Stream<List<SaleRecord>> watchSalesBySeller(String sellerId) {
+    return _collection.where('sellerId', isEqualTo: sellerId).snapshots().map((
+      snapshot,
+    ) {
+      final items =
+          snapshot.docs
+              .map((doc) => SaleRecord.fromFirestore(doc.id, doc.data()))
+              .toList(growable: false)
+            ..sort((left, right) => right.soldAt.compareTo(left.soldAt));
+      return items;
+    });
+  }
+}
+
 class SystemRepository {
   SystemRepository(this._firestore);
 

@@ -353,7 +353,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byType(Drawer),
-        matching: find.widgetWithText(ListTile, 'Estado de actualizacion'),
+        matching: find.widgetWithText(ListTile, 'Confiabilidad del inventario'),
       ),
       findsOneWidget,
     );
@@ -364,17 +364,18 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('Reservar producto'), findsOneWidget);
+    expect(find.text('Conseguir producto'), findsOneWidget);
+    expect(find.text('Apartar en otra sede'), findsOneWidget);
     await tester.scrollUntilVisible(
       find.descendant(
         of: find.byType(Drawer),
-        matching: find.widgetWithText(ListTile, 'Solicitar traslado'),
+        matching: find.widgetWithText(ListTile, 'Traer a mi sede'),
       ),
       120,
       scrollable: find.byType(Scrollable).last,
     );
     await tester.pumpAndSettle();
-    expect(find.text('Solicitar traslado'), findsOneWidget);
+    expect(find.text('Traer a mi sede'), findsOneWidget);
   });
 
   testWidgets(

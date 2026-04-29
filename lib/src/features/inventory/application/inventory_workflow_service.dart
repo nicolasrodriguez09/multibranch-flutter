@@ -256,6 +256,47 @@ class StockAlertFeedData {
   bool get hasCritical => criticalCount > 0;
 }
 
+class SalesCatalogItem {
+  const SalesCatalogItem({required this.product, required this.inventory});
+
+  final Product product;
+  final InventoryItem inventory;
+
+  int get availableStock => inventory.availableStock;
+  double get unitPrice => product.price;
+  String get currency => product.currency;
+}
+
+class DailySalesMetric {
+  const DailySalesMetric({
+    required this.day,
+    required this.quantity,
+    required this.total,
+  });
+
+  final DateTime day;
+  final int quantity;
+  final double total;
+}
+
+class SalesReportData {
+  const SalesReportData({
+    required this.sales,
+    required this.dailyMetrics,
+    required this.generatedAt,
+  });
+
+  final List<SaleRecord> sales;
+  final List<DailySalesMetric> dailyMetrics;
+  final DateTime generatedAt;
+
+  int get totalTransactions => sales.length;
+  int get totalUnits =>
+      sales.fold<int>(0, (total, sale) => total + sale.quantity);
+  double get totalRevenue =>
+      sales.fold<double>(0, (total, sale) => total + sale.totalPrice);
+}
+
 class ProductSearchResult {
   const ProductSearchResult({
     required this.product,
@@ -757,6 +798,7 @@ class InventoryWorkflowService {
        inventories = InventoryRepository(firestore),
        reservations = ReservationRepository(firestore),
        transfers = TransferRepository(firestore),
+       sales = SalesRepository(firestore),
        system = SystemRepository(firestore);
 
   final FirebaseFirestore _firestore;
@@ -768,6 +810,7 @@ class InventoryWorkflowService {
   final InventoryRepository inventories;
   final ReservationRepository reservations;
   final TransferRepository transfers;
+  final SalesRepository sales;
   final SystemRepository system;
   final Map<String, DateTime> _refreshRegistry = <String, DateTime>{};
   final Map<String, ProductSearchData> _productSearchCache =
@@ -842,6 +885,8 @@ class InventoryWorkflowService {
       _firestore.collection(FirestoreCollections.reservations);
   CollectionReference<Map<String, dynamic>> get _transfersCollection =>
       _firestore.collection(FirestoreCollections.transfers);
+  CollectionReference<Map<String, dynamic>> get _salesCollection =>
+      _firestore.collection(FirestoreCollections.sales);
   CollectionReference<Map<String, dynamic>> get _syncLogsCollection =>
       _firestore.collection(FirestoreCollections.syncLogs);
   CollectionReference<Map<String, dynamic>> get _notificationsCollection =>
@@ -2748,6 +2793,267 @@ class InventoryWorkflowService {
       scope: refreshScope,
     );
     return immutableItems;
+  }
+
+  Future<List<SalesCatalogItem>> fetchSalesCatalog({
+    required AppUser actorUser,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.registerSale);
+    final products = await _fetchProductCatalog();
+    final productsById = {
+      for (final product in products.data) product.id: product,
+    };
+    final branchInventory = await _fetchBranchInventory(actorUser.branchId);
+
+    final items =
+        branchInventory.data
+            .where((inventory) => inventory.isActive)
+            .map((inventory) {
+              final product = productsById[inventory.productId];
+              if (product == null || !product.isActive) {
+                return null;
+              }
+              return SalesCatalogItem(product: product, inventory: inventory);
+            })
+            .whereType<SalesCatalogItem>()
+            .toList(growable: false)
+          ..sort((left, right) {
+            final availability = right.availableStock.compareTo(
+              left.availableStock,
+            );
+            if (availability != 0) {
+              return availability;
+            }
+            return left.product.name.compareTo(right.product.name);
+          });
+
+    return List<SalesCatalogItem>.unmodifiable(items);
+  }
+
+  Future<SaleRecord> registerSale({
+    required AppUser actorUser,
+    required String productId,
+    required int quantity,
+    required double unitPrice,
+    required SalePaymentMethod paymentMethod,
+    String customerName = '',
+    String customerPhone = '',
+    String notes = '',
+  }) async {
+    return _trackOperation(
+      actorUser: actorUser,
+      operation: 'sales.register',
+      branchId: actorUser.branchId,
+      entityType: 'sale',
+      requestSummary: {
+        'productId': productId,
+        'quantity': '$quantity',
+        'unitPrice': unitPrice.toStringAsFixed(2),
+        'paymentMethod': paymentMethod.name,
+      },
+      responseSummaryBuilder: (sale) => {
+        'saleId': sale.id,
+        'totalPrice': sale.totalPrice.toStringAsFixed(2),
+        'quantity': '${sale.quantity}',
+      },
+      branchIdBuilder: (sale) => sale.branchId,
+      branchNameBuilder: (sale) => sale.branchName,
+      entityIdBuilder: (sale) => sale.id,
+      entityLabelBuilder: (sale) => sale.productName,
+      action: () async {
+        _ensurePermission(actorUser, AppPermission.registerSale);
+        _ensureBranchAccess(actorUser, actorUser.branchId);
+
+        if (quantity <= 0) {
+          throw const InventoryException(
+            'La cantidad vendida debe ser mayor que cero.',
+          );
+        }
+        if (unitPrice <= 0) {
+          throw const InventoryException(
+            'El precio unitario debe ser mayor que cero.',
+          );
+        }
+
+        final now = _clock();
+        final branch = await catalog.fetchBranch(actorUser.branchId);
+        final product = await catalog.fetchProduct(productId);
+        if (branch == null || product == null || !product.isActive) {
+          throw const InventoryException(
+            'No se encontro el producto o la sucursal para registrar la venta.',
+          );
+        }
+
+        final inventoryRef = _inventoriesCollection.doc(
+          inventories.inventoryId(actorUser.branchId, productId),
+        );
+        final saleRef = _salesCollection.doc();
+        final auditLogRef = _auditLogsCollection.doc();
+        InventoryItem? previousInventory;
+        InventoryItem? updatedInventory;
+
+        final sale = await _firestore.runTransaction((transaction) async {
+          final inventorySnapshot = await transaction.get(inventoryRef);
+          if (!inventorySnapshot.exists) {
+            throw const InventoryException(
+              'No existe inventario para vender este producto en tu sede.',
+            );
+          }
+
+          final inventory = InventoryItem.fromFirestore(
+            inventorySnapshot.id,
+            inventorySnapshot.data()!,
+          );
+          previousInventory = inventory;
+          if (!inventory.isActive) {
+            throw const InventoryException(
+              'El inventario del producto esta inactivo.',
+            );
+          }
+          if (inventory.availableStock < quantity) {
+            throw InventoryException(
+              'Stock insuficiente. Disponible: ${inventory.availableStock}, solicitado: $quantity.',
+            );
+          }
+
+          updatedInventory = inventory.recalculate(
+            stock: inventory.stock - quantity,
+            updatedBy: actorUser.id,
+            updatedAt: now,
+            lastMovementAt: now,
+          );
+          final totalPrice = unitPrice * quantity;
+          final sale = SaleRecord(
+            id: saleRef.id,
+            branchId: branch.id,
+            branchName: branch.name,
+            sellerId: actorUser.id,
+            sellerName: actorUser.fullName,
+            productId: product.id,
+            productName: product.name,
+            sku: product.sku,
+            quantity: quantity,
+            unitPrice: unitPrice,
+            totalPrice: totalPrice,
+            currency: product.currency,
+            paymentMethod: paymentMethod,
+            customerName: customerName.trim(),
+            customerPhone: customerPhone.trim(),
+            notes: notes.trim(),
+            soldAt: now,
+            createdAt: now,
+          );
+          final auditLog = _buildAuditLog(
+            actorUser: actorUser,
+            action: 'sale_registered',
+            entityType: 'sale',
+            entityId: sale.id,
+            entityLabel: sale.productName,
+            message: 'Registro una venta de',
+            metadata: {
+              'branchId': sale.branchId,
+              'branchName': sale.branchName,
+              'sellerId': sale.sellerId,
+              'sellerName': sale.sellerName,
+              'productId': sale.productId,
+              'sku': sale.sku,
+              'quantity': '${sale.quantity}',
+              'unitPrice': sale.unitPrice.toStringAsFixed(2),
+              'totalPrice': sale.totalPrice.toStringAsFixed(2),
+              'currency': sale.currency,
+              'paymentMethod': sale.paymentMethod.name,
+              if (sale.customerName.isNotEmpty)
+                'customerName': sale.customerName,
+              if (sale.customerPhone.isNotEmpty)
+                'customerPhone': sale.customerPhone,
+              if (sale.notes.isNotEmpty) 'notes': sale.notes,
+            },
+            branchId: sale.branchId,
+            branchName: sale.branchName,
+          );
+
+          transaction.set(inventoryRef, updatedInventory!.toFirestore());
+          transaction.set(saleRef, sale.toFirestore());
+          transaction.set(auditLogRef, auditLog.toFirestore());
+          return sale;
+        });
+
+        if (updatedInventory != null) {
+          await _handleLowStockAlertTransition(
+            previousInventory: previousInventory,
+            updatedInventory: updatedInventory!,
+          );
+        }
+        _invalidateProductCaches(productId);
+        return sale;
+      },
+    );
+  }
+
+  Stream<List<SaleRecord>> watchSales({required AppUser actorUser}) {
+    _ensurePermission(actorUser, AppPermission.viewBranchSales);
+    if (actorUser.role == UserRole.admin) {
+      return sales.watchSales();
+    }
+    return sales.watchSalesByBranch(actorUser.branchId);
+  }
+
+  Stream<List<SaleRecord>> watchOwnSales({required AppUser actorUser}) {
+    _ensurePermission(actorUser, AppPermission.registerSale);
+    return sales.watchSalesBySeller(actorUser.id);
+  }
+
+  SalesReportData buildSalesReport(
+    List<SaleRecord> sales, {
+    DateTime? from,
+    DateTime? to,
+  }) {
+    final filtered =
+        sales
+            .where((sale) {
+              if (from != null && sale.soldAt.isBefore(from)) {
+                return false;
+              }
+              if (to != null && !sale.soldAt.isBefore(to)) {
+                return false;
+              }
+              return true;
+            })
+            .toList(growable: false)
+          ..sort((left, right) => right.soldAt.compareTo(left.soldAt));
+
+    final grouped = <DateTime, List<SaleRecord>>{};
+    for (final sale in filtered) {
+      final day = DateTime(
+        sale.soldAt.year,
+        sale.soldAt.month,
+        sale.soldAt.day,
+      );
+      grouped.putIfAbsent(day, () => <SaleRecord>[]).add(sale);
+    }
+    final dailyMetrics =
+        grouped.entries
+            .map(
+              (entry) => DailySalesMetric(
+                day: entry.key,
+                quantity: entry.value.fold<int>(
+                  0,
+                  (total, sale) => total + sale.quantity,
+                ),
+                total: entry.value.fold<double>(
+                  0,
+                  (total, sale) => total + sale.totalPrice,
+                ),
+              ),
+            )
+            .toList(growable: false)
+          ..sort((left, right) => right.day.compareTo(left.day));
+
+    return SalesReportData(
+      sales: List<SaleRecord>.unmodifiable(filtered),
+      dailyMetrics: List<DailySalesMetric>.unmodifiable(dailyMetrics),
+      generatedAt: _clock(),
+    );
   }
 
   Future<TransferTraceabilityData> fetchTransferTraceability({

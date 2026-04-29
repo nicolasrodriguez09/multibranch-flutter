@@ -17,6 +17,8 @@ import 'inventory_adjustment_page.dart';
 import 'product_search_page.dart';
 import 'request_tracking_page.dart';
 import 'reservation_request_page.dart';
+import 'sales_register_page.dart';
+import 'sales_report_page.dart';
 import 'sync_status_page.dart';
 import 'stock_alerts_page.dart';
 import 'transfer_request_page.dart';
@@ -203,6 +205,28 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (context) => ReservationRequestPage(
+          service: widget.service,
+          currentUser: widget.currentUser,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openSalesRegisterPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => SalesRegisterPage(
+          service: widget.service,
+          currentUser: widget.currentUser,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openSalesReportPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => SalesReportPage(
           service: widget.service,
           currentUser: widget.currentUser,
         ),
@@ -678,6 +702,26 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
       const SizedBox(height: 18),
       _DashboardGrid(
         children: [
+          if (user.can(AppPermission.registerSale))
+            _WorkflowActionCard(
+              title: 'Registrar venta',
+              subtitle:
+                  'Descuenta stock de tu sede y guarda hora, vendedor, precio, cliente y metodo de pago.',
+              buttonLabel: 'Nueva venta',
+              icon: Icons.point_of_sale_rounded,
+              accent: AppPalette.mint,
+              onPressed: _openSalesRegisterPage,
+            ),
+          if (user.can(AppPermission.viewBranchSales))
+            _WorkflowActionCard(
+              title: 'Ventas de sucursal',
+              subtitle:
+                  'Consulta ventas por dia con detalle de vendedor, cantidad, precio y trazabilidad.',
+              buttonLabel: 'Ver ventas',
+              icon: Icons.receipt_long_rounded,
+              accent: AppPalette.mint,
+              onPressed: _openSalesReportPage,
+            ),
           if (user.can(AppPermission.approveTransfer) ||
               user.can(AppPermission.approveReservation))
             _WorkflowActionCard(
@@ -699,32 +743,42 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
             onPressed: _openRequestTrackingPage,
           ),
           _WorkflowActionCard(
-            title: 'Estado de actualizacion',
-            subtitle:
-                'Revisa la vigencia del dato y la ultima actualizacion registrada por sucursal.',
+            title: user.role == UserRole.seller
+                ? 'Confiabilidad del inventario'
+                : 'Estado de actualizacion',
+            subtitle: user.role == UserRole.seller
+                ? 'Revisa si el stock de las sucursales esta vigente antes de prometer una venta.'
+                : 'Revisa la vigencia del dato y la ultima actualizacion registrada por sucursal.',
             buttonLabel: 'Ver estado',
             icon: Icons.cloud_done_rounded,
             accent: AppPalette.mint,
             onPressed: _openSyncStatusPage,
           ),
-          _WorkflowActionCard(
-            title: 'Reservar producto',
-            subtitle:
-                'Asegura unidades en otra sucursal para sostener una venta confirmada.',
-            buttonLabel: 'Nueva reserva',
-            icon: Icons.bookmark_add_rounded,
-            accent: AppPalette.blueSoft,
-            onPressed: _openReservationRequestPage,
-          ),
-          _WorkflowActionCard(
-            title: 'Solicitar traslado',
-            subtitle:
-                'Crea una solicitud hacia tu sucursal cuando otra sede tenga disponibilidad.',
-            buttonLabel: 'Nuevo traslado',
-            icon: Icons.local_shipping_rounded,
-            accent: AppPalette.amber,
-            onPressed: _openTransferRequestPage,
-          ),
+          if (user.role == UserRole.seller)
+            _SellerProductAcquisitionCard(
+              onReserve: _openReservationRequestPage,
+              onTransfer: _openTransferRequestPage,
+            )
+          else ...[
+            _WorkflowActionCard(
+              title: 'Reservar producto',
+              subtitle:
+                  'Asegura unidades en otra sucursal para sostener una venta confirmada.',
+              buttonLabel: 'Nueva reserva',
+              icon: Icons.bookmark_add_rounded,
+              accent: AppPalette.blueSoft,
+              onPressed: _openReservationRequestPage,
+            ),
+            _WorkflowActionCard(
+              title: 'Solicitar traslado',
+              subtitle:
+                  'Crea una solicitud hacia tu sucursal cuando otra sede tenga disponibilidad.',
+              buttonLabel: 'Nuevo traslado',
+              icon: Icons.local_shipping_rounded,
+              accent: AppPalette.amber,
+              onPressed: _openTransferRequestPage,
+            ),
+          ],
         ],
       ),
       const SizedBox(height: 18),
@@ -935,6 +989,12 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
             ? () => _runDrawerAction(_openApprovalRequestsPage)
             : null,
         onOpenRequestTracking: () => _runDrawerAction(_openRequestTrackingPage),
+        onOpenSalesRegister: user.can(AppPermission.registerSale)
+            ? () => _runDrawerAction(_openSalesRegisterPage)
+            : null,
+        onOpenSalesReport: user.can(AppPermission.viewBranchSales)
+            ? () => _runDrawerAction(_openSalesReportPage)
+            : null,
         onOpenReservationRequests: () =>
             _runDrawerAction(_openReservationRequestPage),
         onOpenTransferRequests: () =>
@@ -4324,6 +4384,87 @@ class _WorkflowActionCard extends StatelessWidget {
   }
 }
 
+class _SellerProductAcquisitionCard extends StatelessWidget {
+  const _SellerProductAcquisitionCard({
+    required this.onReserve,
+    required this.onTransfer,
+  });
+
+  final Future<void> Function() onReserve;
+  final Future<void> Function() onTransfer;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF102540),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0x26FFFFFF)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: AppPalette.amber.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.shopping_bag_rounded,
+                  color: AppPalette.amber,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Conseguir producto',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Elige si vas a apartar unidades para un cliente o traerlas fisicamente a tu sede.',
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              FilledButton.icon(
+                onPressed: () => unawaited(onReserve()),
+                icon: const Icon(Icons.bookmark_add_rounded),
+                label: const Text('Apartar en otra sede'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => unawaited(onTransfer()),
+                icon: const Icon(Icons.local_shipping_rounded),
+                label: const Text('Traer a mi sede'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _NotificationInboxButton extends StatelessWidget {
   const _NotificationInboxButton({
     required this.service,
@@ -4511,11 +4652,13 @@ class _BranchAppBarMenu extends StatelessWidget {
                     label: 'Estado de solicitudes',
                   ),
                 ),
-                const PopupMenuItem<_BranchAppBarAction>(
+                PopupMenuItem<_BranchAppBarAction>(
                   value: _BranchAppBarAction.syncStatus,
                   child: _BranchPopupActionLabel(
                     icon: Icons.cloud_done_rounded,
-                    label: 'Estado de actualizacion',
+                    label: currentUser.role == UserRole.seller
+                        ? 'Confiabilidad del inventario'
+                        : 'Estado de actualizacion',
                   ),
                 ),
                 if (_canApprove)
@@ -4768,6 +4911,8 @@ class _BranchDrawer extends StatelessWidget {
     required this.onOpenInventoryAdjustment,
     required this.onOpenApprovalRequests,
     required this.onOpenRequestTracking,
+    required this.onOpenSalesRegister,
+    required this.onOpenSalesReport,
     required this.onOpenReservationRequests,
     required this.onOpenTransferRequests,
     required this.onSignOut,
@@ -4786,6 +4931,8 @@ class _BranchDrawer extends StatelessWidget {
   final VoidCallback? onOpenInventoryAdjustment;
   final VoidCallback? onOpenApprovalRequests;
   final VoidCallback onOpenRequestTracking;
+  final VoidCallback? onOpenSalesRegister;
+  final VoidCallback? onOpenSalesReport;
   final VoidCallback onOpenReservationRequests;
   final VoidCallback onOpenTransferRequests;
   final VoidCallback onSignOut;
@@ -4843,6 +4990,24 @@ class _BranchDrawer extends StatelessWidget {
                       ),
                       const SizedBox(height: 18),
                       const _BranchDrawerSectionLabel(text: 'Operacion'),
+                      if (onOpenSalesRegister != null) ...[
+                        const SizedBox(height: 10),
+                        _BranchDrawerTile(
+                          icon: Icons.point_of_sale_rounded,
+                          title: 'Registrar venta',
+                          isSelected: false,
+                          onTap: onOpenSalesRegister!,
+                        ),
+                      ],
+                      if (onOpenSalesReport != null) ...[
+                        const SizedBox(height: 10),
+                        _BranchDrawerTile(
+                          icon: Icons.receipt_long_rounded,
+                          title: 'Ventas de sucursal',
+                          isSelected: false,
+                          onTap: onOpenSalesReport!,
+                        ),
+                      ],
                       const SizedBox(height: 10),
                       _BranchDrawerTile(
                         icon: Icons.track_changes_rounded,
@@ -4868,17 +5033,27 @@ class _BranchDrawer extends StatelessWidget {
                           onTap: onOpenInventoryAdjustment!,
                         ),
                       ],
+                      if (user.role == UserRole.seller) ...[
+                        const SizedBox(height: 18),
+                        const _BranchDrawerSectionLabel(
+                          text: 'Conseguir producto',
+                        ),
+                      ],
                       const SizedBox(height: 10),
                       _BranchDrawerTile(
                         icon: Icons.bookmark_add_rounded,
-                        title: 'Reservar producto',
+                        title: user.role == UserRole.seller
+                            ? 'Apartar en otra sede'
+                            : 'Reservar producto',
                         isSelected: false,
                         onTap: onOpenReservationRequests,
                       ),
                       const SizedBox(height: 10),
                       _BranchDrawerTile(
                         icon: Icons.local_shipping_rounded,
-                        title: 'Solicitar traslado',
+                        title: user.role == UserRole.seller
+                            ? 'Traer a mi sede'
+                            : 'Solicitar traslado',
                         isSelected: false,
                         onTap: onOpenTransferRequests,
                       ),
@@ -4894,7 +5069,9 @@ class _BranchDrawer extends StatelessWidget {
                       const SizedBox(height: 10),
                       _BranchDrawerTile(
                         icon: Icons.cloud_done_rounded,
-                        title: 'Estado de actualizacion',
+                        title: user.role == UserRole.seller
+                            ? 'Confiabilidad del inventario'
+                            : 'Estado de actualizacion',
                         isSelected: false,
                         onTap: onOpenSyncStatus,
                       ),
