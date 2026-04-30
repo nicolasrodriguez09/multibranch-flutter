@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/app_theme.dart';
+import '../domain/models.dart';
 
 class CreateBranchRequest {
   const CreateBranchRequest({
@@ -29,7 +30,9 @@ class CreateBranchRequest {
 }
 
 class CreateBranchDialog extends StatefulWidget {
-  const CreateBranchDialog({super.key});
+  const CreateBranchDialog({super.key, this.initialBranch});
+
+  final Branch? initialBranch;
 
   @override
   State<CreateBranchDialog> createState() => _CreateBranchDialogState();
@@ -47,6 +50,26 @@ class _CreateBranchDialogState extends State<CreateBranchDialog> {
   final _hoursController = TextEditingController(text: '08:00-18:00');
   final _latitudeController = TextEditingController(text: '0');
   final _longitudeController = TextEditingController(text: '0');
+
+  bool get _isEditing => widget.initialBranch != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final branch = widget.initialBranch;
+    if (branch != null) {
+      _nameController.text = branch.name;
+      _codeController.text = branch.code;
+      _addressController.text = branch.address;
+      _cityController.text = branch.city;
+      _phoneController.text = branch.phone;
+      _emailController.text = branch.email;
+      _managerController.text = branch.managerName;
+      _hoursController.text = branch.openingHours;
+      _latitudeController.text = branch.location.lat.toString();
+      _longitudeController.text = branch.location.lng.toString();
+    }
+  }
 
   @override
   void dispose() {
@@ -127,7 +150,7 @@ class _CreateBranchDialogState extends State<CreateBranchDialog> {
                     border: Border.all(color: AppPalette.panelBorder),
                   ),
                   child: Text(
-                    'NUEVA SUCURSAL',
+                    _isEditing ? 'EDITAR SUCURSAL' : 'NUEVA SUCURSAL',
                     style: textTheme.labelMedium?.copyWith(
                       color: AppPalette.amberSoft,
                       fontWeight: FontWeight.w800,
@@ -137,7 +160,7 @@ class _CreateBranchDialogState extends State<CreateBranchDialog> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Agregar sucursal',
+                  _isEditing ? 'Editar sucursal' : 'Agregar sucursal',
                   style: textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.w800,
                   ),
@@ -157,6 +180,7 @@ class _CreateBranchDialogState extends State<CreateBranchDialog> {
                 _field(
                   controller: _codeController,
                   label: 'Codigo',
+                  enabled: !_isEditing,
                   validator: (value) {
                     if (value == null || value.trim().isEmpty) {
                       return 'Ingresa un codigo.';
@@ -249,7 +273,9 @@ class _CreateBranchDialogState extends State<CreateBranchDialog> {
                     Expanded(
                       child: FilledButton(
                         onPressed: _submit,
-                        child: const Text('Crear sucursal'),
+                        child: Text(
+                          _isEditing ? 'Guardar cambios' : 'Crear sucursal',
+                        ),
                       ),
                     ),
                   ],
@@ -267,9 +293,11 @@ class _CreateBranchDialogState extends State<CreateBranchDialog> {
     required String label,
     TextInputType? keyboardType,
     String? Function(String?)? validator,
+    bool enabled = true,
   }) {
     return TextFormField(
       controller: controller,
+      enabled: enabled,
       keyboardType: keyboardType,
       style: const TextStyle(color: AppPalette.textPrimary),
       decoration: InputDecoration(labelText: label),

@@ -415,6 +415,9 @@ class InventoryItem {
       '${branchId}_$productId';
 
   InventoryItem recalculate({
+    String? branchName,
+    String? productName,
+    String? sku,
     int? stock,
     int? reservedStock,
     int? incomingStock,
@@ -433,10 +436,10 @@ class InventoryItem {
     return InventoryItem(
       id: id,
       branchId: branchId,
-      branchName: branchName,
+      branchName: branchName ?? this.branchName,
       productId: productId,
-      productName: productName,
-      sku: sku,
+      productName: productName ?? this.productName,
+      sku: sku ?? this.sku,
       stock: nextStock,
       reservedStock: nextReservedStock,
       availableStock: nextAvailableStock,

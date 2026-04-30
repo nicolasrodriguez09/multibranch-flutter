@@ -1769,6 +1769,546 @@ class InventoryWorkflowService {
     return branch;
   }
 
+  Future<Branch> updateBranch({
+    required AppUser actorUser,
+    required String branchId,
+    required String name,
+    required String address,
+    required String city,
+    String phone = '',
+    String email = '',
+    String managerName = '',
+    String openingHours = '08:00-18:00',
+    double latitude = 0,
+    double longitude = 0,
+    required bool isActive,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.manageBranches);
+
+    final currentBranch = await catalog.fetchBranch(branchId);
+    if (currentBranch == null) {
+      throw const InventoryException('La sucursal no existe.');
+    }
+    final normalizedName = name.trim();
+    final normalizedAddress = address.trim();
+    final normalizedCity = city.trim();
+    if (normalizedName.isEmpty ||
+        normalizedAddress.isEmpty ||
+        normalizedCity.isEmpty) {
+      throw const InventoryException(
+        'Nombre, direccion y ciudad son obligatorios.',
+      );
+    }
+
+    final now = _clock();
+    final updatedBranch = Branch(
+      id: currentBranch.id,
+      name: normalizedName,
+      code: currentBranch.code,
+      address: normalizedAddress,
+      city: normalizedCity,
+      phone: phone.trim(),
+      email: email.trim(),
+      location: BranchLocation(lat: latitude, lng: longitude),
+      isActive: isActive,
+      managerName: managerName.trim(),
+      openingHours: openingHours.trim().isEmpty
+          ? currentBranch.openingHours
+          : openingHours.trim(),
+      lastSyncAt: currentBranch.lastSyncAt,
+      createdAt: currentBranch.createdAt,
+      updatedAt: now,
+    );
+    final branchInventories = await inventories.fetchBranchInventory(branchId);
+    final auditLog = _buildAuditLog(
+      actorUser: actorUser,
+      action: isActive ? 'branch_updated' : 'branch_deactivated',
+      entityType: 'branch',
+      entityId: updatedBranch.id,
+      entityLabel: updatedBranch.name,
+      message: isActive ? 'Actualizo una sucursal.' : 'Desactivo una sucursal.',
+      metadata: {
+        'code': updatedBranch.code,
+        'city': updatedBranch.city,
+        'managerName': updatedBranch.managerName,
+        'isActive': '${updatedBranch.isActive}',
+        'inventoriesUpdated': '${branchInventories.length}',
+      },
+      branchId: updatedBranch.id,
+      branchName: updatedBranch.name,
+    );
+
+    final batch = _firestore.batch();
+    batch.set(
+      _firestore
+          .collection(FirestoreCollections.branches)
+          .doc(updatedBranch.id),
+      updatedBranch.toFirestore(),
+    );
+    for (final inventory in branchInventories) {
+      final refreshedInventory = inventory.recalculate(
+        branchName: updatedBranch.name,
+        isActive: isActive ? inventory.isActive : false,
+        updatedBy: actorUser.id,
+        updatedAt: now,
+      );
+      batch.set(
+        _inventoriesCollection.doc(refreshedInventory.id),
+        refreshedInventory.toFirestore(),
+      );
+    }
+    batch.set(_auditLogsCollection.doc(auditLog.id), auditLog.toFirestore());
+    await batch.commit();
+    _invalidateProductCaches();
+    _invalidateBranchCatalogCache();
+    return updatedBranch;
+  }
+
+  Future<Category> createCategory({
+    required AppUser actorUser,
+    required String name,
+    String description = '',
+    int? lowStockThreshold,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.manageMasterData);
+
+    final normalizedName = name.trim();
+    if (normalizedName.isEmpty) {
+      throw const InventoryException(
+        'El nombre de la categoria es obligatorio.',
+      );
+    }
+    if (lowStockThreshold != null && lowStockThreshold < 0) {
+      throw const InventoryException(
+        'El umbral de stock bajo no puede ser negativo.',
+      );
+    }
+
+    final categoryId = 'cat_${_normalizeBranchCode(normalizedName)}';
+    final existingCategory = await catalog.fetchCategory(categoryId);
+    if (existingCategory != null) {
+      throw InventoryException(
+        'Ya existe una categoria registrada con el nombre $normalizedName.',
+      );
+    }
+
+    final now = _clock();
+    final category = Category(
+      id: categoryId,
+      name: normalizedName,
+      description: description.trim(),
+      lowStockThreshold: lowStockThreshold,
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    );
+    final auditLog = _buildAuditLog(
+      actorUser: actorUser,
+      action: 'category_created',
+      entityType: 'category',
+      entityId: category.id,
+      entityLabel: category.name,
+      message: 'Registro una nueva categoria.',
+      metadata: {
+        if (category.lowStockThreshold != null)
+          'lowStockThreshold': '${category.lowStockThreshold}',
+      },
+    );
+
+    final batch = _firestore.batch();
+    batch.set(
+      _firestore.collection(FirestoreCollections.categories).doc(category.id),
+      category.toFirestore(),
+    );
+    batch.set(_auditLogsCollection.doc(auditLog.id), auditLog.toFirestore());
+    await batch.commit();
+    _categoryCatalogCache = null;
+    return category;
+  }
+
+  Future<Category> updateCategory({
+    required AppUser actorUser,
+    required String categoryId,
+    required String name,
+    String description = '',
+    int? lowStockThreshold,
+    required bool isActive,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.manageMasterData);
+
+    final currentCategory = await catalog.fetchCategory(categoryId);
+    if (currentCategory == null) {
+      throw const InventoryException('La categoria no existe.');
+    }
+    final normalizedName = name.trim();
+    if (normalizedName.isEmpty) {
+      throw const InventoryException(
+        'El nombre de la categoria es obligatorio.',
+      );
+    }
+    if (lowStockThreshold != null && lowStockThreshold < 0) {
+      throw const InventoryException(
+        'El umbral de stock bajo no puede ser negativo.',
+      );
+    }
+    final existingCategories = await catalog.fetchCategories();
+    final duplicatedName = existingCategories.any(
+      (category) =>
+          category.id != categoryId &&
+          category.name.trim().toLowerCase() == normalizedName.toLowerCase(),
+    );
+    if (duplicatedName) {
+      throw InventoryException(
+        'Ya existe una categoria registrada con el nombre $normalizedName.',
+      );
+    }
+
+    final now = _clock();
+    final updatedCategory = Category(
+      id: currentCategory.id,
+      name: normalizedName,
+      description: description.trim(),
+      lowStockThreshold: lowStockThreshold,
+      isActive: isActive,
+      createdAt: currentCategory.createdAt,
+      updatedAt: now,
+    );
+    final auditLog = _buildAuditLog(
+      actorUser: actorUser,
+      action: isActive ? 'category_updated' : 'category_deactivated',
+      entityType: 'category',
+      entityId: updatedCategory.id,
+      entityLabel: updatedCategory.name,
+      message: isActive
+          ? 'Actualizo una categoria.'
+          : 'Desactivo una categoria.',
+      metadata: {
+        if (updatedCategory.lowStockThreshold != null)
+          'lowStockThreshold': '${updatedCategory.lowStockThreshold}',
+        'isActive': '${updatedCategory.isActive}',
+      },
+    );
+
+    final batch = _firestore.batch();
+    batch.set(
+      _firestore.collection(FirestoreCollections.categories).doc(categoryId),
+      updatedCategory.toFirestore(),
+    );
+    batch.set(_auditLogsCollection.doc(auditLog.id), auditLog.toFirestore());
+    await batch.commit();
+    _categoryCatalogCache = null;
+    return updatedCategory;
+  }
+
+  Future<Product> createProduct({
+    required AppUser actorUser,
+    required String sku,
+    required String barcode,
+    required String name,
+    required String description,
+    required String categoryId,
+    required String brand,
+    String imageUrl = '',
+    required double price,
+    required double cost,
+    String currency = 'USD',
+    List<String> tags = const <String>[],
+    int minimumStock = 0,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.manageMasterData);
+
+    final normalizedSku = sku.trim().toUpperCase();
+    final normalizedName = name.trim();
+    final normalizedBrand = brand.trim();
+    final normalizedCurrency = currency.trim().toUpperCase();
+    final normalizedBarcode = barcode.trim();
+
+    if (normalizedSku.isEmpty || normalizedName.isEmpty) {
+      throw const InventoryException(
+        'El SKU y el nombre del producto son obligatorios.',
+      );
+    }
+    if (categoryId.trim().isEmpty) {
+      throw const InventoryException('Debes seleccionar una categoria.');
+    }
+    if (price <= 0) {
+      throw const InventoryException(
+        'El precio de venta debe ser mayor que cero.',
+      );
+    }
+    if (cost < 0 || cost > price) {
+      throw const InventoryException(
+        'El costo no puede ser negativo ni mayor que el precio de venta.',
+      );
+    }
+    if (minimumStock < 0) {
+      throw const InventoryException(
+        'El minimo operativo no puede ser negativo.',
+      );
+    }
+
+    final category = await catalog.fetchCategory(categoryId);
+    if (category == null || !category.isActive) {
+      throw const InventoryException(
+        'La categoria seleccionada no existe o esta inactiva.',
+      );
+    }
+
+    final existingProducts = await catalog.fetchProducts();
+    final duplicatedSku = existingProducts.any(
+      (product) => product.sku.trim().toUpperCase() == normalizedSku,
+    );
+    if (duplicatedSku) {
+      throw InventoryException(
+        'Ya existe un producto registrado con el SKU $normalizedSku.',
+      );
+    }
+    if (normalizedBarcode.isNotEmpty) {
+      final duplicatedBarcode = existingProducts.any(
+        (product) => product.barcode.trim() == normalizedBarcode,
+      );
+      if (duplicatedBarcode) {
+        throw InventoryException(
+          'Ya existe un producto registrado con el codigo de barras $normalizedBarcode.',
+        );
+      }
+    }
+
+    final now = _clock();
+    final productId = 'prod_${_normalizeBranchCode(normalizedSku)}';
+    final existingProductId = await catalog.fetchProduct(productId);
+    if (existingProductId != null) {
+      throw InventoryException(
+        'Ya existe un producto registrado con el identificador $productId.',
+      );
+    }
+    final product = Product(
+      id: productId,
+      sku: normalizedSku,
+      barcode: normalizedBarcode,
+      name: normalizedName,
+      description: description.trim(),
+      categoryId: category.id,
+      brand: normalizedBrand,
+      imageUrl: imageUrl.trim(),
+      price: price,
+      cost: cost,
+      currency: normalizedCurrency.isEmpty ? 'USD' : normalizedCurrency,
+      tags: tags
+          .map((tag) => tag.trim())
+          .where((tag) => tag.isNotEmpty)
+          .toSet()
+          .toList(growable: false),
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    );
+    final branches = (await catalog.fetchBranches())
+        .where((branch) => branch.isActive)
+        .toList(growable: false);
+    final auditLog = _buildAuditLog(
+      actorUser: actorUser,
+      action: 'product_created',
+      entityType: 'product',
+      entityId: product.id,
+      entityLabel: product.name,
+      message: 'Registro un nuevo producto.',
+      metadata: {
+        'sku': product.sku,
+        'categoryId': product.categoryId,
+        'brand': product.brand,
+        'price': product.price.toStringAsFixed(2),
+        'cost': product.cost.toStringAsFixed(2),
+        'currency': product.currency,
+        'inventoryBranches': '${branches.length}',
+        'minimumStock': '$minimumStock',
+      },
+    );
+
+    final batch = _firestore.batch();
+    batch.set(
+      _firestore.collection(FirestoreCollections.products).doc(product.id),
+      product.toFirestore(),
+    );
+    for (final branch in branches) {
+      final inventory = InventoryItem.create(
+        branchId: branch.id,
+        branchName: branch.name,
+        productId: product.id,
+        productName: product.name,
+        sku: product.sku,
+        stock: 0,
+        reservedStock: 0,
+        incomingStock: 0,
+        minimumStock: minimumStock,
+        updatedBy: actorUser.id,
+        isActive: true,
+        updatedAt: now,
+        lastMovementAt: now,
+        lastSyncAt: null,
+      );
+      batch.set(
+        _inventoriesCollection.doc(inventory.id),
+        inventory.toFirestore(),
+      );
+    }
+    batch.set(_auditLogsCollection.doc(auditLog.id), auditLog.toFirestore());
+    await batch.commit();
+    _invalidateProductCaches();
+    return product;
+  }
+
+  Future<Product> updateProduct({
+    required AppUser actorUser,
+    required String productId,
+    required String sku,
+    required String barcode,
+    required String name,
+    required String description,
+    required String categoryId,
+    required String brand,
+    String imageUrl = '',
+    required double price,
+    required double cost,
+    String currency = 'USD',
+    List<String> tags = const <String>[],
+    int? minimumStock,
+    required bool isActive,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.manageMasterData);
+
+    final currentProduct = await catalog.fetchProduct(productId);
+    if (currentProduct == null) {
+      throw const InventoryException('El producto no existe.');
+    }
+    final normalizedSku = sku.trim().toUpperCase();
+    final normalizedName = name.trim();
+    final normalizedCurrency = currency.trim().toUpperCase();
+    final normalizedBarcode = barcode.trim();
+    if (normalizedSku.isEmpty || normalizedName.isEmpty) {
+      throw const InventoryException(
+        'El SKU y el nombre del producto son obligatorios.',
+      );
+    }
+    if (categoryId.trim().isEmpty) {
+      throw const InventoryException('Debes seleccionar una categoria.');
+    }
+    if (price <= 0) {
+      throw const InventoryException(
+        'El precio de venta debe ser mayor que cero.',
+      );
+    }
+    if (cost < 0 || cost > price) {
+      throw const InventoryException(
+        'El costo no puede ser negativo ni mayor que el precio de venta.',
+      );
+    }
+    if (minimumStock != null && minimumStock < 0) {
+      throw const InventoryException(
+        'El minimo operativo no puede ser negativo.',
+      );
+    }
+
+    final category = await catalog.fetchCategory(categoryId);
+    if (category == null || !category.isActive) {
+      throw const InventoryException(
+        'La categoria seleccionada no existe o esta inactiva.',
+      );
+    }
+    final existingProducts = await catalog.fetchProducts();
+    final duplicatedSku = existingProducts.any(
+      (product) =>
+          product.id != productId &&
+          product.sku.trim().toUpperCase() == normalizedSku,
+    );
+    if (duplicatedSku) {
+      throw InventoryException(
+        'Ya existe un producto registrado con el SKU $normalizedSku.',
+      );
+    }
+    if (normalizedBarcode.isNotEmpty) {
+      final duplicatedBarcode = existingProducts.any(
+        (product) =>
+            product.id != productId &&
+            product.barcode.trim() == normalizedBarcode,
+      );
+      if (duplicatedBarcode) {
+        throw InventoryException(
+          'Ya existe un producto registrado con el codigo de barras $normalizedBarcode.',
+        );
+      }
+    }
+
+    final now = _clock();
+    final updatedProduct = Product(
+      id: currentProduct.id,
+      sku: normalizedSku,
+      barcode: normalizedBarcode,
+      name: normalizedName,
+      description: description.trim(),
+      categoryId: category.id,
+      brand: brand.trim(),
+      imageUrl: imageUrl.trim(),
+      price: price,
+      cost: cost,
+      currency: normalizedCurrency.isEmpty ? 'USD' : normalizedCurrency,
+      tags: tags
+          .map((tag) => tag.trim())
+          .where((tag) => tag.isNotEmpty)
+          .toSet()
+          .toList(growable: false),
+      isActive: isActive,
+      createdAt: currentProduct.createdAt,
+      updatedAt: now,
+    );
+    final productInventories = await inventories.fetchProductInventory(
+      productId,
+    );
+    final auditLog = _buildAuditLog(
+      actorUser: actorUser,
+      action: isActive ? 'product_updated' : 'product_deactivated',
+      entityType: 'product',
+      entityId: updatedProduct.id,
+      entityLabel: updatedProduct.name,
+      message: isActive ? 'Actualizo un producto.' : 'Desactivo un producto.',
+      metadata: {
+        'sku': updatedProduct.sku,
+        'categoryId': updatedProduct.categoryId,
+        'brand': updatedProduct.brand,
+        'price': updatedProduct.price.toStringAsFixed(2),
+        'cost': updatedProduct.cost.toStringAsFixed(2),
+        'currency': updatedProduct.currency,
+        'isActive': '${updatedProduct.isActive}',
+        'inventoriesUpdated': '${productInventories.length}',
+        if (minimumStock != null) 'minimumStock': '$minimumStock',
+      },
+    );
+
+    final batch = _firestore.batch();
+    batch.set(
+      _firestore.collection(FirestoreCollections.products).doc(productId),
+      updatedProduct.toFirestore(),
+    );
+    for (final inventory in productInventories) {
+      final refreshedInventory = inventory.recalculate(
+        productName: updatedProduct.name,
+        sku: updatedProduct.sku,
+        minimumStock: minimumStock ?? inventory.minimumStock,
+        isActive: isActive ? inventory.isActive : false,
+        updatedBy: actorUser.id,
+        updatedAt: now,
+      );
+      batch.set(
+        _inventoriesCollection.doc(refreshedInventory.id),
+        refreshedInventory.toFirestore(),
+      );
+    }
+    batch.set(_auditLogsCollection.doc(auditLog.id), auditLog.toFirestore());
+    await batch.commit();
+    _invalidateProductCaches(productId);
+    return updatedProduct;
+  }
+
   String _buildSearchCacheKey({
     required String branchId,
     required String normalizedQuery,
@@ -2816,6 +3356,7 @@ class InventoryWorkflowService {
               return SalesCatalogItem(product: product, inventory: inventory);
             })
             .whereType<SalesCatalogItem>()
+            .where((item) => item.availableStock > 0)
             .toList(growable: false)
           ..sort((left, right) {
             final availability = right.availableStock.compareTo(
@@ -2949,7 +3490,8 @@ class InventoryWorkflowService {
             entityType: 'sale',
             entityId: sale.id,
             entityLabel: sale.productName,
-            message: 'Registro una venta de',
+            message:
+                'Registro una venta de ${sale.quantity} unidad(es) de ${sale.productName}.',
             metadata: {
               'branchId': sale.branchId,
               'branchName': sale.branchName,
@@ -4526,6 +5068,10 @@ class InventoryWorkflowService {
         );
         final reservationRef = _reservationsCollection.doc();
         final auditLogRef = _auditLogsCollection.doc();
+        final reviewTargets = await _approvalNotificationTargets(
+          branchId: branchId,
+          excludeUserId: actorUser.id,
+        );
 
         final reservation = await _firestore.runTransaction((
           transaction,
@@ -4597,6 +5143,21 @@ class InventoryWorkflowService {
 
           transaction.set(reservationRef, reservation.toFirestore());
           transaction.set(auditLogRef, auditLog.toFirestore());
+          for (final target in reviewTargets) {
+            final notificationRef = _notificationsCollection.doc();
+            final notification = AppNotification(
+              id: notificationRef.id,
+              userId: target.id,
+              title: 'Nueva reserva por aprobar',
+              message:
+                  '${actorUser.fullName} solicito reservar ${reservation.quantity} unidad(es) de ${reservation.productName} en ${reservation.branchName}.',
+              type: 'reservation',
+              referenceId: reservation.id,
+              isRead: false,
+              createdAt: now,
+            );
+            transaction.set(notificationRef, notification.toFirestore());
+          }
 
           return reservation;
         });
@@ -5084,6 +5645,10 @@ class InventoryWorkflowService {
           );
         }
 
+        final reviewTargets = await _approvalNotificationTargets(
+          branchId: fromBranchId,
+          excludeUserId: actorUser.id,
+        );
         final now = _clock();
         final transferRef = _transfersCollection.doc();
         final auditLogRef = _auditLogsCollection.doc();
@@ -5125,6 +5690,21 @@ class InventoryWorkflowService {
         final batch = _firestore.batch();
         batch.set(transferRef, transfer.toFirestore());
         batch.set(auditLogRef, auditLog.toFirestore());
+        for (final target in reviewTargets) {
+          final notificationRef = _notificationsCollection.doc();
+          final notification = AppNotification(
+            id: notificationRef.id,
+            userId: target.id,
+            title: 'Nuevo traslado por aprobar',
+            message:
+                '${actorUser.fullName} solicito ${transfer.quantity} unidad(es) de ${transfer.productName} desde ${transfer.fromBranchName} hacia ${transfer.toBranchName}.',
+            type: 'transfer',
+            referenceId: transfer.id,
+            isRead: false,
+            createdAt: now,
+          );
+          batch.set(notificationRef, notification.toFirestore());
+        }
         await batch.commit();
         _invalidateProductCaches(product.id);
         return transfer;
@@ -5779,6 +6359,32 @@ class InventoryWorkflowService {
 
   String _stockAlertReadStateId(String userId, String alertId) =>
       '${userId}_$alertId';
+
+  Future<List<AppUser>> _approvalNotificationTargets({
+    required String branchId,
+    String? excludeUserId,
+  }) async {
+    final allUsers = await users.fetchUsers();
+    final targets =
+        allUsers
+            .where(
+              (user) =>
+                  user.isActive &&
+                  user.id != excludeUserId &&
+                  (user.role == UserRole.admin ||
+                      (user.role == UserRole.supervisor &&
+                          user.branchId == branchId)),
+            )
+            .toList(growable: false)
+          ..sort((left, right) {
+            final roleComparison = left.role.index.compareTo(right.role.index);
+            if (roleComparison != 0) {
+              return roleComparison;
+            }
+            return left.fullName.compareTo(right.fullName);
+          });
+    return targets;
+  }
 
   String _normalizeSyncType(String value) {
     final normalized = value

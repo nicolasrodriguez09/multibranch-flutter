@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/app_theme.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
 import 'branch_panel_drawer.dart';
@@ -124,6 +123,7 @@ class _SalesReportHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final currency = _reportCurrency(report);
     return _SalesPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -149,7 +149,7 @@ class _SalesReportHero extends StatelessWidget {
               Expanded(
                 child: _MetricBox(
                   label: 'Ingresos',
-                  value: _formatMoney(report.totalRevenue, 'USD'),
+                  value: _formatMoney(report.totalRevenue, currency),
                 ),
               ),
               const SizedBox(width: 10),
@@ -206,6 +206,7 @@ class _DailySalesPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final currency = _reportCurrency(report);
     return _SalesPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -228,7 +229,7 @@ class _DailySalesPanel extends StatelessWidget {
             ...report.dailyMetrics.map(
               (metric) => Padding(
                 padding: const EdgeInsets.only(bottom: 10),
-                child: _DailySaleRow(metric: metric),
+                child: _DailySaleRow(metric: metric, currency: currency),
               ),
             ),
         ],
@@ -276,9 +277,10 @@ class _SalesRecordsPanel extends StatelessWidget {
 }
 
 class _DailySaleRow extends StatelessWidget {
-  const _DailySaleRow({required this.metric});
+  const _DailySaleRow({required this.metric, required this.currency});
 
   final DailySalesMetric metric;
+  final String currency;
 
   @override
   Widget build(BuildContext context) {
@@ -294,7 +296,7 @@ class _DailySaleRow extends StatelessWidget {
           Expanded(child: Text(_formatDate(metric.day))),
           Text('${metric.quantity} uds'),
           const SizedBox(width: 16),
-          Text(_formatMoney(metric.total, 'USD')),
+          Text(_formatMoney(metric.total, currency)),
         ],
       ),
     );
@@ -423,6 +425,14 @@ String _filterLabel(_SalesDateFilter filter) {
 
 String _formatMoney(double value, String currency) {
   return '$currency ${value.toStringAsFixed(2)}';
+}
+
+String _reportCurrency(SalesReportData report) {
+  if (report.sales.isEmpty) {
+    return 'USD';
+  }
+  final currencies = report.sales.map((sale) => sale.currency).toSet();
+  return currencies.length == 1 ? currencies.first : 'Mixto';
 }
 
 String _formatDate(DateTime value) {

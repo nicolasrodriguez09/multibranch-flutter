@@ -47,6 +47,66 @@ void main() {
     },
   );
 
+  test(
+    'seller can register a sale and supervisor reporting keeps traceability',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final seller = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.branchSeller,
+      );
+
+      final catalog = await service.fetchSalesCatalog(actorUser: seller);
+      expect(
+        catalog.any((item) => item.product.id == DemoIds.laptopProduct),
+        isTrue,
+      );
+      expect(catalog.every((item) => item.availableStock > 0), isTrue);
+
+      final beforeInventory = await service.inventories.fetchInventory(
+        DemoIds.branchCenter,
+        DemoIds.laptopProduct,
+      );
+      expect(beforeInventory, isNotNull);
+
+      final sale = await service.registerSale(
+        actorUser: seller,
+        productId: DemoIds.laptopProduct,
+        quantity: 2,
+        unitPrice: 799.99,
+        paymentMethod: SalePaymentMethod.cash,
+        customerName: 'Cliente mostrador',
+        customerPhone: '3001234567',
+        notes: 'Venta de prueba',
+      );
+
+      final afterInventory = await service.inventories.fetchInventory(
+        DemoIds.branchCenter,
+        DemoIds.laptopProduct,
+      );
+      final saleDocs = await firestore
+          .collection('sales')
+          .where('sellerId', isEqualTo: seller.id)
+          .get();
+      final auditLogs = await firestore
+          .collection('audit_logs')
+          .where('action', isEqualTo: 'sale_registered')
+          .get();
+      final report = service.buildSalesReport([sale]);
+
+      expect(sale.branchId, DemoIds.branchCenter);
+      expect(sale.sellerName, seller.fullName);
+      expect(sale.quantity, 2);
+      expect(sale.totalPrice, closeTo(1599.98, 0.001));
+      expect(afterInventory!.stock, beforeInventory!.stock - 2);
+      expect(afterInventory.availableStock, beforeInventory.availableStock - 2);
+      expect(saleDocs.docs, hasLength(1));
+      expect(auditLogs.docs, hasLength(1));
+      expect(report.totalTransactions, 1);
+      expect(report.totalUnits, 2);
+      expect(report.dailyMetrics.single.quantity, 2);
+    },
+  );
+
   test('admin can create a branch and the event is audited', () async {
     final admin = sampleData.users.first;
 
@@ -74,6 +134,140 @@ void main() {
     expect(auditLogs.docs, hasLength(1));
     expect(auditLogs.docs.first.data()['entityId'], branch.id);
     expect(auditLogs.docs.first.data()['actorUserId'], admin.id);
+  });
+
+  test(
+    'admin can create catalog categories and products for all branches',
+    () async {
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final admin = sampleData.users.first;
+
+      final category = await service.createCategory(
+        actorUser: admin,
+        name: 'Accesorios premium',
+        description: 'Accesorios de alto valor',
+        lowStockThreshold: 4,
+      );
+      final product = await service.createProduct(
+        actorUser: admin,
+        sku: 'ACC-999',
+        barcode: '7700000009999',
+        name: 'Dock USB-C Pro',
+        description: 'Dock para estaciones de trabajo',
+        categoryId: category.id,
+        brand: 'Acme',
+        price: 149.99,
+        cost: 80,
+        currency: 'USD',
+        tags: const ['dock', 'usb-c'],
+        minimumStock: 3,
+      );
+
+      final storedProduct = await service.catalog.fetchProduct(product.id);
+      final centerInventory = await service.inventories.fetchInventory(
+        DemoIds.branchCenter,
+        product.id,
+      );
+      final northInventory = await service.inventories.fetchInventory(
+        DemoIds.branchNorth,
+        product.id,
+      );
+      final auditLogs = await firestore
+          .collection('audit_logs')
+          .where('action', isEqualTo: 'product_created')
+          .get();
+
+      expect(category.lowStockThreshold, 4);
+      expect(storedProduct, isNotNull);
+      expect(storedProduct!.sku, 'ACC-999');
+      expect(centerInventory, isNotNull);
+      expect(centerInventory!.stock, 0);
+      expect(centerInventory.minimumStock, 3);
+      expect(northInventory, isNotNull);
+      expect(northInventory!.minimumStock, 3);
+      expect(auditLogs.docs, hasLength(1));
+      expect(auditLogs.docs.first.data()['actorUserId'], admin.id);
+    },
+  );
+
+  test('admin can maintain branches, categories and products', () async {
+    await service.seedMasterData(actorUser: sampleData.users.first);
+    final admin = sampleData.users.first;
+
+    final updatedBranch = await service.updateBranch(
+      actorUser: admin,
+      branchId: DemoIds.branchNorth,
+      name: 'Sucursal Norte Renovada',
+      address: 'Av. Norte 123',
+      city: 'Bogota',
+      phone: '3010000000',
+      email: 'norte@empresa.com',
+      managerName: 'Maria Norte',
+      openingHours: '09:00-19:00',
+      latitude: 4.7,
+      longitude: -74.1,
+      isActive: false,
+    );
+    final branchInventory = await service.inventories.fetchInventory(
+      DemoIds.branchNorth,
+      DemoIds.laptopProduct,
+    );
+
+    expect(updatedBranch.isActive, isFalse);
+    expect(branchInventory!.branchName, 'Sucursal Norte Renovada');
+    expect(branchInventory.isActive, isFalse);
+
+    final updatedCategory = await service.updateCategory(
+      actorUser: admin,
+      categoryId: DemoIds.laptopsCategory,
+      name: 'Computadores y portatiles',
+      description: 'Equipos de computo',
+      lowStockThreshold: 6,
+      isActive: true,
+    );
+
+    expect(updatedCategory.name, 'Computadores y portatiles');
+    expect(updatedCategory.lowStockThreshold, 6);
+
+    final updatedProduct = await service.updateProduct(
+      actorUser: admin,
+      productId: DemoIds.laptopProduct,
+      sku: 'LAP-001-NEW',
+      barcode: '7700000000011',
+      name: 'Laptop HP 15 Nueva',
+      description: 'Laptop actualizada',
+      categoryId: DemoIds.laptopsCategory,
+      brand: 'HP',
+      price: 829.99,
+      cost: 610,
+      currency: 'USD',
+      tags: const ['laptop', 'hp'],
+      minimumStock: 5,
+      isActive: false,
+    );
+    final centerInventory = await service.inventories.fetchInventory(
+      DemoIds.branchCenter,
+      DemoIds.laptopProduct,
+    );
+    final auditLogs = await firestore
+        .collection('audit_logs')
+        .where(
+          'action',
+          whereIn: [
+            'branch_deactivated',
+            'category_updated',
+            'product_deactivated',
+          ],
+        )
+        .get();
+
+    expect(updatedProduct.isActive, isFalse);
+    expect(updatedProduct.sku, 'LAP-001-NEW');
+    expect(centerInventory!.productName, 'Laptop HP 15 Nueva');
+    expect(centerInventory.sku, 'LAP-001-NEW');
+    expect(centerInventory.minimumStock, 5);
+    expect(centerInventory.isActive, isFalse);
+    expect(auditLogs.docs, hasLength(3));
   });
 
   test(
@@ -906,6 +1100,10 @@ void main() {
           .collection('audit_logs')
           .where('action', isEqualTo: 'reservation_created')
           .get();
+      final supervisorNotifications = await firestore
+          .collection('notifications')
+          .where('userId', isEqualTo: supervisor.id)
+          .get();
 
       expect(reservation.branchId, DemoIds.branchNorth);
       expect(reservation.reservedBy, seller.id);
@@ -917,6 +1115,11 @@ void main() {
       expect(
         auditLogs.docs.first.data()['metadata']['requestingBranchId'],
         DemoIds.branchCenter,
+      );
+      expect(supervisorNotifications.docs, hasLength(1));
+      expect(
+        supervisorNotifications.docs.first.data()['title'],
+        'Nueva reserva por aprobar',
       );
 
       final approvedReservation = await service.approveReservation(
@@ -1069,6 +1272,9 @@ void main() {
     'seller requests a transfer into own branch and source stock is validated',
     () async {
       await service.seedMasterData(actorUser: sampleData.users.first);
+      final supervisor = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.secondBranchSeller,
+      );
       final seller = sampleData.users.firstWhere(
         (user) => user.id == DemoIds.branchSeller,
       );
@@ -1086,6 +1292,15 @@ void main() {
       expect(transfer.fromBranchId, DemoIds.branchNorth);
       expect(transfer.toBranchId, DemoIds.branchCenter);
       expect(transfer.status, TransferStatus.pending);
+      final supervisorNotifications = await firestore
+          .collection('notifications')
+          .where('userId', isEqualTo: supervisor.id)
+          .get();
+      expect(supervisorNotifications.docs, hasLength(1));
+      expect(
+        supervisorNotifications.docs.first.data()['title'],
+        'Nuevo traslado por aprobar',
+      );
 
       expect(
         () => service.requestTransfer(

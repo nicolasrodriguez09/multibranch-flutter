@@ -10,6 +10,7 @@ import '../domain/models.dart';
 import '../domain/role_permissions.dart';
 import 'approval_requests_page.dart';
 import 'auto_refresh_state_mixin.dart';
+import 'admin_catalog_page.dart';
 import 'branch_directory_page.dart';
 import 'create_branch_dialog.dart';
 import 'notifications_page.dart';
@@ -151,6 +152,17 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
       MaterialPageRoute<void>(
         builder: (context) => EmployeeManagementPage(
           authService: widget.authService,
+          currentUser: widget.currentUser,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openAdminCatalogPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => AdminCatalogPage(
+          service: widget.service,
           currentUser: widget.currentUser,
         ),
       ),
@@ -507,6 +519,49 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         icon: Icons.fact_check_rounded,
         accent: AppPalette.amber,
         onPressed: _openApprovalRequestsPage,
+      ),
+      const SizedBox(height: 18),
+      const _AdminSectionHeader(title: 'Gobierno administrativo'),
+      const SizedBox(height: 12),
+      _DashboardGrid(
+        children: [
+          _WorkflowActionCard(
+            title: 'Catalogo maestro',
+            subtitle:
+                'Crea categorias y productos base para que todas las sedes operen sobre el mismo inventario.',
+            buttonLabel: 'Gestionar catalogo',
+            icon: Icons.inventory_2_rounded,
+            accent: AppPalette.cyan,
+            onPressed: _openAdminCatalogPage,
+          ),
+          _WorkflowActionCard(
+            title: 'Empleados y roles',
+            subtitle:
+                'Alta y mantenimiento de usuarios seller, supervisor y administrador.',
+            buttonLabel: 'Gestionar empleados',
+            icon: Icons.manage_accounts_rounded,
+            accent: AppPalette.mint,
+            onPressed: _openEmployeeManagementPage,
+          ),
+          _WorkflowActionCard(
+            title: 'Sucursales',
+            subtitle:
+                'Consulta la red completa y registra nuevas sedes cuando el negocio crezca.',
+            buttonLabel: 'Ver sucursales',
+            icon: Icons.store_mall_directory_rounded,
+            accent: AppPalette.amber,
+            onPressed: _openBranchDirectoryPage,
+          ),
+          _WorkflowActionCard(
+            title: 'Ventas globales',
+            subtitle:
+                'Revisa ventas por dia, vendedor, sede, producto, cantidad y valor.',
+            buttonLabel: 'Ver ventas',
+            icon: Icons.receipt_long_rounded,
+            accent: AppPalette.blueSoft,
+            onPressed: _openSalesReportPage,
+          ),
+        ],
       ),
       const SizedBox(height: 18),
       _OperationalMetricsSection(
@@ -896,6 +951,12 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         onCreateBranch: _isCreatingBranch
             ? null
             : () => _runDrawerAction(_openCreateBranchDialog),
+        onOpenCatalog: () => _runDrawerAction(_openAdminCatalogPage),
+        onOpenBranches: () => _runDrawerAction(_openBranchDirectoryPage),
+        onOpenInventoryAdjustment: () =>
+            _runDrawerAction(_openInventoryAdjustmentPage),
+        onOpenSalesReport: () => _runDrawerAction(_openSalesReportPage),
+        onOpenRequestTracking: () => _runDrawerAction(_openRequestTrackingPage),
         onManageEmployees: () => _runDrawerAction(_openEmployeeManagementPage),
         onOpenTraceability: () => _runDrawerAction(_openAdminTraceabilityPage),
         onSignOut: widget.authService.signOut,
@@ -4722,6 +4783,11 @@ class _AdminDrawer extends StatelessWidget {
     required this.onOpenApprovalRequests,
     required this.onCreateBaseData,
     required this.onCreateBranch,
+    required this.onOpenCatalog,
+    required this.onOpenBranches,
+    required this.onOpenInventoryAdjustment,
+    required this.onOpenSalesReport,
+    required this.onOpenRequestTracking,
     required this.onManageEmployees,
     required this.onOpenTraceability,
     required this.onSignOut,
@@ -4736,6 +4802,11 @@ class _AdminDrawer extends StatelessWidget {
   final VoidCallback onOpenApprovalRequests;
   final VoidCallback? onCreateBaseData;
   final VoidCallback? onCreateBranch;
+  final VoidCallback? onOpenCatalog;
+  final VoidCallback? onOpenBranches;
+  final VoidCallback? onOpenInventoryAdjustment;
+  final VoidCallback? onOpenSalesReport;
+  final VoidCallback? onOpenRequestTracking;
   final VoidCallback? onManageEmployees;
   final VoidCallback? onOpenTraceability;
   final VoidCallback onSignOut;
@@ -4778,6 +4849,12 @@ class _AdminDrawer extends StatelessWidget {
                       ),
                       const SizedBox(height: 10),
                       _AdminDrawerTile(
+                        icon: Icons.store_mall_directory_rounded,
+                        title: 'Sucursales',
+                        onTap: onOpenBranches,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
                         icon: Icons.notifications_rounded,
                         title: 'Notificaciones',
                         onTap: onOpenNotifications,
@@ -4800,6 +4877,18 @@ class _AdminDrawer extends StatelessWidget {
                         title: 'Bandeja de aprobaciones',
                         onTap: onOpenApprovalRequests,
                       ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.receipt_long_rounded,
+                        title: 'Ventas globales',
+                        onTap: onOpenSalesReport,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.track_changes_rounded,
+                        title: 'Estado de solicitudes',
+                        onTap: onOpenRequestTracking,
+                      ),
                       const SizedBox(height: 18),
                       Text(
                         'Administracion',
@@ -4810,9 +4899,21 @@ class _AdminDrawer extends StatelessWidget {
                       ),
                       const SizedBox(height: 10),
                       _AdminDrawerTile(
+                        icon: Icons.inventory_2_rounded,
+                        title: 'Catalogo maestro',
+                        onTap: onOpenCatalog,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
                         icon: Icons.person_add_alt_1_rounded,
                         title: 'Gestion de empleados',
                         onTap: onManageEmployees,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.tune_rounded,
+                        title: 'Ajuste global de inventario',
+                        onTap: onOpenInventoryAdjustment,
                       ),
                       const SizedBox(height: 10),
                       _AdminDrawerTile(

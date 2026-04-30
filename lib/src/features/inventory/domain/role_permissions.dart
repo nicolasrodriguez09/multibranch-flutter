@@ -22,6 +22,7 @@ enum AppPermission {
   manageInventory('Ajustar inventario'),
   manageBranches('Gestionar sucursales'),
   viewMasterData('Ver catalogo maestro'),
+  manageMasterData('Gestionar catalogo maestro'),
   manageEmployees('Gestionar empleados'),
   seedMasterData('Inicializar la base maestra'),
   viewUsers('Ver usuarios'),
@@ -44,7 +45,7 @@ enum AppModule {
   transfers('Traslados', AppPermission.viewBranchTransfers),
   approvals('Aprobaciones', AppPermission.approveTransfer),
   metrics('Metricas', AppPermission.viewOperationalMetrics),
-  masterData('Base maestra', AppPermission.viewMasterData),
+  masterData('Base maestra', AppPermission.manageMasterData),
   employees('Empleados', AppPermission.manageEmployees),
   users('Usuarios', AppPermission.viewUsers),
   permissionMatrix('Permisos', AppPermission.viewPermissionMatrix);

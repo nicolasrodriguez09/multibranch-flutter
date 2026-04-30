@@ -306,7 +306,8 @@ service cloud.firestore {
         && request.resource.data.quantity > 0
         && request.resource.data.unitPrice is number
         && request.resource.data.unitPrice > 0
-        && request.resource.data.totalPrice == request.resource.data.unitPrice * request.resource.data.quantity;
+        && request.resource.data.totalPrice is number
+        && request.resource.data.totalPrice > 0;
       allow update, delete: if isAdmin();
     }
 

@@ -26,6 +26,7 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage> {
   final TextEditingController _searchController = TextEditingController();
   String _query = '';
   String? _busyInventoryId;
+  String? _selectedBranchId;
 
   @override
   void initState() {
@@ -62,7 +63,7 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage> {
     try {
       await widget.service.setInventoryStock(
         actorUser: widget.currentUser,
-        branchId: widget.currentUser.branchId,
+        branchId: item.branchId,
         productId: item.productId,
         stock: request.stock,
         minimumStock: request.minimumStock,
@@ -104,6 +105,7 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage> {
 
   @override
   Widget build(BuildContext context) {
+    final effectiveBranchId = _selectedBranchId ?? widget.currentUser.branchId;
     if (!widget.currentUser.can(AppPermission.manageInventory)) {
       return Scaffold(
         drawer: BranchPanelDrawer(
@@ -152,7 +154,7 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage> {
           top: false,
           child: StreamBuilder<List<InventoryItem>>(
             stream: widget.service.inventories.watchBranchInventory(
-              widget.currentUser.branchId,
+              effectiveBranchId,
             ),
             builder: (context, snapshot) {
               if (snapshot.hasError) {
@@ -181,12 +183,28 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage> {
                 children: [
                   _InventoryAdjustmentHeader(
                     currentUser: widget.currentUser,
+                    branchId: effectiveBranchId,
                     totalItems: allItems.length,
                     lowStockItems: allItems
                         .where((item) => item.isLowStock)
                         .length,
                   ),
                   const SizedBox(height: 16),
+                  if (widget.currentUser.role == UserRole.admin) ...[
+                    _AdminBranchSelector(
+                      service: widget.service,
+                      selectedBranchId: effectiveBranchId,
+                      onChanged: (value) {
+                        if (value == null || value == effectiveBranchId) {
+                          return;
+                        }
+                        setState(() {
+                          _selectedBranchId = value;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                   TextField(
                     controller: _searchController,
                     decoration: const InputDecoration(
@@ -233,14 +251,60 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage> {
   }
 }
 
+class _AdminBranchSelector extends StatelessWidget {
+  const _AdminBranchSelector({
+    required this.service,
+    required this.selectedBranchId,
+    required this.onChanged,
+  });
+
+  final InventoryWorkflowService service;
+  final String selectedBranchId;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<Branch>>(
+      stream: service.catalog.watchBranches(),
+      builder: (context, snapshot) {
+        final branches = snapshot.data ?? const <Branch>[];
+        if (branches.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        final hasSelected = branches.any(
+          (branch) => branch.id == selectedBranchId,
+        );
+        return DropdownButtonFormField<String>(
+          initialValue: hasSelected ? selectedBranchId : branches.first.id,
+          decoration: const InputDecoration(
+            labelText: 'Sucursal a ajustar',
+            prefixIcon: Icon(Icons.store_mall_directory_rounded),
+          ),
+          items: branches
+              .map(
+                (branch) => DropdownMenuItem<String>(
+                  value: branch.id,
+                  child: Text('${branch.name} | ${branch.code}'),
+                ),
+              )
+              .toList(growable: false),
+          onChanged: onChanged,
+        );
+      },
+    );
+  }
+}
+
 class _InventoryAdjustmentHeader extends StatelessWidget {
   const _InventoryAdjustmentHeader({
     required this.currentUser,
+    required this.branchId,
     required this.totalItems,
     required this.lowStockItems,
   });
 
   final AppUser currentUser;
+  final String branchId;
   final int totalItems;
   final int lowStockItems;
 
@@ -269,7 +333,9 @@ class _InventoryAdjustmentHeader extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Ajusta stock fisico y minimos operativos de ${currentUser.branchId.toUpperCase()} sin salir del panel de sucursal.',
+            currentUser.role == UserRole.admin
+                ? 'Ajusta stock fisico y minimos operativos de cualquier sucursal.'
+                : 'Ajusta stock fisico y minimos operativos de ${branchId.toUpperCase()} sin salir del panel de sucursal.',
             style: Theme.of(
               context,
             ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
@@ -279,7 +345,7 @@ class _InventoryAdjustmentHeader extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
-              _InventoryInfoPill(label: 'Sucursal ${currentUser.branchId}'),
+              _InventoryInfoPill(label: 'Sucursal $branchId'),
               _InventoryInfoPill(label: '$totalItems productos'),
               _InventoryInfoPill(label: '$lowStockItems con stock bajo'),
             ],

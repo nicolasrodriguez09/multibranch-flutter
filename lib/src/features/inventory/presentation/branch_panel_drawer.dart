@@ -122,11 +122,13 @@ class BranchPanelDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isAdmin = currentUser.role == UserRole.admin;
     final canApprove =
         currentUser.can(AppPermission.approveTransfer) ||
         currentUser.can(AppPermission.approveReservation);
     final canAdjust = currentUser.can(AppPermission.manageInventory);
-    final canRegisterSale = currentUser.can(AppPermission.registerSale);
+    final canRegisterSale =
+        !isAdmin && currentUser.can(AppPermission.registerSale);
     final canViewSales = currentUser.can(AppPermission.viewBranchSales);
 
     return Drawer(
@@ -138,9 +140,11 @@ class BranchPanelDrawer extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                currentUser.role == UserRole.seller
-                    ? 'Menu de ventas'
-                    : 'Menu de sucursal',
+                switch (currentUser.role) {
+                  UserRole.admin => 'Menu administrativo',
+                  UserRole.seller => 'Menu de ventas',
+                  UserRole.supervisor => 'Menu de sucursal',
+                },
                 style: Theme.of(
                   context,
                 ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
@@ -199,7 +203,9 @@ class BranchPanelDrawer extends StatelessWidget {
                         const SizedBox(height: 10),
                         _DrawerTile(
                           icon: Icons.receipt_long_rounded,
-                          title: 'Ventas de sucursal',
+                          title: isAdmin
+                              ? 'Ventas globales'
+                              : 'Ventas de sucursal',
                           selected:
                               currentDestination ==
                               BranchPanelDestination.salesReport,
@@ -251,34 +257,36 @@ class BranchPanelDrawer extends StatelessWidget {
                         const SizedBox(height: 18),
                         _DrawerSectionLabel(text: 'Conseguir producto'),
                       ],
-                      const SizedBox(height: 10),
-                      _DrawerTile(
-                        icon: Icons.bookmark_add_rounded,
-                        title: currentUser.role == UserRole.seller
-                            ? 'Apartar en otra sede'
-                            : 'Reservar producto',
-                        selected:
-                            currentDestination ==
+                      if (!isAdmin) ...[
+                        const SizedBox(height: 10),
+                        _DrawerTile(
+                          icon: Icons.bookmark_add_rounded,
+                          title: currentUser.role == UserRole.seller
+                              ? 'Apartar en otra sede'
+                              : 'Reservar producto',
+                          selected:
+                              currentDestination ==
+                              BranchPanelDestination.reservationRequest,
+                          onTap: () => _open(
+                            context,
                             BranchPanelDestination.reservationRequest,
-                        onTap: () => _open(
-                          context,
-                          BranchPanelDestination.reservationRequest,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                      _DrawerTile(
-                        icon: Icons.local_shipping_rounded,
-                        title: currentUser.role == UserRole.seller
-                            ? 'Traer a mi sede'
-                            : 'Solicitar traslado',
-                        selected:
-                            currentDestination ==
+                        const SizedBox(height: 10),
+                        _DrawerTile(
+                          icon: Icons.local_shipping_rounded,
+                          title: currentUser.role == UserRole.seller
+                              ? 'Traer a mi sede'
+                              : 'Solicitar traslado',
+                          selected:
+                              currentDestination ==
+                              BranchPanelDestination.transferRequest,
+                          onTap: () => _open(
+                            context,
                             BranchPanelDestination.transferRequest,
-                        onTap: () => _open(
-                          context,
-                          BranchPanelDestination.transferRequest,
+                          ),
                         ),
-                      ),
+                      ],
                       const SizedBox(height: 18),
                       _DrawerSectionLabel(text: 'Monitoreo'),
                       const SizedBox(height: 10),

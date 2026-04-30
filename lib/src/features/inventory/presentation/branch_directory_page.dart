@@ -5,9 +5,11 @@ import 'package:flutter/material.dart';
 import '../../../core/app_theme.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
+import '../domain/role_permissions.dart';
 import 'auto_refresh_state_mixin.dart';
 import 'branch_panel_drawer.dart';
 import 'branch_location_resolver.dart';
+import 'create_branch_dialog.dart';
 
 enum _BranchAvailabilityFilter { all, withStock, withoutStock }
 
@@ -155,6 +157,76 @@ class _BranchDirectoryPageState extends State<BranchDirectoryPage>
   Future<void> _refresh() async {
     await _refreshDirectory(forceRefresh: true, showFeedback: true);
     await _resolveDeviceLocation();
+  }
+
+  Future<void> _editBranch(Branch branch) async {
+    final request = await showDialog<CreateBranchRequest>(
+      context: context,
+      builder: (context) => CreateBranchDialog(initialBranch: branch),
+    );
+    if (request == null) {
+      return;
+    }
+
+    try {
+      await widget.service.updateBranch(
+        actorUser: widget.currentUser,
+        branchId: branch.id,
+        name: request.name,
+        address: request.address,
+        city: request.city,
+        phone: request.phone,
+        email: request.email,
+        managerName: request.managerName,
+        openingHours: request.openingHours,
+        latitude: request.latitude,
+        longitude: request.longitude,
+        isActive: branch.isActive,
+      );
+      if (!mounted) {
+        return;
+      }
+      _showStatusMessage('Sucursal actualizada: ${request.name}.');
+      await _refreshDirectory(forceRefresh: true, showFeedback: false);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showStatusMessage('No se pudo actualizar la sucursal: $error');
+    }
+  }
+
+  Future<void> _toggleBranch(Branch branch) async {
+    try {
+      final updatedBranch = await widget.service.updateBranch(
+        actorUser: widget.currentUser,
+        branchId: branch.id,
+        name: branch.name,
+        address: branch.address,
+        city: branch.city,
+        phone: branch.phone,
+        email: branch.email,
+        managerName: branch.managerName,
+        openingHours: branch.openingHours,
+        latitude: branch.location.lat,
+        longitude: branch.location.lng,
+        isActive: !branch.isActive,
+      );
+      if (!mounted) {
+        return;
+      }
+      _showStatusMessage(
+        updatedBranch.isActive
+            ? 'Sucursal reactivada: ${updatedBranch.name}.'
+            : 'Sucursal desactivada: ${updatedBranch.name}.',
+      );
+      await _refreshDirectory(forceRefresh: true, showFeedback: false);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showStatusMessage('No se pudo cambiar el estado: $error');
+    }
   }
 
   void _showStatusMessage(String message) {
@@ -389,6 +461,11 @@ class _BranchDirectoryPageState extends State<BranchDirectoryPage>
                         currentBranchId: data.currentBranch?.id,
                         selectedProduct: data.selectedProduct,
                         distanceReferenceLabel: _distanceReferenceLabel(data),
+                        canManage: widget.currentUser.can(
+                          AppPermission.manageBranches,
+                        ),
+                        onEdit: () => _editBranch(entry.entry.branch),
+                        onToggle: () => _toggleBranch(entry.entry.branch),
                       ),
                     ),
                   ),
@@ -744,12 +821,18 @@ class _BranchCard extends StatelessWidget {
     required this.currentBranchId,
     required this.selectedProduct,
     required this.distanceReferenceLabel,
+    required this.canManage,
+    required this.onEdit,
+    required this.onToggle,
   });
 
   final _ResolvedBranchEntry resolvedEntry;
   final String? currentBranchId;
   final Product? selectedProduct;
   final String distanceReferenceLabel;
+  final bool canManage;
+  final VoidCallback onEdit;
+  final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -797,6 +880,9 @@ class _BranchCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
+              if (!entry.branch.isActive)
+                const _StatusTag(label: 'Inactiva', color: AppPalette.danger),
+              if (!entry.branch.isActive) const SizedBox(width: 8),
               if (isCurrentBranch)
                 const _StatusTag(label: 'Tu sucursal', color: AppPalette.blue),
             ],
@@ -854,6 +940,31 @@ class _BranchCard extends StatelessWidget {
                 _StockChip(
                   label: 'En transito',
                   value: '${entry.incomingStock}',
+                ),
+              ],
+            ),
+          ],
+          if (canManage) ...[
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: onEdit,
+                  icon: const Icon(Icons.edit_rounded),
+                  label: const Text('Editar'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: onToggle,
+                  icon: Icon(
+                    entry.branch.isActive
+                        ? Icons.block_rounded
+                        : Icons.check_circle_rounded,
+                  ),
+                  label: Text(
+                    entry.branch.isActive ? 'Desactivar' : 'Reactivar',
+                  ),
                 ),
               ],
             ),

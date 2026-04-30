@@ -79,7 +79,7 @@ class _SalesRegisterPageState extends State<SalesRegisterPage> {
     });
   }
 
-  Future<void> _submit(List<SalesCatalogItem> catalog) async {
+  Future<void> _submit() async {
     final form = _formKey.currentState;
     if (form == null || !form.validate()) {
       return;
@@ -239,7 +239,7 @@ class _SalesRegisterPageState extends State<SalesRegisterPage> {
                           });
                         }
                       },
-                      onSubmit: () => _submit(catalog),
+                      onSubmit: _submit,
                     ),
                     const SizedBox(height: 16),
                     _RecentSalesPanel(
