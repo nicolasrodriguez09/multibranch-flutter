@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/app_theme.dart';
+import '../../auth/application/auth_service.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
 import 'branch_panel_drawer.dart';
@@ -10,10 +11,12 @@ class ApprovalRequestsPage extends StatefulWidget {
     super.key,
     required this.service,
     required this.currentUser,
+    this.authService,
   });
 
   final InventoryWorkflowService service;
   final AppUser currentUser;
+  final AuthService? authService;
 
   @override
   State<ApprovalRequestsPage> createState() => _ApprovalRequestsPageState();
@@ -180,6 +183,7 @@ class _ApprovalRequestsPageState extends State<ApprovalRequestsPage> {
         service: widget.service,
         currentUser: widget.currentUser,
         currentDestination: BranchPanelDestination.approvals,
+        authService: widget.authService,
       ),
       appBar: AppBar(
         title: const Text('Bandeja de aprobaciones'),
@@ -192,7 +196,7 @@ class _ApprovalRequestsPageState extends State<ApprovalRequestsPage> {
         ],
       ),
       body: Container(
-        color: const Color(0xFF08172D),
+        color: const Color(0xFF08090C),
         child: SafeArea(
           top: false,
           child: RefreshIndicator(
@@ -345,9 +349,9 @@ class _ApprovalHeader extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -448,9 +452,9 @@ class _ApprovalSectionCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -510,7 +514,7 @@ class _PendingReservationCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.04),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -614,7 +618,7 @@ class _PendingTransferCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.04),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -736,7 +740,7 @@ class _DecisionDialogState extends State<_DecisionDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: const Color(0xFF102540),
+      backgroundColor: const Color(0xFF17191F),
       title: Text(widget.title),
       content: SizedBox(
         width: 440,
@@ -793,9 +797,9 @@ class _ApprovalErrorCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -831,7 +835,7 @@ class _ApprovalInfoPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Text(
         label,

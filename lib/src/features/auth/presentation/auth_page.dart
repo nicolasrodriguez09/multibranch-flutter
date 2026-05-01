@@ -21,15 +21,11 @@ class AuthPage extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF07162C),
+      backgroundColor: const Color(0xFF08090C),
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [
-              Color(0xFF06152A),
-              Color(0xFF0A2A52),
-              Color(0xFF0B2141),
-            ],
+            colors: [Color(0xFF050506), Color(0xFF101116), Color(0xFF17191F)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -38,20 +34,23 @@ class AuthPage extends StatelessWidget {
           children: [
             const _AmbientGlow(
               alignment: Alignment.topCenter,
-              color: Color(0x552C7BFF),
+              color: Color(0x55FF2636),
               size: 320,
               offsetY: -120,
             ),
             const _AmbientGlow(
               alignment: Alignment.centerRight,
-              color: Color(0x44FF8B2C),
+              color: Color(0x44FF2636),
               size: 240,
               offsetX: 110,
             ),
             SafeArea(
               child: Center(
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 24,
+                  ),
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 440),
                     child: Column(
@@ -75,7 +74,7 @@ class AuthPage extends StatelessWidget {
                           'Conecta y gestiona tu inventario entre sucursales.',
                           textAlign: TextAlign.center,
                           style: textTheme.titleMedium?.copyWith(
-                            color: const Color(0xCCD8E6FF),
+                            color: const Color(0xCCD8D8DE),
                             height: 1.35,
                             fontWeight: FontWeight.w500,
                           ),
@@ -87,12 +86,12 @@ class AuthPage extends StatelessWidget {
                             borderRadius: BorderRadius.circular(34),
                             boxShadow: const [
                               BoxShadow(
-                                color: Color(0x66050E1E),
+                                color: Color(0x99000000),
                                 blurRadius: 30,
                                 offset: Offset(0, 20),
                               ),
                             ],
-                            border: Border.all(color: const Color(0x33FFFFFF)),
+                            border: Border.all(color: const Color(0x33FF2636)),
                           ),
                           clipBehavior: Clip.antiAlias,
                           child: Stack(
@@ -106,7 +105,7 @@ class AuthPage extends StatelessWidget {
                                   alignment: Alignment.center,
                                   errorBuilder: (context, error, stackTrace) {
                                     return Container(
-                                      color: const Color(0xFF0A2345),
+                                      color: const Color(0xFF121318),
                                       alignment: Alignment.center,
                                       child: const Icon(
                                         Icons.inventory_2_outlined,
@@ -124,7 +123,9 @@ class AuthPage extends StatelessWidget {
                                       colors: [
                                         Colors.black.withValues(alpha: 0.08),
                                         Colors.black.withValues(alpha: 0.12),
-                                        const Color(0xFF07162C).withValues(alpha: 0.82),
+                                        const Color(
+                                          0xFF08090C,
+                                        ).withValues(alpha: 0.82),
                                       ],
                                       begin: Alignment.topCenter,
                                       end: Alignment.bottomCenter,
@@ -148,7 +149,7 @@ class AuthPage extends StatelessWidget {
                               TextSpan(text: 'Consulta. Valida. '),
                               TextSpan(
                                 text: 'Transfiere.',
-                                style: TextStyle(color: Color(0xFFFFA94D)),
+                                style: TextStyle(color: Color(0xFFFF2636)),
                               ),
                             ],
                           ),
@@ -158,7 +159,7 @@ class AuthPage extends StatelessWidget {
                           'Accede al sistema con tu cuenta de empleado.',
                           textAlign: TextAlign.center,
                           style: textTheme.bodyLarge?.copyWith(
-                            color: const Color(0xB3E5EFFC),
+                            color: const Color(0xB8D6D7DE),
                             height: 1.35,
                           ),
                         ),
@@ -190,10 +191,7 @@ class AuthPage extends StatelessWidget {
 }
 
 class _LoginPage extends StatefulWidget {
-  const _LoginPage({
-    required this.authService,
-    required this.inventoryService,
-  });
+  const _LoginPage({required this.authService, required this.inventoryService});
 
   final AuthService authService;
   final InventoryWorkflowService inventoryService;
@@ -236,26 +234,26 @@ class _LoginPageState extends State<_LoginPage> {
   }) {
     return InputDecoration(
       labelText: label,
-      labelStyle: const TextStyle(color: Color(0xCCEEF5FF)),
-      prefixIcon: Icon(icon, color: const Color(0xFFFFA94D)),
+      labelStyle: const TextStyle(color: Color(0xCCF6F7FA)),
+      prefixIcon: Icon(icon, color: const Color(0xFFFF2636)),
       filled: true,
-      fillColor: const Color(0x40142E52),
+      fillColor: const Color(0x401D1F26),
       contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(18),
-        borderSide: const BorderSide(color: Color(0x66FFFFFF)),
+        borderSide: const BorderSide(color: Color(0x66FF2636)),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(18),
-        borderSide: const BorderSide(color: Color(0xFFFFA94D), width: 1.4),
+        borderSide: const BorderSide(color: Color(0xFFFF2636), width: 1.4),
       ),
       errorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(18),
-        borderSide: const BorderSide(color: Color(0xFFFF7B7B)),
+        borderSide: const BorderSide(color: Color(0xFFFF4C63)),
       ),
       focusedErrorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(18),
-        borderSide: const BorderSide(color: Color(0xFFFF7B7B), width: 1.4),
+        borderSide: const BorderSide(color: Color(0xFFFF4C63), width: 1.4),
       ),
     );
   }
@@ -298,15 +296,11 @@ class _LoginPageState extends State<_LoginPage> {
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF07162C),
+      backgroundColor: const Color(0xFF08090C),
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [
-              Color(0xFF06152A),
-              Color(0xFF0A2A52),
-              Color(0xFF0B2141),
-            ],
+            colors: [Color(0xFF050506), Color(0xFF101116), Color(0xFF17191F)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -315,13 +309,13 @@ class _LoginPageState extends State<_LoginPage> {
           children: [
             const _AmbientGlow(
               alignment: Alignment.topCenter,
-              color: Color(0x552C7BFF),
+              color: Color(0x55FF2636),
               size: 320,
               offsetY: -120,
             ),
             const _AmbientGlow(
               alignment: Alignment.bottomLeft,
-              color: Color(0x44FF8B2C),
+              color: Color(0x44FF2636),
               size: 240,
               offsetX: -80,
               offsetY: 80,
@@ -329,18 +323,21 @@ class _LoginPageState extends State<_LoginPage> {
             SafeArea(
               child: Center(
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 24,
+                  ),
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 420),
                     child: Container(
                       padding: const EdgeInsets.all(24),
                       decoration: BoxDecoration(
-                        color: const Color(0x26112642),
+                        color: const Color(0x331B1D23),
                         borderRadius: BorderRadius.circular(30),
-                        border: Border.all(color: const Color(0x33FFFFFF)),
+                        border: Border.all(color: const Color(0x33FF2636)),
                         boxShadow: const [
                           BoxShadow(
-                            color: Color(0x66050E1E),
+                            color: Color(0x99000000),
                             blurRadius: 28,
                             offset: Offset(0, 16),
                           ),
@@ -354,7 +351,7 @@ class _LoginPageState extends State<_LoginPage> {
                             IconButton(
                               onPressed: () => Navigator.of(context).pop(),
                               style: IconButton.styleFrom(
-                                backgroundColor: const Color(0x221B4365),
+                                backgroundColor: const Color(0x33212328),
                                 foregroundColor: Colors.white,
                               ),
                               icon: const Icon(Icons.arrow_back),
@@ -387,7 +384,7 @@ class _LoginPageState extends State<_LoginPage> {
                             Text(
                               'Ingresa con tu correo corporativo y tu contrasena.',
                               style: textTheme.bodyLarge?.copyWith(
-                                color: const Color(0xB3E5EFFC),
+                                color: const Color(0xB8D6D7DE),
                                 height: 1.35,
                               ),
                             ),
@@ -396,7 +393,7 @@ class _LoginPageState extends State<_LoginPage> {
                               controller: _emailController,
                               keyboardType: TextInputType.emailAddress,
                               style: const TextStyle(color: Colors.white),
-                              cursorColor: const Color(0xFFFFA94D),
+                              cursorColor: const Color(0xFFFF2636),
                               decoration: _inputDecoration(
                                 label: 'Correo corporativo',
                                 icon: Icons.alternate_email,
@@ -413,7 +410,7 @@ class _LoginPageState extends State<_LoginPage> {
                               controller: _passwordController,
                               obscureText: true,
                               style: const TextStyle(color: Colors.white),
-                              cursorColor: const Color(0xFFFFA94D),
+                              cursorColor: const Color(0xFFFF2636),
                               decoration: _inputDecoration(
                                 label: 'Contrasena',
                                 icon: Icons.lock_outline,
@@ -462,17 +459,14 @@ class _PrimaryActionButton extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [
-            Color(0xFF2E7BFF),
-            Color(0xFF2251D1),
-          ],
+          colors: [Color(0xFFFF2636), Color(0xFFC91424)],
           begin: Alignment.centerLeft,
           end: Alignment.centerRight,
         ),
         borderRadius: BorderRadius.circular(18),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x553283FF),
+            color: Color(0x55FF2636),
             blurRadius: 18,
             offset: Offset(0, 10),
           ),
@@ -538,12 +532,7 @@ class _AmbientGlow extends StatelessWidget {
             height: size,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: RadialGradient(
-                colors: [
-                  color,
-                  Colors.transparent,
-                ],
-              ),
+              gradient: RadialGradient(colors: [color, Colors.transparent]),
             ),
           ),
         ),

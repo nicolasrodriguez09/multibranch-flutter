@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../core/app_theme.dart';
+import '../../auth/application/auth_service.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
 import 'branch_panel_drawer.dart';
@@ -12,10 +13,12 @@ class SyncStatusPage extends StatefulWidget {
     super.key,
     required this.service,
     required this.currentUser,
+    this.authService,
   });
 
   final InventoryWorkflowService service;
   final AppUser currentUser;
+  final AuthService? authService;
 
   @override
   State<SyncStatusPage> createState() => _SyncStatusPageState();
@@ -311,6 +314,7 @@ class _SyncStatusPageState extends State<SyncStatusPage> {
         service: widget.service,
         currentUser: widget.currentUser,
         currentDestination: BranchPanelDestination.syncStatus,
+        authService: widget.authService,
       ),
       appBar: AppBar(
         title: Text(
@@ -334,7 +338,7 @@ class _SyncStatusPageState extends State<SyncStatusPage> {
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF081A33), Color(0xFF0A2142), Color(0xFF08172D)],
+            colors: [Color(0xFF07080B), Color(0xFF101116), Color(0xFF08090C)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -461,7 +465,7 @@ class _ErrorCard extends StatelessWidget {
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
-        color: const Color(0x331E2330),
+        color: const Color(0x33FF2636),
         border: Border.all(color: AppPalette.panelBorder),
       ),
       child: Column(
@@ -540,13 +544,13 @@ class _StatusHero extends StatelessWidget {
         gradient: LinearGradient(
           colors: [
             accent.withValues(alpha: 0.28),
-            const Color(0xFF15365E),
-            const Color(0xFF0C1D36),
+            const Color(0xFF3A1116),
+            const Color(0xFF121318),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        border: Border.all(color: const Color(0x33FFFFFF)),
+        border: Border.all(color: const Color(0x33FF2636)),
         boxShadow: const [
           BoxShadow(
             color: Color(0x33000000),
@@ -641,7 +645,7 @@ class _StatusHero extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.06),
                   borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: const Color(0x22FFFFFF)),
+                  border: Border.all(color: const Color(0x22FF2636)),
                 ),
                 child: Row(
                   children: [
@@ -727,9 +731,9 @@ class _MonitoringAlertsCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(24),
         gradient: LinearGradient(
           colors: [
-            const Color(0x26FF7A59),
-            const Color(0x1A3B2338),
-            const Color(0x14141C2E),
+            const Color(0x26FF2636),
+            const Color(0x1AFF2636),
+            const Color(0x141D1F26),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -961,7 +965,7 @@ class _FailureRulesCard extends StatelessWidget {
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
-        color: const Color(0x1D102545),
+        color: const Color(0x241D1F26),
         border: Border.all(color: AppPalette.panelBorder),
       ),
       child: Column(
@@ -1028,7 +1032,7 @@ class _WarningsCard extends StatelessWidget {
         gradient: LinearGradient(
           colors: [
             AppPalette.amber.withValues(alpha: 0.24),
-            const Color(0xFF2A2517),
+            const Color(0xFF251114),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -1110,7 +1114,7 @@ class _AttentionBranchesCard extends StatelessWidget {
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
-        color: const Color(0x1D102545),
+        color: const Color(0x241D1F26),
         border: Border.all(color: AppPalette.panelBorder),
       ),
       child: Column(
@@ -1230,7 +1234,7 @@ class _BranchStatusList extends StatelessWidget {
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
-        color: const Color(0x1D102545),
+        color: const Color(0x241D1F26),
         border: Border.all(color: AppPalette.panelBorder),
       ),
       child: Column(
@@ -1291,7 +1295,7 @@ class _BranchStatusTile extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
         color: Colors.white.withValues(alpha: 0.04),
-        border: Border.all(color: const Color(0x22FFFFFF)),
+        border: Border.all(color: const Color(0x22FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1436,7 +1440,7 @@ class _MetricBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0x22FFFFFF)),
+        border: Border.all(color: const Color(0x22FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1471,9 +1475,9 @@ class _MetaChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
       decoration: BoxDecoration(
-        color: const Color(0x1F173255),
+        color: const Color(0x1FFF2636),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0x22FFFFFF)),
+        border: Border.all(color: const Color(0x22FF2636)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

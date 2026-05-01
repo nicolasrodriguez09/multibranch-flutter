@@ -118,7 +118,7 @@ class _CreateBranchDialogState extends State<CreateBranchDialog> {
         padding: const EdgeInsets.all(26),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
-            colors: [Color(0xEE122A4E), Color(0xEE08172D)],
+            colors: [Color(0xEE151016), Color(0xEE08090C)],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
@@ -126,7 +126,7 @@ class _CreateBranchDialogState extends State<CreateBranchDialog> {
           border: Border.all(color: AppPalette.panelBorder),
           boxShadow: const [
             BoxShadow(
-              color: Color(0x66050E1E),
+              color: Color(0x99000000),
               blurRadius: 36,
               offset: Offset(0, 20),
             ),

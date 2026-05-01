@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../auth/application/auth_service.dart';
+
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
 import 'branch_panel_drawer.dart';
@@ -11,10 +13,12 @@ class SalesReportPage extends StatefulWidget {
     super.key,
     required this.service,
     required this.currentUser,
+    this.authService,
   });
 
   final InventoryWorkflowService service;
   final AppUser currentUser;
+  final AuthService? authService;
 
   @override
   State<SalesReportPage> createState() => _SalesReportPageState();
@@ -50,12 +54,13 @@ class _SalesReportPageState extends State<SalesReportPage> {
         service: widget.service,
         currentUser: widget.currentUser,
         currentDestination: BranchPanelDestination.salesReport,
+        authService: widget.authService,
       ),
       appBar: AppBar(title: const Text('Ventas de sucursal')),
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF081A33), Color(0xFF0A2142), Color(0xFF08172D)],
+            colors: [Color(0xFF07080B), Color(0xFF101116), Color(0xFF08090C)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -287,9 +292,9 @@ class _DailySaleRow extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF0B1D34),
+        color: const Color(0xFF14151A),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Row(
         children: [
@@ -313,9 +318,9 @@ class _SaleRecordTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF0B1D34),
+        color: const Color(0xFF14151A),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -405,9 +410,9 @@ class _SalesPanel extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: child,
     );

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/app_theme.dart';
+import '../../auth/application/auth_service.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
 import 'branch_panel_drawer.dart';
@@ -27,10 +28,14 @@ class RequestTrackingPage extends StatefulWidget {
     super.key,
     required this.service,
     required this.currentUser,
+    this.authService,
+    this.drawerDestination = BranchPanelDestination.requestTracking,
   });
 
   final InventoryWorkflowService service;
   final AppUser currentUser;
+  final AuthService? authService;
+  final BranchPanelDestination drawerDestination;
 
   @override
   State<RequestTrackingPage> createState() => _RequestTrackingPageState();
@@ -143,7 +148,8 @@ class _RequestTrackingPageState extends State<RequestTrackingPage> {
       drawer: BranchPanelDrawer(
         service: widget.service,
         currentUser: widget.currentUser,
-        currentDestination: BranchPanelDestination.requestTracking,
+        currentDestination: widget.drawerDestination,
+        authService: widget.authService,
       ),
       appBar: AppBar(
         title: const Text('Estado de solicitudes'),
@@ -164,7 +170,7 @@ class _RequestTrackingPageState extends State<RequestTrackingPage> {
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF081A33), Color(0xFF0A2142), Color(0xFF08172D)],
+            colors: [Color(0xFF07080B), Color(0xFF101116), Color(0xFF08090C)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -294,11 +300,11 @@ class _TrackingSummaryCard extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
         gradient: const LinearGradient(
-          colors: [Color(0xFF214C9A), Color(0xFF173C78), Color(0xFF102543)],
+          colors: [Color(0xFF8B121E), Color(0xFF551018), Color(0xFF151016)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        border: Border.all(color: const Color(0x33FFFFFF)),
+        border: Border.all(color: const Color(0x33FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -462,9 +468,9 @@ class _TrackingFiltersCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -581,7 +587,7 @@ class _TrackingRequestCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: accent.withValues(alpha: 0.35)),
       ),
@@ -761,9 +767,9 @@ class _TrackingEmptyState extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

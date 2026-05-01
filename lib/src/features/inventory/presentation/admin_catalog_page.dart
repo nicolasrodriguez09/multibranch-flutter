@@ -2,19 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/app_theme.dart';
+import '../../auth/application/auth_service.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
 import '../domain/role_permissions.dart';
+import 'branch_panel_drawer.dart';
 
 class AdminCatalogPage extends StatefulWidget {
   const AdminCatalogPage({
     super.key,
     required this.service,
     required this.currentUser,
+    this.authService,
   });
 
   final InventoryWorkflowService service;
   final AppUser currentUser;
+  final AuthService? authService;
 
   @override
   State<AdminCatalogPage> createState() => _AdminCatalogPageState();
@@ -301,6 +305,12 @@ class _AdminCatalogPageState extends State<AdminCatalogPage> {
   Widget build(BuildContext context) {
     if (!widget.currentUser.can(AppPermission.manageMasterData)) {
       return Scaffold(
+        drawer: BranchPanelDrawer(
+          service: widget.service,
+          currentUser: widget.currentUser,
+          currentDestination: BranchPanelDestination.adminCatalog,
+          authService: widget.authService,
+        ),
         appBar: AppBar(title: const Text('Catalogo maestro')),
         body: const Center(
           child: Padding(
@@ -315,6 +325,12 @@ class _AdminCatalogPageState extends State<AdminCatalogPage> {
     }
 
     return Scaffold(
+      drawer: BranchPanelDrawer(
+        service: widget.service,
+        currentUser: widget.currentUser,
+        currentDestination: BranchPanelDestination.adminCatalog,
+        authService: widget.authService,
+      ),
       appBar: AppBar(
         title: const Text('Catalogo maestro'),
         actions: [
@@ -334,7 +350,7 @@ class _AdminCatalogPageState extends State<AdminCatalogPage> {
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF081A33), Color(0xFF0A2142), Color(0xFF08172D)],
+            colors: [Color(0xFF07080B), Color(0xFF101116), Color(0xFF08090C)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -560,9 +576,9 @@ class _CategoryTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF0B1D34),
+        color: const Color(0xFF14151A),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Row(
         children: [
@@ -706,9 +722,9 @@ class _ProductTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF0B1D34),
+        color: const Color(0xFF14151A),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Row(
         children: [
@@ -1160,9 +1176,9 @@ class _CatalogPanel extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: child,
     );

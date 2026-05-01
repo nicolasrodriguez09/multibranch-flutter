@@ -12,6 +12,7 @@ import 'approval_requests_page.dart';
 import 'auto_refresh_state_mixin.dart';
 import 'admin_catalog_page.dart';
 import 'branch_directory_page.dart';
+import 'branch_panel_drawer.dart';
 import 'create_branch_dialog.dart';
 import 'notifications_page.dart';
 import 'inventory_adjustment_page.dart';
@@ -152,6 +153,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
       MaterialPageRoute<void>(
         builder: (context) => EmployeeManagementPage(
           authService: widget.authService,
+          inventoryService: widget.service,
           currentUser: widget.currentUser,
         ),
       ),
@@ -164,6 +166,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => AdminCatalogPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -175,6 +178,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => _AdminTraceabilityPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -197,6 +201,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => BranchDirectoryPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -208,6 +213,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => TransferRequestPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -219,6 +225,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => ReservationRequestPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -230,6 +237,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => SalesRegisterPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -241,6 +249,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => SalesReportPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -333,6 +342,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => ApprovalRequestsPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -344,6 +354,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => NotificationInboxPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -355,6 +366,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => RequestTrackingPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -366,6 +378,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => SyncStatusPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -377,6 +390,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => StockAlertsPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -388,6 +402,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => InventoryAdjustmentPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -938,6 +953,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
       ),
       drawer: _AdminDrawer(
         user: user,
+        onOpenDashboard: () => Navigator.of(context).pop(),
         isCreating: _isCreating,
         isCreatingBranch: _isCreatingBranch,
         onOpenNotifications: () => _runDrawerAction(_openNotificationsPage),
@@ -964,7 +980,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF081A33), Color(0xFF0A2142), Color(0xFF08172D)],
+            colors: [Color(0xFF07080B), Color(0xFF101116), Color(0xFF08090C)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -1065,7 +1081,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF081A33), Color(0xFF0A2142), Color(0xFF08172D)],
+            colors: [Color(0xFF07080B), Color(0xFF101116), Color(0xFF08090C)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -1109,16 +1125,16 @@ class _AdminRoleBar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFF13335F),
+        color: const Color(0xFF15161B),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0x33FFFFFF)),
+        border: Border.all(color: const Color(0x33FF2636)),
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: const Color(0xFF214A8D),
+              color: const Color(0xFF2A1014),
               borderRadius: BorderRadius.circular(999),
             ),
             child: Row(
@@ -1172,11 +1188,11 @@ class _AdminOperationalHero extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(22),
             gradient: const LinearGradient(
-              colors: [Color(0xFF234C9A), Color(0xFF20457D), Color(0xFF122A4D)],
+              colors: [Color(0xFF7A101A), Color(0xFF3A1116), Color(0xFF151016)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
-            border: Border.all(color: const Color(0x33FFFFFF)),
+            border: Border.all(color: const Color(0x33FF2636)),
             boxShadow: const [
               BoxShadow(
                 color: Color(0x33000000),
@@ -1275,7 +1291,7 @@ class _AdminOperationalHero extends StatelessWidget {
                     FilledButton(
                       onPressed: onPressed,
                       style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF204C9B),
+                        backgroundColor: const Color(0xFFFF2636),
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
@@ -1358,19 +1374,19 @@ class _BranchOperationalHero extends StatelessWidget {
                     };
                     final colors = switch (role) {
                       UserRole.seller => const [
-                        Color(0xFF1F4D91),
-                        Color(0xFF1A3769),
-                        Color(0xFF102543),
+                        Color(0xFF75111A),
+                        Color(0xFF3A1116),
+                        Color(0xFF151016),
                       ],
                       UserRole.supervisor => const [
-                        Color(0xFF205B83),
-                        Color(0xFF174766),
-                        Color(0xFF0F253C),
+                        Color(0xFF7A101A),
+                        Color(0xFF3A1116),
+                        Color(0xFF151016),
                       ],
                       UserRole.admin => const [
-                        Color(0xFF234C9A),
-                        Color(0xFF20457D),
-                        Color(0xFF122A4D),
+                        Color(0xFF7A101A),
+                        Color(0xFF3A1116),
+                        Color(0xFF151016),
                       ],
                     };
                     final iconColor = switch (role) {
@@ -1399,7 +1415,7 @@ class _BranchOperationalHero extends StatelessWidget {
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         ),
-                        border: Border.all(color: const Color(0x33FFFFFF)),
+                        border: Border.all(color: const Color(0x33FF2636)),
                         boxShadow: const [
                           BoxShadow(
                             color: Color(0x33000000),
@@ -1489,7 +1505,7 @@ class _BranchOperationalHero extends StatelessWidget {
                                 FilledButton(
                                   onPressed: onPressed,
                                   style: FilledButton.styleFrom(
-                                    backgroundColor: const Color(0xFF204C9B),
+                                    backgroundColor: const Color(0xFFFF2636),
                                     foregroundColor: Colors.white,
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(14),
@@ -1706,21 +1722,21 @@ class _BranchMetricsStrip extends StatelessWidget {
                       title: 'Productos\nvisibles',
                       value: '$inventoryCount',
                       helper: 'Inventario de sucursal',
-                      colors: const [Color(0xFF214C9A), Color(0xFF183A79)],
+                      colors: const [Color(0xFF8B121E), Color(0xFF5A1018)],
                     ),
                     (
                       icon: Icons.remove_shopping_cart_rounded,
                       title: 'Productos\nsin stock',
                       value: '$outOfStock',
                       helper: 'Sin disponibilidad',
-                      colors: const [Color(0xFF2E8B57), Color(0xFF256E49)],
+                      colors: const [Color(0xFFFF6B73), Color(0xFFB20D19)],
                     ),
                     (
                       icon: Icons.bookmark_added_rounded,
                       title: 'Reservas\nactivas',
                       value: '$activeReservations',
                       helper: 'Compromisos vigentes',
-                      colors: const [Color(0xFFFF8A24), Color(0xFFE66A11)],
+                      colors: const [Color(0xFFFF3B47), Color(0xFFB20D19)],
                     ),
                   ],
                   UserRole.supervisor => [
@@ -1729,14 +1745,14 @@ class _BranchMetricsStrip extends StatelessWidget {
                       title: 'Stock\nbajo',
                       value: '$lowStock',
                       helper: 'Reposicion prioritaria',
-                      colors: const [Color(0xFF214C9A), Color(0xFF183A79)],
+                      colors: const [Color(0xFF8B121E), Color(0xFF5A1018)],
                     ),
                     (
                       icon: Icons.remove_shopping_cart_rounded,
                       title: 'Sin\nstock',
                       value: '$outOfStock',
                       helper: 'Quiebres detectados',
-                      colors: const [Color(0xFF2E8B57), Color(0xFF256E49)],
+                      colors: const [Color(0xFFFF6B73), Color(0xFFB20D19)],
                     ),
                     (
                       icon: Icons.pending_actions_rounded,
@@ -1745,7 +1761,7 @@ class _BranchMetricsStrip extends StatelessWidget {
                           '${pendingReservationApprovals + pendingTransfers}',
                       helper:
                           '$pendingReservationApprovals reservas y $pendingTransfers traslados',
-                      colors: const [Color(0xFFFF8A24), Color(0xFFE66A11)],
+                      colors: const [Color(0xFFFF3B47), Color(0xFFB20D19)],
                     ),
                   ],
                   UserRole.admin => [
@@ -1754,7 +1770,7 @@ class _BranchMetricsStrip extends StatelessWidget {
                       title: 'Sin uso',
                       value: '0',
                       helper: '',
-                      colors: const [Color(0xFF214C9A), Color(0xFF183A79)],
+                      colors: const [Color(0xFF8B121E), Color(0xFF5A1018)],
                     ),
                   ],
                 };
@@ -1799,7 +1815,7 @@ class _OperationalKpiStrip extends StatelessWidget {
             title: 'Consultas\nsin stock',
             value: '${stats.consultedOutOfStockCount}',
             helper: 'Referencias sin respuesta',
-            colors: const [Color(0xFF214C9A), Color(0xFF183A79)],
+            colors: const [Color(0xFF8B121E), Color(0xFF5A1018)],
           ),
         ),
         const SizedBox(width: 10),
@@ -1809,7 +1825,7 @@ class _OperationalKpiStrip extends StatelessWidget {
             title: 'Traslados\nhoy',
             value: '${stats.transferRequestsToday}',
             helper: 'Solicitudes del dia',
-            colors: const [Color(0xFF2E8B57), Color(0xFF256E49)],
+            colors: const [Color(0xFFFF6B73), Color(0xFFB20D19)],
           ),
         ),
         const SizedBox(width: 10),
@@ -1819,7 +1835,7 @@ class _OperationalKpiStrip extends StatelessWidget {
             title: 'Tiempo\nmedio datos',
             value: _formatDurationCompact(stats.averageApiResponseTime),
             helper: 'Actualizaciones recientes',
-            colors: const [Color(0xFFFF8A24), Color(0xFFE66A11)],
+            colors: const [Color(0xFFFF3B47), Color(0xFFB20D19)],
           ),
         ),
       ],
@@ -1965,7 +1981,7 @@ class _AdminMetricsStrip extends StatelessWidget {
                         title: 'Usuarios\nactivos',
                         value: '$activeUsers',
                         helper: 'Empleados habilitados',
-                        colors: const [Color(0xFF214C9A), Color(0xFF183A79)],
+                        colors: const [Color(0xFF8B121E), Color(0xFF5A1018)],
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -1975,7 +1991,7 @@ class _AdminMetricsStrip extends StatelessWidget {
                         title: 'Reservas\nactivas',
                         value: '$activeReservations',
                         helper: 'Vigentes en el sistema',
-                        colors: const [Color(0xFF2E8B57), Color(0xFF256E49)],
+                        colors: const [Color(0xFFFF6B73), Color(0xFFB20D19)],
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -1987,7 +2003,7 @@ class _AdminMetricsStrip extends StatelessWidget {
                             '${pendingReservationApprovals + pendingTransfers}',
                         helper:
                             '$pendingReservationApprovals reservas y $pendingTransfers traslados',
-                        colors: const [Color(0xFFFF8A24), Color(0xFFE66A11)],
+                        colors: const [Color(0xFFFF3B47), Color(0xFFB20D19)],
                       ),
                     ),
                   ],
@@ -2541,9 +2557,9 @@ class _AdminPendingSection extends StatelessWidget {
                     width: double.infinity,
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF102540),
+                      color: const Color(0xFF17191F),
                       borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: const Color(0x26FFFFFF)),
+                      border: Border.all(color: const Color(0x26FF2636)),
                     ),
                     child: const Text('No hay solicitudes pendientes.'),
                   )
@@ -2666,9 +2682,9 @@ class _AdminAuditSection extends StatelessWidget {
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF102540),
+                  color: const Color(0xFF17191F),
                   borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: const Color(0x26FFFFFF)),
+                  border: Border.all(color: const Color(0x26FF2636)),
                 ),
                 child: const Text(
                   'No hay eventos administrativos registrados.',
@@ -2808,7 +2824,7 @@ class _TransferTraceabilityDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF08172D),
+      backgroundColor: const Color(0xFF08090C),
       insetPadding: const EdgeInsets.all(16),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 860, maxHeight: 760),
@@ -3109,19 +3125,27 @@ class _AdminTraceabilityPage extends StatelessWidget {
   const _AdminTraceabilityPage({
     required this.service,
     required this.currentUser,
+    required this.authService,
   });
 
   final InventoryWorkflowService service;
   final AppUser currentUser;
+  final AuthService authService;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      drawer: BranchPanelDrawer(
+        service: service,
+        currentUser: currentUser,
+        currentDestination: BranchPanelDestination.adminTraceability,
+        authService: authService,
+      ),
       appBar: AppBar(title: const Text('Trazabilidad operativa')),
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF081A33), Color(0xFF0A2142), Color(0xFF08172D)],
+            colors: [Color(0xFF07080B), Color(0xFF101116), Color(0xFF08090C)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -3455,7 +3479,7 @@ class _TechnicalAuditMetricTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: accent.withValues(alpha: 0.32)),
       ),
@@ -3522,7 +3546,7 @@ class _TechnicalAuditErrorTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppPalette.danger.withValues(alpha: 0.38)),
       ),
@@ -3588,7 +3612,7 @@ class _AdminTraceabilityEntryCard extends StatelessWidget {
           width: double.infinity,
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: const Color(0x40132647),
+            color: const Color(0x401D1F26),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: accent.withValues(alpha: 0.28)),
           ),
@@ -3667,7 +3691,7 @@ class _ReservationTraceabilityDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF08172D),
+      backgroundColor: const Color(0xFF08090C),
       insetPadding: const EdgeInsets.all(16),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 860, maxHeight: 760),
@@ -3948,9 +3972,9 @@ class _TraceabilityBlock extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: child,
     );
@@ -3974,7 +3998,7 @@ class _TraceabilityMetricCard extends StatelessWidget {
       width: 180,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: accent.withValues(alpha: 0.3)),
       ),
@@ -4086,9 +4110,9 @@ class _TraceabilityActorCard extends StatelessWidget {
       width: 190,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4144,7 +4168,7 @@ class _InventoryTraceabilityCard extends StatelessWidget {
       width: 250,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: accent.withValues(alpha: 0.28)),
       ),
@@ -4271,7 +4295,7 @@ class _TransferAuditTimelineTile extends StatelessWidget {
                               color: Colors.white.withValues(alpha: 0.06),
                               borderRadius: BorderRadius.circular(999),
                               border: Border.all(
-                                color: const Color(0x26FFFFFF),
+                                color: const Color(0x26FF2636),
                               ),
                             ),
                             child: Text(
@@ -4326,11 +4350,11 @@ class _AdminRefreshCard extends StatelessWidget {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(18),
                 gradient: const LinearGradient(
-                  colors: [Color(0xFF213452), Color(0xFF0F213D)],
+                  colors: [Color(0xFF3A1116), Color(0xFF151016)],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
-                border: Border.all(color: const Color(0x26FFFFFF)),
+                border: Border.all(color: const Color(0x26FF2636)),
               ),
               child: Row(
                 children: [
@@ -4398,9 +4422,9 @@ class _WorkflowActionCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Row(
         children: [
@@ -4459,9 +4483,9 @@ class _SellerProductAcquisitionCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4775,6 +4799,7 @@ class _BranchPopupActionLabel extends StatelessWidget {
 class _AdminDrawer extends StatelessWidget {
   const _AdminDrawer({
     required this.user,
+    required this.onOpenDashboard,
     required this.isCreating,
     required this.isCreatingBranch,
     required this.onOpenNotifications,
@@ -4794,6 +4819,7 @@ class _AdminDrawer extends StatelessWidget {
   });
 
   final AppUser user;
+  final VoidCallback onOpenDashboard;
   final bool isCreating;
   final bool isCreatingBranch;
   final VoidCallback onOpenNotifications;
@@ -4814,7 +4840,7 @@ class _AdminDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Drawer(
-      backgroundColor: const Color(0xFF09192E),
+      backgroundColor: const Color(0xFF090A0D),
       child: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -4840,18 +4866,23 @@ class _AdminDrawer extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Monitoreo operativo',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: Colors.white70,
-                          fontWeight: FontWeight.w700,
-                        ),
+                      const _AdminDrawerSectionLabel(text: 'Navegacion'),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.space_dashboard_rounded,
+                        title: 'Panel principal',
+                        selected: true,
+                        onTap: onOpenDashboard,
                       ),
                       const SizedBox(height: 10),
                       _AdminDrawerTile(
                         icon: Icons.store_mall_directory_rounded,
                         title: 'Sucursales',
                         onTap: onOpenBranches,
+                      ),
+                      const SizedBox(height: 18),
+                      const _AdminDrawerSectionLabel(
+                        text: 'Monitoreo operativo',
                       ),
                       const SizedBox(height: 10),
                       _AdminDrawerTile(
@@ -4890,13 +4921,7 @@ class _AdminDrawer extends StatelessWidget {
                         onTap: onOpenRequestTracking,
                       ),
                       const SizedBox(height: 18),
-                      Text(
-                        'Administracion',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: Colors.white70,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                      const _AdminDrawerSectionLabel(text: 'Administracion'),
                       const SizedBox(height: 10),
                       _AdminDrawerTile(
                         icon: Icons.inventory_2_rounded,
@@ -4940,6 +4965,8 @@ class _AdminDrawer extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 12),
+              const _RedStockDrawerBrandCard(),
+              const SizedBox(height: 12),
               _AdminDrawerTile(
                 icon: Icons.logout_rounded,
                 title: 'Cerrar sesion',
@@ -4953,44 +4980,125 @@ class _AdminDrawer extends StatelessWidget {
   }
 }
 
+class _RedStockDrawerBrandCard extends StatelessWidget {
+  const _RedStockDrawerBrandCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppPalette.blue.withValues(alpha: 0.18),
+            AppPalette.storm.withValues(alpha: 0.86),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppPalette.panelBorder),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [AppPalette.blueSoft, AppPalette.blueDark],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.inventory_2_rounded, color: Colors.white),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Red Stock',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Control total. Inventario inteligente.',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: AppPalette.textMuted),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AdminDrawerSectionLabel extends StatelessWidget {
+  const _AdminDrawerSectionLabel({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+        color: Colors.white70,
+        fontWeight: FontWeight.w700,
+      ),
+    );
+  }
+}
+
 class _AdminDrawerTile extends StatelessWidget {
   const _AdminDrawerTile({
     required this.icon,
     required this.title,
     this.loading = false,
+    this.selected = false,
     required this.onTap,
   });
 
   final IconData icon;
   final String title;
   final bool loading;
+  final bool selected;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: const Color(0xFF0E2442),
-      borderRadius: BorderRadius.circular(16),
+      color: selected
+          ? AppPalette.amber.withValues(alpha: 0.16)
+          : Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
       child: ListTile(
+        dense: true,
         onTap: onTap,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         leading: loading
             ? const SizedBox(
                 width: 20,
                 height: 20,
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
-            : Icon(icon, color: Colors.white),
+            : Icon(icon, color: selected ? AppPalette.amber : Colors.white),
         title: Text(
           title,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            color: Colors.white,
-            fontWeight: FontWeight.w700,
+          style: TextStyle(
+            color: selected ? AppPalette.amber : Colors.white,
+            fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
           ),
-        ),
-        trailing: const Icon(
-          Icons.chevron_right_rounded,
-          color: Colors.white70,
         ),
       ),
     );
@@ -5041,7 +5149,7 @@ class _BranchDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Drawer(
-      backgroundColor: const Color(0xFF09192E),
+      backgroundColor: const Color(0xFF090A0D),
       child: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -5187,6 +5295,8 @@ class _BranchDrawer extends StatelessWidget {
                   ),
                 ),
               ),
+              const SizedBox(height: 12),
+              const _RedStockDrawerBrandCard(),
               const SizedBox(height: 12),
               _BranchDrawerTile(
                 icon: Icons.logout_rounded,
@@ -5549,13 +5659,13 @@ class _DashboardPanel extends StatelessWidget {
         gradient: LinearGradient(
           colors: [
             accent.withValues(alpha: 0.22),
-            const Color(0xFF132847),
-            const Color(0xFF0C1D36),
+            const Color(0xFF3A1116),
+            const Color(0xFF121318),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(18),
@@ -5617,9 +5727,9 @@ class _InsightList extends StatelessWidget {
         width: double.infinity,
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: const Color(0x40132647),
+          color: const Color(0x401D1F26),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0x26FFFFFF)),
+          border: Border.all(color: const Color(0x26FF2636)),
         ),
         child: Text(
           emptyMessage,
@@ -5638,9 +5748,9 @@ class _InsightList extends StatelessWidget {
               margin: const EdgeInsets.only(bottom: 10),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: const Color(0x40132647),
+                color: const Color(0x401D1F26),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0x26FFFFFF)),
+                border: Border.all(color: const Color(0x26FF2636)),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -6109,24 +6219,24 @@ IconData _auditActionIcon(String value) {
 
 Color _auditActionColor(String value) {
   return switch (value.trim().toLowerCase()) {
-    'employee_created' => const Color(0xFF2E8B57),
-    'employee_role_updated' => const Color(0xFF214C9A),
-    'employee_updated' => const Color(0xFF2A5F89),
-    'branch_created' => const Color(0xFFE67A16),
-    'master_data_seeded' => const Color(0xFF6A5AE0),
-    'transfer_requested' => const Color(0xFFD39B2A),
-    'transfer_approved' => const Color(0xFF2E8B57),
+    'employee_created' => const Color(0xFFFF6B73),
+    'employee_role_updated' => const Color(0xFF8B121E),
+    'employee_updated' => const Color(0xFFFF6B73),
+    'branch_created' => const Color(0xFFFF3B47),
+    'master_data_seeded' => const Color(0xFFFF9AA1),
+    'transfer_requested' => const Color(0xFFFF3B47),
+    'transfer_approved' => const Color(0xFFFF6B73),
     'transfer_rejected' => const Color(0xFFC24949),
-    'transfer_in_transit' => const Color(0xFF2A8AC7),
-    'transfer_received' => const Color(0xFF1F7A8C),
-    'reservation_created' => const Color(0xFF1F7A8C),
-    'reservation_approved' => const Color(0xFF2E8B57),
+    'transfer_in_transit' => const Color(0xFFFF9AA1),
+    'transfer_received' => const Color(0xFFFF6B73),
+    'reservation_created' => const Color(0xFFFF6B73),
+    'reservation_approved' => const Color(0xFFFF6B73),
     'reservation_rejected' => const Color(0xFFC24949),
-    'reservation_completed' => const Color(0xFF2E8B57),
+    'reservation_completed' => const Color(0xFFFF6B73),
     'reservation_cancelled' => const Color(0xFFC24949),
-    'reservation_expired' => const Color(0xFFD39B2A),
-    'reservation_updated' => const Color(0xFF31547D),
-    _ => const Color(0xFF31547D),
+    'reservation_expired' => const Color(0xFFFF3B47),
+    'reservation_updated' => const Color(0xFF5A1018),
+    _ => const Color(0xFF5A1018),
   };
 }
 

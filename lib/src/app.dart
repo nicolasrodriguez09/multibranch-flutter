@@ -119,7 +119,7 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: _navigatorKey,
-      title: 'Multi-Branch Inventory',
+      title: 'Red Stock',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
       home: _AuthGate(
@@ -246,7 +246,7 @@ class _SystemStatePage extends StatelessWidget {
                     padding: const EdgeInsets.all(28),
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
-                        colors: [Color(0xCC11284C), Color(0xCC08172D)],
+                        colors: [Color(0xEE151016), Color(0xEE08090C)],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
@@ -254,7 +254,7 @@ class _SystemStatePage extends StatelessWidget {
                       border: Border.all(color: AppPalette.panelBorder),
                       boxShadow: const [
                         BoxShadow(
-                          color: Color(0x66050E1E),
+                          color: Color(0x99000000),
                           blurRadius: 36,
                           offset: Offset(0, 20),
                         ),
@@ -270,7 +270,7 @@ class _SystemStatePage extends StatelessWidget {
                             vertical: 8,
                           ),
                           decoration: BoxDecoration(
-                            color: const Color(0x1FFFFFFF),
+                            color: const Color(0x1FFF2636),
                             borderRadius: BorderRadius.circular(999),
                             border: Border.all(color: AppPalette.panelBorder),
                           ),
@@ -376,19 +376,19 @@ class _SystemBackdrop extends StatelessWidget {
         children: const [
           _GlowBubble(
             alignment: Alignment.topCenter,
-            color: Color(0x552C7BFF),
+            color: Color(0x55FF2636),
             size: 340,
             offsetY: -110,
           ),
           _GlowBubble(
             alignment: Alignment.centerLeft,
-            color: Color(0x33A4F1FF),
+            color: Color(0x33FF2636),
             size: 260,
             offsetX: -110,
           ),
           _GlowBubble(
             alignment: Alignment.bottomRight,
-            color: Color(0x44FF8B2C),
+            color: Color(0x44FF2636),
             size: 260,
             offsetX: 120,
             offsetY: 90,

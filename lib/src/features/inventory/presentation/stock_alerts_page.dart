@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../core/app_theme.dart';
+import '../../auth/application/auth_service.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
 import 'branch_panel_drawer.dart';
@@ -14,10 +15,12 @@ class StockAlertsPage extends StatefulWidget {
     super.key,
     required this.service,
     required this.currentUser,
+    this.authService,
   });
 
   final InventoryWorkflowService service;
   final AppUser currentUser;
+  final AuthService? authService;
 
   @override
   State<StockAlertsPage> createState() => _StockAlertsPageState();
@@ -143,6 +146,7 @@ class _StockAlertsPageState extends State<StockAlertsPage> {
         service: widget.service,
         currentUser: widget.currentUser,
         currentDestination: BranchPanelDestination.stockAlerts,
+        authService: widget.authService,
       ),
       appBar: AppBar(
         title: const Text('Alertas de stock'),
@@ -161,7 +165,7 @@ class _StockAlertsPageState extends State<StockAlertsPage> {
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF081A33), Color(0xFF0A2142), Color(0xFF08172D)],
+            colors: [Color(0xFF07080B), Color(0xFF101116), Color(0xFF08090C)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -264,13 +268,13 @@ class _AlertsHero extends StatelessWidget {
         gradient: LinearGradient(
           colors: [
             accent.withValues(alpha: 0.25),
-            const Color(0xFF17365E),
-            const Color(0xFF0C1D36),
+            const Color(0xFF3A1116),
+            const Color(0xFF121318),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        border: Border.all(color: const Color(0x33FFFFFF)),
+        border: Border.all(color: const Color(0x33FF2636)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(18),
@@ -364,7 +368,7 @@ class _AlertMetric extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0x22FFFFFF)),
+        border: Border.all(color: const Color(0x22FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -477,7 +481,7 @@ class _AlertCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(22),
-        color: const Color(0x1C102545),
+        color: const Color(0x221D1F26),
         border: Border.all(color: accent.withValues(alpha: 0.28)),
       ),
       child: Column(
@@ -629,7 +633,7 @@ class _MetaPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0x22FFFFFF)),
+        border: Border.all(color: const Color(0x22FF2636)),
       ),
       child: Text(
         label,
@@ -650,7 +654,7 @@ class _EmptyAlertsCard extends StatelessWidget {
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(22),
-        color: const Color(0x1C102545),
+        color: const Color(0x221D1F26),
         border: Border.all(color: AppPalette.panelBorder),
       ),
       child: Column(
@@ -700,7 +704,7 @@ class _AlertErrorCard extends StatelessWidget {
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
-        color: const Color(0x331E2330),
+        color: const Color(0x33FF2636),
         border: Border.all(color: AppPalette.panelBorder),
       ),
       child: Column(

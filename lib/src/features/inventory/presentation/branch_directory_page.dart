@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../core/app_theme.dart';
+import '../../auth/application/auth_service.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
 import '../domain/role_permissions.dart';
@@ -27,12 +28,14 @@ class BranchDirectoryPage extends StatefulWidget {
     super.key,
     required this.service,
     required this.currentUser,
+    this.authService,
     this.selectedProductId,
     this.locationResolver,
   });
 
   final InventoryWorkflowService service;
   final AppUser currentUser;
+  final AuthService? authService;
   final String? selectedProductId;
   final BranchLocationResolver? locationResolver;
 
@@ -488,6 +491,7 @@ class _BranchDirectoryPageState extends State<BranchDirectoryPage>
         service: widget.service,
         currentUser: widget.currentUser,
         currentDestination: BranchPanelDestination.branches,
+        authService: widget.authService,
       ),
       appBar: AppBar(
         title: const Text('Sucursales'),
@@ -504,7 +508,7 @@ class _BranchDirectoryPageState extends State<BranchDirectoryPage>
         ],
       ),
       body: Container(
-        color: const Color(0xFF08172D),
+        color: const Color(0xFF08090C),
         child: SafeArea(top: false, child: content),
       ),
     );
@@ -527,9 +531,9 @@ class _BranchDirectoryHeader extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -613,9 +617,9 @@ class _BranchDirectoryFilters extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -849,9 +853,9 @@ class _BranchCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -991,9 +995,9 @@ class _BranchDirectoryEmptyState extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Text(
         'No hay sucursales que coincidan con los filtros actuales.',
@@ -1024,9 +1028,9 @@ class _BranchDirectoryErrorState extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
-              color: const Color(0xFF102540),
+              color: const Color(0xFF17191F),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0x26FFFFFF)),
+              border: Border.all(color: const Color(0x26FF2636)),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1123,7 +1127,7 @@ class _InfoPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Text(
         label,
@@ -1149,7 +1153,7 @@ class _StockChip extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0x1FFFFFFF)),
+        border: Border.all(color: const Color(0x1FFF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

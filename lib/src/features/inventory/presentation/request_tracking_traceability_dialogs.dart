@@ -106,7 +106,7 @@ class _TransferRequestTraceabilityDialogState
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF08172D),
+      backgroundColor: const Color(0xFF08090C),
       insetPadding: const EdgeInsets.all(16),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 880, maxHeight: 780),
@@ -475,7 +475,7 @@ class _ReservationRequestTraceabilityDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF08172D),
+      backgroundColor: const Color(0xFF08090C),
       insetPadding: const EdgeInsets.all(16),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 880, maxHeight: 780),
@@ -781,11 +781,11 @@ class _TraceabilityActionPanel extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(22),
         gradient: const LinearGradient(
-          colors: [Color(0xFF1C3E73), Color(0xFF11284B)],
+          colors: [Color(0xFF3A1116), Color(0xFF151016)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        border: Border.all(color: const Color(0x33FFFFFF)),
+        border: Border.all(color: const Color(0x33FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -840,9 +840,9 @@ class _TraceabilityBlock extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: child,
     );
@@ -1181,7 +1181,7 @@ class _AuditTimelineTile extends StatelessWidget {
                               color: Colors.white.withValues(alpha: 0.06),
                               borderRadius: BorderRadius.circular(999),
                               border: Border.all(
-                                color: const Color(0x26FFFFFF),
+                                color: const Color(0x26FF2636),
                               ),
                             ),
                             child: Text(
@@ -1315,19 +1315,19 @@ IconData _auditActionIcon(String value) {
 
 Color _auditActionColor(String value) {
   return switch (value.trim().toLowerCase()) {
-    'transfer_requested' => const Color(0xFFD39B2A),
-    'transfer_approved' => const Color(0xFF2E8B57),
+    'transfer_requested' => const Color(0xFFFF3B47),
+    'transfer_approved' => const Color(0xFFFF6B73),
     'transfer_rejected' => const Color(0xFFC24949),
-    'transfer_in_transit' => const Color(0xFF2A8AC7),
-    'transfer_received' => const Color(0xFF1F7A8C),
-    'reservation_created' => const Color(0xFF1F7A8C),
-    'reservation_approved' => const Color(0xFF2E8B57),
+    'transfer_in_transit' => const Color(0xFFFF9AA1),
+    'transfer_received' => const Color(0xFFFF6B73),
+    'reservation_created' => const Color(0xFFFF6B73),
+    'reservation_approved' => const Color(0xFFFF6B73),
     'reservation_rejected' => const Color(0xFFC24949),
-    'reservation_completed' => const Color(0xFF2E8B57),
+    'reservation_completed' => const Color(0xFFFF6B73),
     'reservation_cancelled' => const Color(0xFFC24949),
-    'reservation_expired' => const Color(0xFFD39B2A),
-    'reservation_updated' => const Color(0xFF31547D),
-    _ => const Color(0xFF31547D),
+    'reservation_expired' => const Color(0xFFFF3B47),
+    'reservation_updated' => const Color(0xFF5A1018),
+    _ => const Color(0xFF5A1018),
   };
 }
 

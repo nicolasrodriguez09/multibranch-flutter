@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/app_theme.dart';
+import '../../auth/application/auth_service.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
 import 'branch_panel_drawer.dart';
@@ -10,10 +11,12 @@ class NotificationInboxPage extends StatefulWidget {
     super.key,
     required this.service,
     required this.currentUser,
+    this.authService,
   });
 
   final InventoryWorkflowService service;
   final AppUser currentUser;
+  final AuthService? authService;
 
   @override
   State<NotificationInboxPage> createState() => _NotificationInboxPageState();
@@ -100,12 +103,13 @@ class _NotificationInboxPageState extends State<NotificationInboxPage> {
         service: widget.service,
         currentUser: widget.currentUser,
         currentDestination: BranchPanelDestination.notifications,
+        authService: widget.authService,
       ),
       appBar: AppBar(title: const Text('Notificaciones')),
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF081A33), Color(0xFF0A2142), Color(0xFF08172D)],
+            colors: [Color(0xFF07080B), Color(0xFF101116), Color(0xFF08090C)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -225,11 +229,11 @@ class _NotificationSummaryCard extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(22),
         gradient: const LinearGradient(
-          colors: [Color(0xFF214C9A), Color(0xFF173C78), Color(0xFF102543)],
+          colors: [Color(0xFF8B121E), Color(0xFF551018), Color(0xFF151016)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        border: Border.all(color: const Color(0x33FFFFFF)),
+        border: Border.all(color: const Color(0x33FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -408,12 +412,12 @@ class _NotificationCard extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: notification.isRead
-                ? const Color(0xFF0F223E)
-                : const Color(0xFF132A4A),
+                ? const Color(0xFF251114)
+                : const Color(0xFF2A1014),
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
               color: notification.isRead
-                  ? const Color(0x1FFFFFFF)
+                  ? const Color(0x1FFF2636)
                   : visual.color.withValues(alpha: 0.48),
             ),
           ),
@@ -606,9 +610,9 @@ class _EmptyNotificationState extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

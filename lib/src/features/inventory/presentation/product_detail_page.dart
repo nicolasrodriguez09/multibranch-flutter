@@ -196,7 +196,7 @@ class _ProductDetailPageState extends State<ProductDetailPage>
         ],
       ),
       body: Container(
-        color: const Color(0xFF08172D),
+        color: const Color(0xFF08090C),
         child: SafeArea(top: false, child: body),
       ),
     );
@@ -556,7 +556,7 @@ class _BranchStockCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.04),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x1FFFFFFF)),
+        border: Border.all(color: const Color(0x1FFF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -701,7 +701,7 @@ class _DataReliabilityPanel extends StatelessWidget {
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.06),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0x26FFFFFF)),
+                border: Border.all(color: const Color(0x26FF2636)),
               ),
               child: Text(
                 'Mostrando informacion desde cache local. Confirma antes de comunicar si el cliente necesita una validacion exacta.',
@@ -825,7 +825,7 @@ class _AlternativeBranchSuggestionPanelState
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.04),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0x1FFFFFFF)),
+              border: Border.all(color: const Color(0x1FFF2636)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -972,7 +972,7 @@ class _ProductImageBox extends StatelessWidget {
     final decoration = BoxDecoration(
       color: Colors.white.withValues(alpha: 0.05),
       borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: const Color(0x26FFFFFF)),
+      border: Border.all(color: const Color(0x26FF2636)),
     );
 
     if (imageUrl.isEmpty) {
@@ -1053,9 +1053,9 @@ class _DetailPanel extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: child,
     );
@@ -1122,7 +1122,7 @@ class _MetricPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Text(
         label,
@@ -1148,7 +1148,7 @@ class _StockMetricTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0x1FFFFFFF)),
+        border: Border.all(color: const Color(0x1FFF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
