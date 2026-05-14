@@ -301,7 +301,7 @@ class _ProductSearchPageState extends State<ProductSearchPage>
     final result = await showModalBottomSheet<_FilterSheetResult>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF0D1E36),
+      backgroundColor: const Color(0xFF101116),
       builder: (context) => _ProductFiltersSheet(
         options: _filterOptions!,
         initialFilters: _filters,
@@ -479,7 +479,7 @@ class _ProductSearchPageState extends State<ProductSearchPage>
         ],
       ),
       body: Container(
-        color: const Color(0xFF08172D),
+        color: const Color(0xFF08090C),
         child: SafeArea(
           top: false,
           child: Column(
@@ -773,7 +773,7 @@ class _FilterButton extends StatelessWidget {
               onPressed: onPressed,
               style: FilledButton.styleFrom(
                 padding: EdgeInsets.zero,
-                backgroundColor: const Color(0xFF153258),
+                backgroundColor: const Color(0xFF1E2027),
               ),
               child: const Icon(Icons.tune_rounded),
             ),
@@ -787,7 +787,7 @@ class _FilterButton extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: AppPalette.amber,
                   borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: const Color(0xFF08172D), width: 2),
+                  border: Border.all(color: const Color(0xFF08090C), width: 2),
                 ),
                 child: Text(
                   '$activeCount',
@@ -819,7 +819,7 @@ class _IconShortcutButton extends StatelessWidget {
         onPressed: onPressed,
         style: FilledButton.styleFrom(
           padding: EdgeInsets.zero,
-          backgroundColor: const Color(0xFF153258),
+          backgroundColor: const Color(0xFF1E2027),
         ),
         child: Icon(icon),
       ),
@@ -866,9 +866,9 @@ class _SearchSummary extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: const Color(0x1AFFB84D),
+                color: const Color(0x1AFF2636),
                 borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: const Color(0x33FFB84D)),
+                border: Border.all(color: const Color(0x33FF2636)),
               ),
               child: Text(
                 'CACHE LOCAL',
@@ -896,9 +896,9 @@ class _CacheNoticeCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x33FFB84D)),
+        border: Border.all(color: const Color(0x33FF2636)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -955,9 +955,9 @@ class _ActiveFiltersCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1003,9 +1003,9 @@ class _SearchHintCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1051,9 +1051,9 @@ class _SavedFiltersCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1168,9 +1168,9 @@ class _RecentSearchesCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1220,9 +1220,9 @@ class _RecentCachedProductsCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1293,9 +1293,9 @@ class _SearchFeedbackCard extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: const Color(0xFF102540),
+              color: const Color(0xFF17191F),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0x26FFFFFF)),
+              border: Border.all(color: const Color(0x26FF2636)),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1364,9 +1364,9 @@ class _SearchResultCard extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: const Color(0xFF102540),
+            color: const Color(0xFF17191F),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0x26FFFFFF)),
+            border: Border.all(color: const Color(0x26FF2636)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1470,7 +1470,7 @@ class _SearchInfoPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Text(
         label,

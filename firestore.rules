@@ -42,6 +42,16 @@ service cloud.firestore {
       return hasUserProfile() && (isAdmin() || hasSameBranch(branchId) || isSeller() || isSupervisor());
     }
 
+    function canCreateOwnSuccessfulSyncLog(data) {
+      return isSupervisor()
+        && data.branchId is string
+        && hasSameBranch(data.branchId)
+        && data.branchName is string
+        && data.type == 'inventory'
+        && (data.status == 'success' || data.status == 'completed' || data.status == 'ok')
+        && data.recordsProcessed is int;
+    }
+
     function canManageInventory(branchId) {
       return isAdmin() || (isSupervisor() && hasSameBranch(branchId));
     }
@@ -83,10 +93,74 @@ service cloud.firestore {
       return isAdmin() || ((isSeller() || isSupervisor()) && hasSameBranch(branchId));
     }
 
+    function canRegisterSale(branchId) {
+      return isAdmin() || ((isSeller() || isSupervisor()) && hasSameBranch(branchId));
+    }
+
+    function canReadSale(data) {
+      return isAdmin()
+        || (isSupervisor() && hasSameBranch(data.branchId))
+        || (signedIn() && data.sellerId == request.auth.uid);
+    }
+
     function validInventoryDerivedFields(data) {
       return data.availableStock == data.stock - data.reservedStock
         && data.isLowStock == (data.availableStock <= data.minimumStock)
         && data.updatedBy == request.auth.uid;
+    }
+
+    function sameInventoryCatalogScope(data, existing) {
+      return data.branchId == existing.branchId
+        && data.branchName == existing.branchName
+        && data.productId == existing.productId
+        && data.productName == existing.productName
+        && data.sku == existing.sku
+        && data.minimumStock == existing.minimumStock
+        && data.isActive == existing.isActive
+        && data.lastSyncAt == existing.lastSyncAt;
+    }
+
+    function canRecordIncomingTransferInventory(data, existing) {
+      return isSupervisor()
+        && sameInventoryCatalogScope(data, existing)
+        && data.stock == existing.stock
+        && data.reservedStock == existing.reservedStock
+        && data.availableStock == existing.availableStock
+        && data.incomingStock > existing.incomingStock;
+    }
+
+    function canCreateIncomingTransferInventory(data) {
+      return isSupervisor()
+        && data.branchId is string
+        && data.branchName is string
+        && data.productId is string
+        && data.productName is string
+        && data.sku is string
+        && data.stock == 0
+        && data.reservedStock == 0
+        && data.availableStock == 0
+        && data.incomingStock > 0
+        && data.minimumStock == 0
+        && data.isActive == true;
+    }
+
+    function canReceiveIncomingTransferInventory(data, existing) {
+      return (isSeller() || isSupervisor())
+        && hasSameBranch(existing.branchId)
+        && sameInventoryCatalogScope(data, existing)
+        && data.reservedStock == existing.reservedStock
+        && data.stock > existing.stock
+        && data.incomingStock < existing.incomingStock
+        && data.stock - existing.stock == existing.incomingStock - data.incomingStock;
+    }
+
+    function canRegisterSaleInventory(data, existing) {
+      return (isSeller() || isSupervisor())
+        && hasSameBranch(existing.branchId)
+        && sameInventoryCatalogScope(data, existing)
+        && data.reservedStock == existing.reservedStock
+        && data.incomingStock == existing.incomingStock
+        && data.stock < existing.stock;
     }
 
     function sameTransferScope(data, existing) {
@@ -137,6 +211,43 @@ service cloud.firestore {
         && data.productId == existing.productId;
     }
 
+    function canReadTransferAudit(entityId) {
+      return exists(/databases/$(database)/documents/transfers/$(entityId))
+        && (
+          isAdmin()
+          || canReadBranch(get(/databases/$(database)/documents/transfers/$(entityId)).data.fromBranchId)
+          || canReadBranch(get(/databases/$(database)/documents/transfers/$(entityId)).data.toBranchId)
+        );
+    }
+
+    function canReadReservationAudit(entityId) {
+      return exists(/databases/$(database)/documents/reservations/$(entityId))
+        && canReadReservation(
+          get(/databases/$(database)/documents/reservations/$(entityId)).data
+        );
+    }
+
+    function canReadSaleAudit(entityId) {
+      return exists(/databases/$(database)/documents/sales/$(entityId))
+        && canReadSale(get(/databases/$(database)/documents/sales/$(entityId)).data);
+    }
+
+    function canReadAuditLog(data) {
+      return isAdmin()
+        || (
+          data.entityType == 'transfer'
+          && canReadTransferAudit(data.entityId)
+        )
+        || (
+          data.entityType == 'reservation'
+          && canReadReservationAudit(data.entityId)
+        )
+        || (
+          data.entityType == 'sale'
+          && canReadSaleAudit(data.entityId)
+        );
+    }
+
     match /users/{userId} {
       allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
       allow create: if isAdmin();
@@ -168,14 +279,36 @@ service cloud.firestore {
     match /inventories/{inventoryId} {
       allow read: if canReadInventory(resource.data.branchId);
       allow create: if signedIn()
-        && canManageInventory(request.resource.data.branchId)
-        && validInventoryDerivedFields(request.resource.data);
+        && validInventoryDerivedFields(request.resource.data)
+        && (
+          canManageInventory(request.resource.data.branchId)
+          || canCreateIncomingTransferInventory(request.resource.data)
+        );
       allow update: if signedIn()
-        && canManageInventory(request.resource.data.branchId)
         && validInventoryDerivedFields(request.resource.data)
         && request.resource.data.branchId == resource.data.branchId
-        && request.resource.data.productId == resource.data.productId;
+        && request.resource.data.productId == resource.data.productId
+        && (
+          canManageInventory(request.resource.data.branchId)
+          || canRecordIncomingTransferInventory(request.resource.data, resource.data)
+          || canReceiveIncomingTransferInventory(request.resource.data, resource.data)
+          || canRegisterSaleInventory(request.resource.data, resource.data)
+        );
       allow delete: if isAdmin();
+    }
+
+    match /sales/{saleId} {
+      allow read: if canReadSale(resource.data);
+      allow create: if hasUserProfile()
+        && request.resource.data.sellerId == request.auth.uid
+        && canRegisterSale(request.resource.data.branchId)
+        && request.resource.data.quantity is int
+        && request.resource.data.quantity > 0
+        && request.resource.data.unitPrice is number
+        && request.resource.data.unitPrice > 0
+        && request.resource.data.totalPrice is number
+        && request.resource.data.totalPrice > 0;
+      allow update, delete: if isAdmin();
     }
 
     match /transfers/{transferId} {
@@ -257,8 +390,9 @@ service cloud.firestore {
     }
 
     match /sync_logs/{syncId} {
-      allow read: if hasUserProfile();
-      allow write: if isAdmin();
+      allow read: if signedIn();
+      allow create: if isAdmin() || canCreateOwnSuccessfulSyncLog(request.resource.data);
+      allow update, delete: if isAdmin();
     }
 
     match /stock_alert_reads/{readId} {
@@ -282,7 +416,7 @@ service cloud.firestore {
     }
 
     match /audit_logs/{auditId} {
-      allow read: if isAdmin();
+      allow read: if canReadAuditLog(resource.data);
       allow create: if hasUserProfile()
         && request.resource.data.actorUserId == request.auth.uid
         && request.resource.data.actorRole == currentUser().role;
@@ -301,6 +435,14 @@ service cloud.firestore {
       allow create, update: if signedIn()
         && (request.resource.data.userId == request.auth.uid || isAdmin());
       allow delete: if signedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    match /request_logs/{requestId} {
+      allow read: if isAdmin();
+      allow create: if hasUserProfile()
+        && request.resource.data.actorUserId == request.auth.uid
+        && request.resource.data.actorRole == currentUser().role;
+      allow update, delete: if isAdmin();
     }
   }
 }

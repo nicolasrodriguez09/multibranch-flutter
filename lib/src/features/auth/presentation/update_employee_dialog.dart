@@ -88,7 +88,7 @@ class _UpdateEmployeeDialogState extends State<UpdateEmployeeDialog> {
         constraints: const BoxConstraints(maxWidth: 620),
         padding: const EdgeInsets.all(26),
         decoration: BoxDecoration(
-          color: const Color(0xFF0C1D36),
+          color: const Color(0xFF121318),
           borderRadius: BorderRadius.circular(24),
           border: Border.all(color: AppPalette.panelBorder),
         ),

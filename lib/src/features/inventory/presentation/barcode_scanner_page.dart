@@ -200,7 +200,7 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage>
     return Scaffold(
       appBar: AppBar(title: const Text('Escanear codigo de barras')),
       body: Container(
-        color: const Color(0xFF08172D),
+        color: const Color(0xFF08090C),
         child: SafeArea(
           top: false,
           child: ListView(
@@ -450,9 +450,9 @@ class _Panel extends StatelessWidget {
     return Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: child,
     );
@@ -468,7 +468,7 @@ class _ScannerFallback extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ColoredBox(
-      color: const Color(0xFF06152A),
+      color: const Color(0xFF050506),
       child: Center(
         child: Padding(
           padding: const EdgeInsets.all(20),

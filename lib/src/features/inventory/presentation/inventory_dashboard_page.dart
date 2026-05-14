@@ -10,12 +10,17 @@ import '../domain/models.dart';
 import '../domain/role_permissions.dart';
 import 'approval_requests_page.dart';
 import 'auto_refresh_state_mixin.dart';
+import 'admin_catalog_page.dart';
 import 'branch_directory_page.dart';
+import 'branch_panel_drawer.dart';
 import 'create_branch_dialog.dart';
 import 'notifications_page.dart';
+import 'inventory_adjustment_page.dart';
 import 'product_search_page.dart';
 import 'request_tracking_page.dart';
 import 'reservation_request_page.dart';
+import 'sales_register_page.dart';
+import 'sales_report_page.dart';
 import 'sync_status_page.dart';
 import 'stock_alerts_page.dart';
 import 'transfer_request_page.dart';
@@ -78,7 +83,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         return;
       }
       _showStatusMessage(
-        'Base inicial creada. Ya puedes revisar inventarios, solicitudes y sincronizaciones.',
+        'Base inicial creada. Ya puedes revisar inventarios, solicitudes y monitoreo de actualizacion.',
       );
       await _refreshDashboard(isManual: true, forceRefresh: true);
     } catch (error) {
@@ -148,7 +153,20 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
       MaterialPageRoute<void>(
         builder: (context) => EmployeeManagementPage(
           authService: widget.authService,
+          inventoryService: widget.service,
           currentUser: widget.currentUser,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openAdminCatalogPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => AdminCatalogPage(
+          service: widget.service,
+          currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -160,6 +178,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => _AdminTraceabilityPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -182,6 +201,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => BranchDirectoryPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -193,6 +213,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => TransferRequestPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -204,6 +225,31 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => ReservationRequestPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openSalesRegisterPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => SalesRegisterPage(
+          service: widget.service,
+          currentUser: widget.currentUser,
+          authService: widget.authService,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openSalesReportPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => SalesReportPage(
+          service: widget.service,
+          currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -296,6 +342,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => ApprovalRequestsPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -307,6 +354,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => NotificationInboxPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -318,6 +366,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => RequestTrackingPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -329,6 +378,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => SyncStatusPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -340,6 +390,19 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         builder: (context) => StockAlertsPage(
           service: widget.service,
           currentUser: widget.currentUser,
+          authService: widget.authService,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openInventoryAdjustmentPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => InventoryAdjustmentPage(
+          service: widget.service,
+          currentUser: widget.currentUser,
+          authService: widget.authService,
         ),
       ),
     );
@@ -368,8 +431,8 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
       _BranchDashboardSection.inventory => 'Inventario y alertas',
       _BranchDashboardSection.workflow =>
         role == UserRole.seller
-            ? 'Compromisos y sincronizacion'
-            : 'Solicitudes y sincronizacion',
+            ? 'Compromisos y monitoreo'
+            : 'Solicitudes y monitoreo',
       _BranchDashboardSection.metrics => 'KPIs operativos',
     };
   }
@@ -471,6 +534,49 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         icon: Icons.fact_check_rounded,
         accent: AppPalette.amber,
         onPressed: _openApprovalRequestsPage,
+      ),
+      const SizedBox(height: 18),
+      const _AdminSectionHeader(title: 'Gobierno administrativo'),
+      const SizedBox(height: 12),
+      _DashboardGrid(
+        children: [
+          _WorkflowActionCard(
+            title: 'Catalogo maestro',
+            subtitle:
+                'Crea categorias y productos base para que todas las sedes operen sobre el mismo inventario.',
+            buttonLabel: 'Gestionar catalogo',
+            icon: Icons.inventory_2_rounded,
+            accent: AppPalette.cyan,
+            onPressed: _openAdminCatalogPage,
+          ),
+          _WorkflowActionCard(
+            title: 'Empleados y roles',
+            subtitle:
+                'Alta y mantenimiento de usuarios seller, supervisor y administrador.',
+            buttonLabel: 'Gestionar empleados',
+            icon: Icons.manage_accounts_rounded,
+            accent: AppPalette.mint,
+            onPressed: _openEmployeeManagementPage,
+          ),
+          _WorkflowActionCard(
+            title: 'Sucursales',
+            subtitle:
+                'Consulta la red completa y registra nuevas sedes cuando el negocio crezca.',
+            buttonLabel: 'Ver sucursales',
+            icon: Icons.store_mall_directory_rounded,
+            accent: AppPalette.amber,
+            onPressed: _openBranchDirectoryPage,
+          ),
+          _WorkflowActionCard(
+            title: 'Ventas globales',
+            subtitle:
+                'Revisa ventas por dia, vendedor, sede, producto, cantidad y valor.',
+            buttonLabel: 'Ver ventas',
+            icon: Icons.receipt_long_rounded,
+            accent: AppPalette.blueSoft,
+            onPressed: _openSalesReportPage,
+          ),
+        ],
       ),
       const SizedBox(height: 18),
       _OperationalMetricsSection(
@@ -600,6 +706,17 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
     return [
       ..._buildBranchSectionShell(user, 'Inventario y alertas'),
       const SizedBox(height: 18),
+      if (user.can(AppPermission.manageInventory))
+        _WorkflowActionCard(
+          title: 'Ajuste de inventario',
+          subtitle:
+              'Actualiza stock fisico y minimos operativos sin salir del panel de sucursal.',
+          buttonLabel: 'Abrir ajustes',
+          icon: Icons.tune_rounded,
+          accent: AppPalette.cyan,
+          onPressed: _openInventoryAdjustmentPage,
+        ),
+      if (user.can(AppPermission.manageInventory)) const SizedBox(height: 18),
       _WorkflowActionCard(
         title: 'Alertas de stock',
         subtitle:
@@ -638,8 +755,8 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
 
   List<Widget> _buildBranchWorkflowSections(AppUser user) {
     final title = user.role == UserRole.seller
-        ? 'Compromisos y sincronizacion'
-        : 'Solicitudes y sincronizacion';
+        ? 'Compromisos y monitoreo'
+        : 'Solicitudes y monitoreo';
     final pendingTitle = user.role == UserRole.seller
         ? 'Compromisos activos'
         : 'Solicitudes pendientes';
@@ -647,14 +764,34 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         ? 'Reservas activas y traslados pendientes vinculados a tus ventas.'
         : 'Reservas activas y traslados que requieren seguimiento de la sucursal.';
     final syncSubtitle = user.role == UserRole.seller
-        ? 'Eventos recientes para validar que la informacion local este al dia.'
-        : 'Trazabilidad reciente de sincronizacion para validar continuidad operativa.';
+        ? 'Eventos recientes para validar que la informacion local siga vigente.'
+        : 'Trazabilidad reciente de actualizacion para validar continuidad operativa.';
 
     return [
       ..._buildBranchSectionShell(user, title),
       const SizedBox(height: 18),
       _DashboardGrid(
         children: [
+          if (user.can(AppPermission.registerSale))
+            _WorkflowActionCard(
+              title: 'Registrar venta',
+              subtitle:
+                  'Descuenta stock de tu sede y guarda hora, vendedor, precio, cliente y metodo de pago.',
+              buttonLabel: 'Nueva venta',
+              icon: Icons.point_of_sale_rounded,
+              accent: AppPalette.mint,
+              onPressed: _openSalesRegisterPage,
+            ),
+          if (user.can(AppPermission.viewBranchSales))
+            _WorkflowActionCard(
+              title: 'Ventas de sucursal',
+              subtitle:
+                  'Consulta ventas por dia con detalle de vendedor, cantidad, precio y trazabilidad.',
+              buttonLabel: 'Ver ventas',
+              icon: Icons.receipt_long_rounded,
+              accent: AppPalette.mint,
+              onPressed: _openSalesReportPage,
+            ),
           if (user.can(AppPermission.approveTransfer) ||
               user.can(AppPermission.approveReservation))
             _WorkflowActionCard(
@@ -676,32 +813,42 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
             onPressed: _openRequestTrackingPage,
           ),
           _WorkflowActionCard(
-            title: 'Estado de sincronizacion',
-            subtitle:
-                'Revisa la salud de la API y la ultima sincronizacion de cada sucursal.',
+            title: user.role == UserRole.seller
+                ? 'Confiabilidad del inventario'
+                : 'Estado de actualizacion',
+            subtitle: user.role == UserRole.seller
+                ? 'Revisa si el stock de las sucursales esta vigente antes de prometer una venta.'
+                : 'Revisa la vigencia del dato y la ultima actualizacion registrada por sucursal.',
             buttonLabel: 'Ver estado',
             icon: Icons.cloud_done_rounded,
             accent: AppPalette.mint,
             onPressed: _openSyncStatusPage,
           ),
-          _WorkflowActionCard(
-            title: 'Reservar producto',
-            subtitle:
-                'Asegura unidades en otra sucursal para sostener una venta confirmada.',
-            buttonLabel: 'Nueva reserva',
-            icon: Icons.bookmark_add_rounded,
-            accent: AppPalette.blueSoft,
-            onPressed: _openReservationRequestPage,
-          ),
-          _WorkflowActionCard(
-            title: 'Solicitar traslado',
-            subtitle:
-                'Crea una solicitud hacia tu sucursal cuando otra sede tenga disponibilidad.',
-            buttonLabel: 'Nuevo traslado',
-            icon: Icons.local_shipping_rounded,
-            accent: AppPalette.amber,
-            onPressed: _openTransferRequestPage,
-          ),
+          if (user.role == UserRole.seller)
+            _SellerProductAcquisitionCard(
+              onReserve: _openReservationRequestPage,
+              onTransfer: _openTransferRequestPage,
+            )
+          else ...[
+            _WorkflowActionCard(
+              title: 'Reservar producto',
+              subtitle:
+                  'Asegura unidades en otra sucursal para sostener una venta confirmada.',
+              buttonLabel: 'Nueva reserva',
+              icon: Icons.bookmark_add_rounded,
+              accent: AppPalette.blueSoft,
+              onPressed: _openReservationRequestPage,
+            ),
+            _WorkflowActionCard(
+              title: 'Solicitar traslado',
+              subtitle:
+                  'Crea una solicitud hacia tu sucursal cuando otra sede tenga disponibilidad.',
+              buttonLabel: 'Nuevo traslado',
+              icon: Icons.local_shipping_rounded,
+              accent: AppPalette.amber,
+              onPressed: _openTransferRequestPage,
+            ),
+          ],
         ],
       ),
       const SizedBox(height: 18),
@@ -716,7 +863,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
           _LatestSyncsPanel(
             service: widget.service,
             branchId: user.branchId,
-            title: 'Ultimas sincronizaciones',
+            title: 'Ultimas actualizaciones',
             subtitle: syncSubtitle,
           ),
         ],
@@ -806,14 +953,26 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
       ),
       drawer: _AdminDrawer(
         user: user,
+        onOpenDashboard: () => Navigator.of(context).pop(),
         isCreating: _isCreating,
         isCreatingBranch: _isCreatingBranch,
+        onOpenNotifications: () => _runDrawerAction(_openNotificationsPage),
+        onOpenStockAlerts: () => _runDrawerAction(_openStockAlertsPage),
+        onOpenSyncStatus: () => _runDrawerAction(_openSyncStatusPage),
+        onOpenApprovalRequests: () =>
+            _runDrawerAction(_openApprovalRequestsPage),
         onCreateBaseData: _isCreating
             ? null
             : () => _runDrawerAction(_createBaseData),
         onCreateBranch: _isCreatingBranch
             ? null
             : () => _runDrawerAction(_openCreateBranchDialog),
+        onOpenCatalog: () => _runDrawerAction(_openAdminCatalogPage),
+        onOpenBranches: () => _runDrawerAction(_openBranchDirectoryPage),
+        onOpenInventoryAdjustment: () =>
+            _runDrawerAction(_openInventoryAdjustmentPage),
+        onOpenSalesReport: () => _runDrawerAction(_openSalesReportPage),
+        onOpenRequestTracking: () => _runDrawerAction(_openRequestTrackingPage),
         onManageEmployees: () => _runDrawerAction(_openEmployeeManagementPage),
         onOpenTraceability: () => _runDrawerAction(_openAdminTraceabilityPage),
         onSignOut: widget.authService.signOut,
@@ -821,7 +980,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF081A33), Color(0xFF0A2142), Color(0xFF08172D)],
+            colors: [Color(0xFF07080B), Color(0xFF101116), Color(0xFF08090C)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -874,25 +1033,16 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
           ),
           Padding(
             padding: const EdgeInsets.only(right: 8),
-            child: _ToolbarButton(
-              icon: _isRefreshing
-                  ? Icons.hourglass_top_rounded
-                  : Icons.sync_rounded,
-              onPressed: _isRefreshing
-                  ? () {}
-                  : () => _refreshDashboard(isManual: true),
+            child: _BranchAppBarMenu(
+              service: widget.service,
+              currentUser: user,
+              isRefreshing: _isRefreshing,
+              onRefresh: () => _refreshDashboard(isManual: true),
+              onOpenApprovalRequests: _openApprovalRequestsPage,
+              onOpenRequestTracking: _openRequestTrackingPage,
+              onOpenSyncStatus: _openSyncStatusPage,
             ),
           ),
-          if (user.can(AppPermission.approveTransfer) ||
-              user.can(AppPermission.approveReservation))
-            Padding(
-              padding: const EdgeInsets.only(right: 16),
-              child: _ApprovalInboxButton(
-                service: widget.service,
-                currentUser: user,
-                onPressed: () => unawaited(_openApprovalRequestsPage()),
-              ),
-            ),
         ],
       ),
       drawer: _BranchDrawer(
@@ -904,6 +1054,24 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         sectionIconBuilder: _branchSectionIcon,
         onSelectSection: _selectBranchSection,
         onOpenBranches: () => _runDrawerAction(_openBranchDirectoryPage),
+        onOpenNotifications: () => _runDrawerAction(_openNotificationsPage),
+        onOpenStockAlerts: () => _runDrawerAction(_openStockAlertsPage),
+        onOpenSyncStatus: () => _runDrawerAction(_openSyncStatusPage),
+        onOpenInventoryAdjustment: user.can(AppPermission.manageInventory)
+            ? () => _runDrawerAction(_openInventoryAdjustmentPage)
+            : null,
+        onOpenApprovalRequests:
+            user.can(AppPermission.approveTransfer) ||
+                user.can(AppPermission.approveReservation)
+            ? () => _runDrawerAction(_openApprovalRequestsPage)
+            : null,
+        onOpenRequestTracking: () => _runDrawerAction(_openRequestTrackingPage),
+        onOpenSalesRegister: user.can(AppPermission.registerSale)
+            ? () => _runDrawerAction(_openSalesRegisterPage)
+            : null,
+        onOpenSalesReport: user.can(AppPermission.viewBranchSales)
+            ? () => _runDrawerAction(_openSalesReportPage)
+            : null,
         onOpenReservationRequests: () =>
             _runDrawerAction(_openReservationRequestPage),
         onOpenTransferRequests: () =>
@@ -913,7 +1081,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF081A33), Color(0xFF0A2142), Color(0xFF08172D)],
+            colors: [Color(0xFF07080B), Color(0xFF101116), Color(0xFF08090C)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -957,16 +1125,16 @@ class _AdminRoleBar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFF13335F),
+        color: const Color(0xFF15161B),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0x33FFFFFF)),
+        border: Border.all(color: const Color(0x33FF2636)),
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: const Color(0xFF214A8D),
+              color: const Color(0xFF2A1014),
               borderRadius: BorderRadius.circular(999),
             ),
             child: Row(
@@ -1013,18 +1181,18 @@ class _AdminOperationalHero extends StatelessWidget {
         final logs = snapshot.data ?? const <SyncLog>[];
         final latest = logs.isEmpty ? null : logs.first;
         final syncStatus = latest == null
-            ? 'Sin sincronizaciones registradas'
+            ? 'Sin actualizaciones registradas'
             : '${_formatSyncStatus(latest.status)} | ${latest.recordsProcessed} registros';
 
         return Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(22),
             gradient: const LinearGradient(
-              colors: [Color(0xFF234C9A), Color(0xFF20457D), Color(0xFF122A4D)],
+              colors: [Color(0xFF7A101A), Color(0xFF3A1116), Color(0xFF151016)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
-            border: Border.all(color: const Color(0x33FFFFFF)),
+            border: Border.all(color: const Color(0x33FF2636)),
             boxShadow: const [
               BoxShadow(
                 color: Color(0x33000000),
@@ -1092,7 +1260,7 @@ class _AdminOperationalHero extends StatelessWidget {
                         ),
                         const SizedBox(width: 10),
                         Text(
-                          'Sincronizacion operativa',
+                          'Actualizacion operativa',
                           style: Theme.of(context).textTheme.titleLarge
                               ?.copyWith(
                                 color: Colors.white,
@@ -1104,8 +1272,8 @@ class _AdminOperationalHero extends StatelessWidget {
                     const SizedBox(height: 14),
                     Text(
                       latest == null
-                          ? 'Ultima sincronizacion: Sin registros'
-                          : 'Ultima sincronizacion: ${_formatRelativeTime(latest.createdAt)}',
+                          ? 'Ultima actualizacion: Sin registros'
+                          : 'Ultima actualizacion: ${_formatRelativeTime(latest.createdAt)}',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: Colors.white.withValues(alpha: 0.88),
                       ),
@@ -1123,7 +1291,7 @@ class _AdminOperationalHero extends StatelessWidget {
                     FilledButton(
                       onPressed: onPressed,
                       style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF204C9B),
+                        backgroundColor: const Color(0xFFFF2636),
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
@@ -1206,19 +1374,19 @@ class _BranchOperationalHero extends StatelessWidget {
                     };
                     final colors = switch (role) {
                       UserRole.seller => const [
-                        Color(0xFF1F4D91),
-                        Color(0xFF1A3769),
-                        Color(0xFF102543),
+                        Color(0xFF75111A),
+                        Color(0xFF3A1116),
+                        Color(0xFF151016),
                       ],
                       UserRole.supervisor => const [
-                        Color(0xFF205B83),
-                        Color(0xFF174766),
-                        Color(0xFF0F253C),
+                        Color(0xFF7A101A),
+                        Color(0xFF3A1116),
+                        Color(0xFF151016),
                       ],
                       UserRole.admin => const [
-                        Color(0xFF234C9A),
-                        Color(0xFF20457D),
-                        Color(0xFF122A4D),
+                        Color(0xFF7A101A),
+                        Color(0xFF3A1116),
+                        Color(0xFF151016),
                       ],
                     };
                     final iconColor = switch (role) {
@@ -1247,7 +1415,7 @@ class _BranchOperationalHero extends StatelessWidget {
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         ),
-                        border: Border.all(color: const Color(0x33FFFFFF)),
+                        border: Border.all(color: const Color(0x33FF2636)),
                         boxShadow: const [
                           BoxShadow(
                             color: Color(0x33000000),
@@ -1312,8 +1480,8 @@ class _BranchOperationalHero extends StatelessWidget {
                                 const SizedBox(height: 14),
                                 Text(
                                   latestSync == null
-                                      ? 'Ultima sincronizacion: Sin registros'
-                                      : 'Ultima sincronizacion: ${_formatRelativeTime(latestSync.createdAt)}',
+                                      ? 'Ultima actualizacion: Sin registros'
+                                      : 'Ultima actualizacion: ${_formatRelativeTime(latestSync.createdAt)}',
                                   style: Theme.of(context).textTheme.bodyMedium
                                       ?.copyWith(
                                         color: Colors.white.withValues(
@@ -1337,7 +1505,7 @@ class _BranchOperationalHero extends StatelessWidget {
                                 FilledButton(
                                   onPressed: onPressed,
                                   style: FilledButton.styleFrom(
-                                    backgroundColor: const Color(0xFF204C9B),
+                                    backgroundColor: const Color(0xFFFF2636),
                                     foregroundColor: Colors.white,
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(14),
@@ -1347,7 +1515,7 @@ class _BranchOperationalHero extends StatelessWidget {
                                       vertical: 12,
                                     ),
                                   ),
-                                  child: const Text('Ver sincronizacion'),
+                                  child: const Text('Ver monitoreo'),
                                 ),
                               ],
                             ),
@@ -1554,21 +1722,21 @@ class _BranchMetricsStrip extends StatelessWidget {
                       title: 'Productos\nvisibles',
                       value: '$inventoryCount',
                       helper: 'Inventario de sucursal',
-                      colors: const [Color(0xFF214C9A), Color(0xFF183A79)],
+                      colors: const [Color(0xFF8B121E), Color(0xFF5A1018)],
                     ),
                     (
                       icon: Icons.remove_shopping_cart_rounded,
                       title: 'Productos\nsin stock',
                       value: '$outOfStock',
                       helper: 'Sin disponibilidad',
-                      colors: const [Color(0xFF2E8B57), Color(0xFF256E49)],
+                      colors: const [Color(0xFFFF6B73), Color(0xFFB20D19)],
                     ),
                     (
                       icon: Icons.bookmark_added_rounded,
                       title: 'Reservas\nactivas',
                       value: '$activeReservations',
                       helper: 'Compromisos vigentes',
-                      colors: const [Color(0xFFFF8A24), Color(0xFFE66A11)],
+                      colors: const [Color(0xFFFF3B47), Color(0xFFB20D19)],
                     ),
                   ],
                   UserRole.supervisor => [
@@ -1577,14 +1745,14 @@ class _BranchMetricsStrip extends StatelessWidget {
                       title: 'Stock\nbajo',
                       value: '$lowStock',
                       helper: 'Reposicion prioritaria',
-                      colors: const [Color(0xFF214C9A), Color(0xFF183A79)],
+                      colors: const [Color(0xFF8B121E), Color(0xFF5A1018)],
                     ),
                     (
                       icon: Icons.remove_shopping_cart_rounded,
                       title: 'Sin\nstock',
                       value: '$outOfStock',
                       helper: 'Quiebres detectados',
-                      colors: const [Color(0xFF2E8B57), Color(0xFF256E49)],
+                      colors: const [Color(0xFFFF6B73), Color(0xFFB20D19)],
                     ),
                     (
                       icon: Icons.pending_actions_rounded,
@@ -1593,7 +1761,7 @@ class _BranchMetricsStrip extends StatelessWidget {
                           '${pendingReservationApprovals + pendingTransfers}',
                       helper:
                           '$pendingReservationApprovals reservas y $pendingTransfers traslados',
-                      colors: const [Color(0xFFFF8A24), Color(0xFFE66A11)],
+                      colors: const [Color(0xFFFF3B47), Color(0xFFB20D19)],
                     ),
                   ],
                   UserRole.admin => [
@@ -1602,7 +1770,7 @@ class _BranchMetricsStrip extends StatelessWidget {
                       title: 'Sin uso',
                       value: '0',
                       helper: '',
-                      colors: const [Color(0xFF214C9A), Color(0xFF183A79)],
+                      colors: const [Color(0xFF8B121E), Color(0xFF5A1018)],
                     ),
                   ],
                 };
@@ -1647,7 +1815,7 @@ class _OperationalKpiStrip extends StatelessWidget {
             title: 'Consultas\nsin stock',
             value: '${stats.consultedOutOfStockCount}',
             helper: 'Referencias sin respuesta',
-            colors: const [Color(0xFF214C9A), Color(0xFF183A79)],
+            colors: const [Color(0xFF8B121E), Color(0xFF5A1018)],
           ),
         ),
         const SizedBox(width: 10),
@@ -1657,17 +1825,17 @@ class _OperationalKpiStrip extends StatelessWidget {
             title: 'Traslados\nhoy',
             value: '${stats.transferRequestsToday}',
             helper: 'Solicitudes del dia',
-            colors: const [Color(0xFF2E8B57), Color(0xFF256E49)],
+            colors: const [Color(0xFFFF6B73), Color(0xFFB20D19)],
           ),
         ),
         const SizedBox(width: 10),
         Expanded(
           child: _AdminMetricTile(
             icon: Icons.speed_rounded,
-            title: 'Tiempo\npromedio API',
+            title: 'Tiempo\nmedio datos',
             value: _formatDurationCompact(stats.averageApiResponseTime),
-            helper: 'Basado en sync logs',
-            colors: const [Color(0xFFFF8A24), Color(0xFFE66A11)],
+            helper: 'Actualizaciones recientes',
+            colors: const [Color(0xFFFF3B47), Color(0xFFB20D19)],
           ),
         ),
       ],
@@ -1813,7 +1981,7 @@ class _AdminMetricsStrip extends StatelessWidget {
                         title: 'Usuarios\nactivos',
                         value: '$activeUsers',
                         helper: 'Empleados habilitados',
-                        colors: const [Color(0xFF214C9A), Color(0xFF183A79)],
+                        colors: const [Color(0xFF8B121E), Color(0xFF5A1018)],
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -1823,7 +1991,7 @@ class _AdminMetricsStrip extends StatelessWidget {
                         title: 'Reservas\nactivas',
                         value: '$activeReservations',
                         helper: 'Vigentes en el sistema',
-                        colors: const [Color(0xFF2E8B57), Color(0xFF256E49)],
+                        colors: const [Color(0xFFFF6B73), Color(0xFFB20D19)],
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -1835,7 +2003,7 @@ class _AdminMetricsStrip extends StatelessWidget {
                             '${pendingReservationApprovals + pendingTransfers}',
                         helper:
                             '$pendingReservationApprovals reservas y $pendingTransfers traslados',
-                        colors: const [Color(0xFFFF8A24), Color(0xFFE66A11)],
+                        colors: const [Color(0xFFFF3B47), Color(0xFFB20D19)],
                       ),
                     ),
                   ],
@@ -2158,12 +2326,12 @@ class _SyncStatusOverviewPanel extends StatelessWidget {
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return _DashboardPanel(
-            title: 'Estado de sincronizacion',
+            title: 'Estado de actualizacion',
             subtitle:
-                'Salud de la API y de las sucursales para validar si el dato sigue confiable.',
+                'Vigencia del dato y de las sucursales para validar si la informacion sigue confiable.',
             accent: AppPalette.danger,
             child: Text(
-              'No fue posible cargar el estado de sincronizacion.',
+              'No fue posible cargar el estado de actualizacion.',
               style: Theme.of(
                 context,
               ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
@@ -2174,9 +2342,9 @@ class _SyncStatusOverviewPanel extends StatelessWidget {
         final data = snapshot.data;
         if (data == null) {
           return _DashboardPanel(
-            title: 'Estado de sincronizacion',
+            title: 'Estado de actualizacion',
             subtitle:
-                'Salud de la API y de las sucursales para validar si el dato sigue confiable.',
+                'Vigencia del dato y de las sucursales para validar si la informacion sigue confiable.',
             accent: AppPalette.cyan,
             child: const Center(child: CircularProgressIndicator()),
           );
@@ -2222,7 +2390,7 @@ class _SyncStatusOverviewPanel extends StatelessWidget {
             .length;
 
         return _DashboardPanel(
-          title: 'Estado de sincronizacion',
+          title: 'Estado de actualizacion',
           subtitle:
               'Visibilidad rapida para saber si puedes confiar en el dato antes de actuar.',
           accent: accent,
@@ -2230,7 +2398,7 @@ class _SyncStatusOverviewPanel extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'API: ${data.apiStatus.summary} | Al dia: ${data.healthyBranches.length}/${data.branches.length} | Alertas: ${data.warningBranches.length + data.criticalBranches.length}',
+                'Monitor: ${data.apiStatus.summary} | Al dia: ${data.healthyBranches.length}/${data.branches.length} | Alertas: ${data.warningBranches.length + data.criticalBranches.length}',
                 style: Theme.of(
                   context,
                 ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
@@ -2248,7 +2416,7 @@ class _SyncStatusOverviewPanel extends StatelessWidget {
               _InsightList(
                 items: items,
                 emptyMessage:
-                    'No hay sucursales con retraso o fallos de sincronizacion.',
+                    'No hay sucursales con retraso o fallos de actualizacion.',
               ),
               const SizedBox(height: 12),
               Align(
@@ -2389,9 +2557,9 @@ class _AdminPendingSection extends StatelessWidget {
                     width: double.infinity,
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF102540),
+                      color: const Color(0xFF17191F),
                       borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: const Color(0x26FFFFFF)),
+                      border: Border.all(color: const Color(0x26FF2636)),
                     ),
                     child: const Text('No hay solicitudes pendientes.'),
                   )
@@ -2514,9 +2682,9 @@ class _AdminAuditSection extends StatelessWidget {
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF102540),
+                  color: const Color(0xFF17191F),
                   borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: const Color(0x26FFFFFF)),
+                  border: Border.all(color: const Color(0x26FF2636)),
                 ),
                 child: const Text(
                   'No hay eventos administrativos registrados.',
@@ -2656,7 +2824,7 @@ class _TransferTraceabilityDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF08172D),
+      backgroundColor: const Color(0xFF08090C),
       insetPadding: const EdgeInsets.all(16),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 860, maxHeight: 760),
@@ -2957,19 +3125,27 @@ class _AdminTraceabilityPage extends StatelessWidget {
   const _AdminTraceabilityPage({
     required this.service,
     required this.currentUser,
+    required this.authService,
   });
 
   final InventoryWorkflowService service;
   final AppUser currentUser;
+  final AuthService authService;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      drawer: BranchPanelDrawer(
+        service: service,
+        currentUser: currentUser,
+        currentDestination: BranchPanelDestination.adminTraceability,
+        authService: authService,
+      ),
       appBar: AppBar(title: const Text('Trazabilidad operativa')),
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF081A33), Color(0xFF0A2142), Color(0xFF08172D)],
+            colors: [Color(0xFF07080B), Color(0xFF101116), Color(0xFF08090C)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -3303,7 +3479,7 @@ class _TechnicalAuditMetricTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: accent.withValues(alpha: 0.32)),
       ),
@@ -3370,7 +3546,7 @@ class _TechnicalAuditErrorTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppPalette.danger.withValues(alpha: 0.38)),
       ),
@@ -3436,7 +3612,7 @@ class _AdminTraceabilityEntryCard extends StatelessWidget {
           width: double.infinity,
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: const Color(0x40132647),
+            color: const Color(0x401D1F26),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: accent.withValues(alpha: 0.28)),
           ),
@@ -3515,7 +3691,7 @@ class _ReservationTraceabilityDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF08172D),
+      backgroundColor: const Color(0xFF08090C),
       insetPadding: const EdgeInsets.all(16),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 860, maxHeight: 760),
@@ -3796,9 +3972,9 @@ class _TraceabilityBlock extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: child,
     );
@@ -3822,7 +3998,7 @@ class _TraceabilityMetricCard extends StatelessWidget {
       width: 180,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: accent.withValues(alpha: 0.3)),
       ),
@@ -3934,9 +4110,9 @@ class _TraceabilityActorCard extends StatelessWidget {
       width: 190,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3992,7 +4168,7 @@ class _InventoryTraceabilityCard extends StatelessWidget {
       width: 250,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: accent.withValues(alpha: 0.28)),
       ),
@@ -4119,7 +4295,7 @@ class _TransferAuditTimelineTile extends StatelessWidget {
                               color: Colors.white.withValues(alpha: 0.06),
                               borderRadius: BorderRadius.circular(999),
                               border: Border.all(
-                                color: const Color(0x26FFFFFF),
+                                color: const Color(0x26FF2636),
                               ),
                             ),
                             child: Text(
@@ -4161,8 +4337,8 @@ class _AdminRefreshCard extends StatelessWidget {
         final logs = snapshot.data ?? const <SyncLog>[];
         final latest = logs.isEmpty ? null : logs.first;
         final subtitle = latest == null
-            ? 'Sin sincronizaciones registradas'
-            : 'Ultima sincronizacion real: ${_formatClock(latest.createdAt)} | ${_formatSyncStatus(latest.status)}';
+            ? 'Sin actualizaciones registradas'
+            : 'Ultima actualizacion real: ${_formatClock(latest.createdAt)} | ${_formatSyncStatus(latest.status)}';
 
         return Material(
           color: Colors.transparent,
@@ -4174,11 +4350,11 @@ class _AdminRefreshCard extends StatelessWidget {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(18),
                 gradient: const LinearGradient(
-                  colors: [Color(0xFF213452), Color(0xFF0F213D)],
+                  colors: [Color(0xFF3A1116), Color(0xFF151016)],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
-                border: Border.all(color: const Color(0x26FFFFFF)),
+                border: Border.all(color: const Color(0x26FF2636)),
               ),
               child: Row(
                 children: [
@@ -4246,9 +4422,9 @@ class _WorkflowActionCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Row(
         children: [
@@ -4286,6 +4462,87 @@ class _WorkflowActionCard extends StatelessWidget {
           FilledButton(
             onPressed: () => unawaited(onPressed()),
             child: Text(buttonLabel),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SellerProductAcquisitionCard extends StatelessWidget {
+  const _SellerProductAcquisitionCard({
+    required this.onReserve,
+    required this.onTransfer,
+  });
+
+  final Future<void> Function() onReserve;
+  final Future<void> Function() onTransfer;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF17191F),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0x26FF2636)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: AppPalette.amber.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.shopping_bag_rounded,
+                  color: AppPalette.amber,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Conseguir producto',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Elige si vas a apartar unidades para un cliente o traerlas fisicamente a tu sede.',
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              FilledButton.icon(
+                onPressed: () => unawaited(onReserve()),
+                icon: const Icon(Icons.bookmark_add_rounded),
+                label: const Text('Apartar en otra sede'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => unawaited(onTransfer()),
+                icon: const Icon(Icons.local_shipping_rounded),
+                label: const Text('Traer a mi sede'),
+              ),
+            ],
           ),
         ],
       ),
@@ -4403,23 +4660,179 @@ class _ApprovalInboxButton extends StatelessWidget {
   }
 }
 
+enum _BranchAppBarAction { refresh, approvals, requestTracking, syncStatus }
+
+class _BranchAppBarMenu extends StatelessWidget {
+  const _BranchAppBarMenu({
+    required this.service,
+    required this.currentUser,
+    required this.isRefreshing,
+    required this.onRefresh,
+    required this.onOpenApprovalRequests,
+    required this.onOpenRequestTracking,
+    required this.onOpenSyncStatus,
+  });
+
+  final InventoryWorkflowService service;
+  final AppUser currentUser;
+  final bool isRefreshing;
+  final Future<void> Function() onRefresh;
+  final Future<void> Function() onOpenApprovalRequests;
+  final Future<void> Function() onOpenRequestTracking;
+  final Future<void> Function() onOpenSyncStatus;
+
+  bool get _canApprove =>
+      currentUser.can(AppPermission.approveTransfer) ||
+      currentUser.can(AppPermission.approveReservation);
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<ApprovalQueueData>(
+      stream: _canApprove
+          ? service.watchApprovalQueue(actorUser: currentUser)
+          : null,
+      builder: (context, snapshot) {
+        final pendingApprovals = snapshot.data?.totalPending ?? 0;
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            PopupMenuButton<_BranchAppBarAction>(
+              tooltip: 'Mas opciones',
+              icon: const Icon(Icons.more_vert_rounded),
+              onSelected: (action) {
+                switch (action) {
+                  case _BranchAppBarAction.refresh:
+                    if (!isRefreshing) {
+                      unawaited(onRefresh());
+                    }
+                    break;
+                  case _BranchAppBarAction.approvals:
+                    unawaited(onOpenApprovalRequests());
+                    break;
+                  case _BranchAppBarAction.requestTracking:
+                    unawaited(onOpenRequestTracking());
+                    break;
+                  case _BranchAppBarAction.syncStatus:
+                    unawaited(onOpenSyncStatus());
+                    break;
+                }
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem<_BranchAppBarAction>(
+                  value: _BranchAppBarAction.refresh,
+                  enabled: !isRefreshing,
+                  child: _BranchPopupActionLabel(
+                    icon: isRefreshing
+                        ? Icons.hourglass_top_rounded
+                        : Icons.sync_rounded,
+                    label: isRefreshing
+                        ? 'Actualizando datos'
+                        : 'Actualizar datos',
+                  ),
+                ),
+                const PopupMenuItem<_BranchAppBarAction>(
+                  value: _BranchAppBarAction.requestTracking,
+                  child: _BranchPopupActionLabel(
+                    icon: Icons.track_changes_rounded,
+                    label: 'Estado de solicitudes',
+                  ),
+                ),
+                PopupMenuItem<_BranchAppBarAction>(
+                  value: _BranchAppBarAction.syncStatus,
+                  child: _BranchPopupActionLabel(
+                    icon: Icons.cloud_done_rounded,
+                    label: currentUser.role == UserRole.seller
+                        ? 'Confiabilidad del inventario'
+                        : 'Estado de actualizacion',
+                  ),
+                ),
+                if (_canApprove)
+                  PopupMenuItem<_BranchAppBarAction>(
+                    value: _BranchAppBarAction.approvals,
+                    child: _BranchPopupActionLabel(
+                      icon: Icons.fact_check_rounded,
+                      label: pendingApprovals > 0
+                          ? 'Aprobaciones ($pendingApprovals)'
+                          : 'Bandeja de aprobaciones',
+                    ),
+                  ),
+              ],
+            ),
+            if (pendingApprovals > 0)
+              Positioned(
+                top: 2,
+                right: 2,
+                child: Container(
+                  width: 9,
+                  height: 9,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFFF4C63),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _BranchPopupActionLabel extends StatelessWidget {
+  const _BranchPopupActionLabel({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 20),
+        const SizedBox(width: 12),
+        Flexible(child: Text(label)),
+      ],
+    );
+  }
+}
+
 class _AdminDrawer extends StatelessWidget {
   const _AdminDrawer({
     required this.user,
+    required this.onOpenDashboard,
     required this.isCreating,
     required this.isCreatingBranch,
+    required this.onOpenNotifications,
+    required this.onOpenStockAlerts,
+    required this.onOpenSyncStatus,
+    required this.onOpenApprovalRequests,
     required this.onCreateBaseData,
     required this.onCreateBranch,
+    required this.onOpenCatalog,
+    required this.onOpenBranches,
+    required this.onOpenInventoryAdjustment,
+    required this.onOpenSalesReport,
+    required this.onOpenRequestTracking,
     required this.onManageEmployees,
     required this.onOpenTraceability,
     required this.onSignOut,
   });
 
   final AppUser user;
+  final VoidCallback onOpenDashboard;
   final bool isCreating;
   final bool isCreatingBranch;
+  final VoidCallback onOpenNotifications;
+  final VoidCallback onOpenStockAlerts;
+  final VoidCallback onOpenSyncStatus;
+  final VoidCallback onOpenApprovalRequests;
   final VoidCallback? onCreateBaseData;
   final VoidCallback? onCreateBranch;
+  final VoidCallback? onOpenCatalog;
+  final VoidCallback? onOpenBranches;
+  final VoidCallback? onOpenInventoryAdjustment;
+  final VoidCallback? onOpenSalesReport;
+  final VoidCallback? onOpenRequestTracking;
   final VoidCallback? onManageEmployees;
   final VoidCallback? onOpenTraceability;
   final VoidCallback onSignOut;
@@ -4427,7 +4840,7 @@ class _AdminDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Drawer(
-      backgroundColor: const Color(0xFF09192E),
+      backgroundColor: const Color(0xFF090A0D),
       child: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -4453,10 +4866,79 @@ class _AdminDrawer extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      const _AdminDrawerSectionLabel(text: 'Navegacion'),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.space_dashboard_rounded,
+                        title: 'Panel principal',
+                        selected: true,
+                        onTap: onOpenDashboard,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.store_mall_directory_rounded,
+                        title: 'Sucursales',
+                        onTap: onOpenBranches,
+                      ),
+                      const SizedBox(height: 18),
+                      const _AdminDrawerSectionLabel(
+                        text: 'Monitoreo operativo',
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.notifications_rounded,
+                        title: 'Notificaciones',
+                        onTap: onOpenNotifications,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.notification_important_rounded,
+                        title: 'Alertas de stock',
+                        onTap: onOpenStockAlerts,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.cloud_done_rounded,
+                        title: 'Estado de actualizacion',
+                        onTap: onOpenSyncStatus,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.fact_check_rounded,
+                        title: 'Bandeja de aprobaciones',
+                        onTap: onOpenApprovalRequests,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.receipt_long_rounded,
+                        title: 'Ventas globales',
+                        onTap: onOpenSalesReport,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.track_changes_rounded,
+                        title: 'Estado de solicitudes',
+                        onTap: onOpenRequestTracking,
+                      ),
+                      const SizedBox(height: 18),
+                      const _AdminDrawerSectionLabel(text: 'Administracion'),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.inventory_2_rounded,
+                        title: 'Catalogo maestro',
+                        onTap: onOpenCatalog,
+                      ),
+                      const SizedBox(height: 10),
                       _AdminDrawerTile(
                         icon: Icons.person_add_alt_1_rounded,
                         title: 'Gestion de empleados',
                         onTap: onManageEmployees,
+                      ),
+                      const SizedBox(height: 10),
+                      _AdminDrawerTile(
+                        icon: Icons.tune_rounded,
+                        title: 'Ajuste global de inventario',
+                        onTap: onOpenInventoryAdjustment,
                       ),
                       const SizedBox(height: 10),
                       _AdminDrawerTile(
@@ -4483,6 +4965,8 @@ class _AdminDrawer extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 12),
+              const _RedStockDrawerBrandCard(),
+              const SizedBox(height: 12),
               _AdminDrawerTile(
                 icon: Icons.logout_rounded,
                 title: 'Cerrar sesion',
@@ -4496,44 +4980,125 @@ class _AdminDrawer extends StatelessWidget {
   }
 }
 
+class _RedStockDrawerBrandCard extends StatelessWidget {
+  const _RedStockDrawerBrandCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppPalette.blue.withValues(alpha: 0.18),
+            AppPalette.storm.withValues(alpha: 0.86),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppPalette.panelBorder),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [AppPalette.blueSoft, AppPalette.blueDark],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.inventory_2_rounded, color: Colors.white),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Red Stock',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Control total. Inventario inteligente.',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: AppPalette.textMuted),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AdminDrawerSectionLabel extends StatelessWidget {
+  const _AdminDrawerSectionLabel({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+        color: Colors.white70,
+        fontWeight: FontWeight.w700,
+      ),
+    );
+  }
+}
+
 class _AdminDrawerTile extends StatelessWidget {
   const _AdminDrawerTile({
     required this.icon,
     required this.title,
     this.loading = false,
+    this.selected = false,
     required this.onTap,
   });
 
   final IconData icon;
   final String title;
   final bool loading;
+  final bool selected;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: const Color(0xFF0E2442),
-      borderRadius: BorderRadius.circular(16),
+      color: selected
+          ? AppPalette.amber.withValues(alpha: 0.16)
+          : Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
       child: ListTile(
+        dense: true,
         onTap: onTap,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         leading: loading
             ? const SizedBox(
                 width: 20,
                 height: 20,
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
-            : Icon(icon, color: Colors.white),
+            : Icon(icon, color: selected ? AppPalette.amber : Colors.white),
         title: Text(
           title,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            color: Colors.white,
-            fontWeight: FontWeight.w700,
+          style: TextStyle(
+            color: selected ? AppPalette.amber : Colors.white,
+            fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
           ),
-        ),
-        trailing: const Icon(
-          Icons.chevron_right_rounded,
-          color: Colors.white70,
         ),
       ),
     );
@@ -4549,6 +5114,14 @@ class _BranchDrawer extends StatelessWidget {
     required this.sectionIconBuilder,
     required this.onSelectSection,
     required this.onOpenBranches,
+    required this.onOpenNotifications,
+    required this.onOpenStockAlerts,
+    required this.onOpenSyncStatus,
+    required this.onOpenInventoryAdjustment,
+    required this.onOpenApprovalRequests,
+    required this.onOpenRequestTracking,
+    required this.onOpenSalesRegister,
+    required this.onOpenSalesReport,
     required this.onOpenReservationRequests,
     required this.onOpenTransferRequests,
     required this.onSignOut,
@@ -4561,6 +5134,14 @@ class _BranchDrawer extends StatelessWidget {
   final IconData Function(_BranchDashboardSection section) sectionIconBuilder;
   final Future<void> Function(_BranchDashboardSection section) onSelectSection;
   final VoidCallback onOpenBranches;
+  final VoidCallback onOpenNotifications;
+  final VoidCallback onOpenStockAlerts;
+  final VoidCallback onOpenSyncStatus;
+  final VoidCallback? onOpenInventoryAdjustment;
+  final VoidCallback? onOpenApprovalRequests;
+  final VoidCallback onOpenRequestTracking;
+  final VoidCallback? onOpenSalesRegister;
+  final VoidCallback? onOpenSalesReport;
   final VoidCallback onOpenReservationRequests;
   final VoidCallback onOpenTransferRequests;
   final VoidCallback onSignOut;
@@ -4568,7 +5149,7 @@ class _BranchDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Drawer(
-      backgroundColor: const Color(0xFF09192E),
+      backgroundColor: const Color(0xFF090A0D),
       child: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -4596,6 +5177,8 @@ class _BranchDrawer extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      const _BranchDrawerSectionLabel(text: 'Navegacion'),
+                      const SizedBox(height: 10),
                       ...sections.map(
                         (section) => Padding(
                           padding: const EdgeInsets.only(bottom: 10),
@@ -4607,37 +5190,140 @@ class _BranchDrawer extends StatelessWidget {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      _AdminDrawerTile(
+                      const SizedBox(height: 10),
+                      _BranchDrawerTile(
                         icon: Icons.store_mall_directory_rounded,
                         title: 'Sucursales',
+                        isSelected: false,
                         onTap: onOpenBranches,
                       ),
+                      const SizedBox(height: 18),
+                      const _BranchDrawerSectionLabel(text: 'Operacion'),
+                      if (onOpenSalesRegister != null) ...[
+                        const SizedBox(height: 10),
+                        _BranchDrawerTile(
+                          icon: Icons.point_of_sale_rounded,
+                          title: 'Registrar venta',
+                          isSelected: false,
+                          onTap: onOpenSalesRegister!,
+                        ),
+                      ],
+                      if (onOpenSalesReport != null) ...[
+                        const SizedBox(height: 10),
+                        _BranchDrawerTile(
+                          icon: Icons.receipt_long_rounded,
+                          title: 'Ventas de sucursal',
+                          isSelected: false,
+                          onTap: onOpenSalesReport!,
+                        ),
+                      ],
                       const SizedBox(height: 10),
-                      _AdminDrawerTile(
+                      _BranchDrawerTile(
+                        icon: Icons.track_changes_rounded,
+                        title: 'Estado de solicitudes',
+                        isSelected: false,
+                        onTap: onOpenRequestTracking,
+                      ),
+                      if (onOpenApprovalRequests != null) ...[
+                        const SizedBox(height: 10),
+                        _BranchDrawerTile(
+                          icon: Icons.fact_check_rounded,
+                          title: 'Bandeja de aprobaciones',
+                          isSelected: false,
+                          onTap: onOpenApprovalRequests!,
+                        ),
+                      ],
+                      if (onOpenInventoryAdjustment != null) ...[
+                        const SizedBox(height: 10),
+                        _BranchDrawerTile(
+                          icon: Icons.tune_rounded,
+                          title: 'Ajuste de inventario',
+                          isSelected: false,
+                          onTap: onOpenInventoryAdjustment!,
+                        ),
+                      ],
+                      if (user.role == UserRole.seller) ...[
+                        const SizedBox(height: 18),
+                        const _BranchDrawerSectionLabel(
+                          text: 'Conseguir producto',
+                        ),
+                      ],
+                      const SizedBox(height: 10),
+                      _BranchDrawerTile(
                         icon: Icons.bookmark_add_rounded,
-                        title: 'Reservar producto',
+                        title: user.role == UserRole.seller
+                            ? 'Apartar en otra sede'
+                            : 'Reservar producto',
+                        isSelected: false,
                         onTap: onOpenReservationRequests,
                       ),
                       const SizedBox(height: 10),
-                      _AdminDrawerTile(
+                      _BranchDrawerTile(
                         icon: Icons.local_shipping_rounded,
-                        title: 'Solicitar traslado',
+                        title: user.role == UserRole.seller
+                            ? 'Traer a mi sede'
+                            : 'Solicitar traslado',
+                        isSelected: false,
                         onTap: onOpenTransferRequests,
+                      ),
+                      const SizedBox(height: 18),
+                      const _BranchDrawerSectionLabel(text: 'Monitoreo'),
+                      const SizedBox(height: 10),
+                      _BranchDrawerTile(
+                        icon: Icons.notification_important_rounded,
+                        title: 'Alertas de stock',
+                        isSelected: false,
+                        onTap: onOpenStockAlerts,
+                      ),
+                      const SizedBox(height: 10),
+                      _BranchDrawerTile(
+                        icon: Icons.cloud_done_rounded,
+                        title: user.role == UserRole.seller
+                            ? 'Confiabilidad del inventario'
+                            : 'Estado de actualizacion',
+                        isSelected: false,
+                        onTap: onOpenSyncStatus,
+                      ),
+                      const SizedBox(height: 10),
+                      _BranchDrawerTile(
+                        icon: Icons.notifications_rounded,
+                        title: 'Notificaciones',
+                        isSelected: false,
+                        onTap: onOpenNotifications,
                       ),
                     ],
                   ),
                 ),
               ),
               const SizedBox(height: 12),
-              _AdminDrawerTile(
+              const _RedStockDrawerBrandCard(),
+              const SizedBox(height: 12),
+              _BranchDrawerTile(
                 icon: Icons.logout_rounded,
                 title: 'Cerrar sesion',
+                isSelected: false,
                 onTap: onSignOut,
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _BranchDrawerSectionLabel extends StatelessWidget {
+  const _BranchDrawerSectionLabel({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+        color: Colors.white70,
+        fontWeight: FontWeight.w700,
       ),
     );
   }
@@ -4659,25 +5345,25 @@ class _BranchDrawerTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: isSelected ? const Color(0xFF173660) : const Color(0xFF0E2442),
-      borderRadius: BorderRadius.circular(16),
+      color: isSelected
+          ? AppPalette.amber.withValues(alpha: 0.16)
+          : Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
       child: ListTile(
         onTap: onTap,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        dense: true,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         leading: Icon(
           icon,
           color: isSelected ? AppPalette.amber : Colors.white,
         ),
         title: Text(
           title,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            color: Colors.white,
-            fontWeight: FontWeight.w700,
+          style: TextStyle(
+            color: isSelected ? AppPalette.amber : Colors.white,
+            fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
           ),
         ),
-        trailing: isSelected
-            ? const Icon(Icons.check_rounded, color: AppPalette.amber)
-            : const Icon(Icons.chevron_right_rounded, color: Colors.white70),
       ),
     );
   }
@@ -4886,7 +5572,7 @@ class _LatestSyncsPanel extends StatelessWidget {
   const _LatestSyncsPanel({
     required this.service,
     required this.branchId,
-    this.title = 'Ultimas sincronizaciones',
+    this.title = 'Ultimas actualizaciones',
     this.subtitle = 'Eventos recientes registrados para esta sucursal.',
   });
 
@@ -4922,7 +5608,7 @@ class _LatestSyncsPanel extends StatelessWidget {
           child: _InsightList(
             items: items,
             emptyMessage:
-                'No hay sincronizaciones registradas para esta sucursal.',
+                'No hay actualizaciones registradas para esta sucursal.',
           ),
         );
       },
@@ -4973,13 +5659,13 @@ class _DashboardPanel extends StatelessWidget {
         gradient: LinearGradient(
           colors: [
             accent.withValues(alpha: 0.22),
-            const Color(0xFF132847),
-            const Color(0xFF0C1D36),
+            const Color(0xFF3A1116),
+            const Color(0xFF121318),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(18),
@@ -5041,9 +5727,9 @@ class _InsightList extends StatelessWidget {
         width: double.infinity,
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: const Color(0x40132647),
+          color: const Color(0x401D1F26),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0x26FFFFFF)),
+          border: Border.all(color: const Color(0x26FF2636)),
         ),
         child: Text(
           emptyMessage,
@@ -5062,9 +5748,9 @@ class _InsightList extends StatelessWidget {
               margin: const EdgeInsets.only(bottom: 10),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: const Color(0x40132647),
+                color: const Color(0x401D1F26),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0x26FFFFFF)),
+                border: Border.all(color: const Color(0x26FF2636)),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -5533,24 +6219,24 @@ IconData _auditActionIcon(String value) {
 
 Color _auditActionColor(String value) {
   return switch (value.trim().toLowerCase()) {
-    'employee_created' => const Color(0xFF2E8B57),
-    'employee_role_updated' => const Color(0xFF214C9A),
-    'employee_updated' => const Color(0xFF2A5F89),
-    'branch_created' => const Color(0xFFE67A16),
-    'master_data_seeded' => const Color(0xFF6A5AE0),
-    'transfer_requested' => const Color(0xFFD39B2A),
-    'transfer_approved' => const Color(0xFF2E8B57),
+    'employee_created' => const Color(0xFFFF6B73),
+    'employee_role_updated' => const Color(0xFF8B121E),
+    'employee_updated' => const Color(0xFFFF6B73),
+    'branch_created' => const Color(0xFFFF3B47),
+    'master_data_seeded' => const Color(0xFFFF9AA1),
+    'transfer_requested' => const Color(0xFFFF3B47),
+    'transfer_approved' => const Color(0xFFFF6B73),
     'transfer_rejected' => const Color(0xFFC24949),
-    'transfer_in_transit' => const Color(0xFF2A8AC7),
-    'transfer_received' => const Color(0xFF1F7A8C),
-    'reservation_created' => const Color(0xFF1F7A8C),
-    'reservation_approved' => const Color(0xFF2E8B57),
+    'transfer_in_transit' => const Color(0xFFFF9AA1),
+    'transfer_received' => const Color(0xFFFF6B73),
+    'reservation_created' => const Color(0xFFFF6B73),
+    'reservation_approved' => const Color(0xFFFF6B73),
     'reservation_rejected' => const Color(0xFFC24949),
-    'reservation_completed' => const Color(0xFF2E8B57),
+    'reservation_completed' => const Color(0xFFFF6B73),
     'reservation_cancelled' => const Color(0xFFC24949),
-    'reservation_expired' => const Color(0xFFD39B2A),
-    'reservation_updated' => const Color(0xFF31547D),
-    _ => const Color(0xFF31547D),
+    'reservation_expired' => const Color(0xFFFF3B47),
+    'reservation_updated' => const Color(0xFF5A1018),
+    _ => const Color(0xFF5A1018),
   };
 }
 

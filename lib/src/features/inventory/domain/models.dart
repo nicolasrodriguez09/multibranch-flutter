@@ -415,6 +415,9 @@ class InventoryItem {
       '${branchId}_$productId';
 
   InventoryItem recalculate({
+    String? branchName,
+    String? productName,
+    String? sku,
     int? stock,
     int? reservedStock,
     int? incomingStock,
@@ -433,10 +436,10 @@ class InventoryItem {
     return InventoryItem(
       id: id,
       branchId: branchId,
-      branchName: branchName,
+      branchName: branchName ?? this.branchName,
       productId: productId,
-      productName: productName,
-      sku: sku,
+      productName: productName ?? this.productName,
+      sku: sku ?? this.sku,
       stock: nextStock,
       reservedStock: nextReservedStock,
       availableStock: nextAvailableStock,
@@ -491,6 +494,117 @@ class InventoryItem {
           readDateTime(data, 'updatedAt') ??
           DateTime.fromMillisecondsSinceEpoch(0),
       isLowStock: readBool(data, 'isLowStock'),
+    );
+  }
+}
+
+enum SalePaymentMethod {
+  cash('Efectivo'),
+  card('Tarjeta'),
+  transfer('Transferencia'),
+  mixed('Mixto'),
+  other('Otro');
+
+  const SalePaymentMethod(this.label);
+
+  final String label;
+
+  static SalePaymentMethod fromValue(String value) {
+    final normalized = value.trim().toLowerCase();
+    return SalePaymentMethod.values.firstWhere(
+      (method) => method.name == normalized,
+      orElse: () => SalePaymentMethod.other,
+    );
+  }
+}
+
+class SaleRecord {
+  const SaleRecord({
+    required this.id,
+    required this.branchId,
+    required this.branchName,
+    required this.sellerId,
+    required this.sellerName,
+    required this.productId,
+    required this.productName,
+    required this.sku,
+    required this.quantity,
+    required this.unitPrice,
+    required this.totalPrice,
+    required this.currency,
+    required this.paymentMethod,
+    required this.customerName,
+    required this.customerPhone,
+    required this.notes,
+    required this.soldAt,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String branchId;
+  final String branchName;
+  final String sellerId;
+  final String sellerName;
+  final String productId;
+  final String productName;
+  final String sku;
+  final int quantity;
+  final double unitPrice;
+  final double totalPrice;
+  final String currency;
+  final SalePaymentMethod paymentMethod;
+  final String customerName;
+  final String customerPhone;
+  final String notes;
+  final DateTime soldAt;
+  final DateTime createdAt;
+
+  Map<String, dynamic> toFirestore() => {
+    'branchId': branchId,
+    'branchName': branchName,
+    'sellerId': sellerId,
+    'sellerName': sellerName,
+    'productId': productId,
+    'productName': productName,
+    'sku': sku,
+    'quantity': quantity,
+    'unitPrice': unitPrice,
+    'totalPrice': totalPrice,
+    'currency': currency,
+    'paymentMethod': paymentMethod.name,
+    'customerName': customerName,
+    'customerPhone': customerPhone,
+    'notes': notes,
+    'soldAt': writeDateTime(soldAt),
+    'createdAt': writeDateTime(createdAt),
+  };
+
+  factory SaleRecord.fromFirestore(String id, Map<String, dynamic> data) {
+    return SaleRecord(
+      id: id,
+      branchId: readString(data, 'branchId'),
+      branchName: readString(data, 'branchName'),
+      sellerId: readString(data, 'sellerId'),
+      sellerName: readString(data, 'sellerName'),
+      productId: readString(data, 'productId'),
+      productName: readString(data, 'productName'),
+      sku: readString(data, 'sku'),
+      quantity: readInt(data, 'quantity'),
+      unitPrice: readDouble(data, 'unitPrice'),
+      totalPrice: readDouble(data, 'totalPrice'),
+      currency: readString(data, 'currency'),
+      paymentMethod: SalePaymentMethod.fromValue(
+        readString(data, 'paymentMethod'),
+      ),
+      customerName: readString(data, 'customerName'),
+      customerPhone: readString(data, 'customerPhone'),
+      notes: readString(data, 'notes'),
+      soldAt:
+          readDateTime(data, 'soldAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      createdAt:
+          readDateTime(data, 'createdAt') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
     );
   }
 }

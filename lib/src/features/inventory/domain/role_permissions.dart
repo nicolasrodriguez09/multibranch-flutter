@@ -4,12 +4,14 @@ enum AppPermission {
   viewOwnInventory('Ver inventario de sucursal'),
   viewNotifications('Ver notificaciones personales'),
   viewRequestTracking('Consultar estado de solicitudes'),
-  viewSyncStatus('Ver estado de sincronizacion'),
+  viewSyncStatus('Ver estado de actualizacion'),
   viewStockByBranch('Ver stock por sucursal'),
   viewLowStock('Ver alertas de stock bajo'),
   viewBranchReservations('Ver reservas activas de la sucursal'),
   viewBranchTransfers('Ver traslados de la sucursal'),
   viewOperationalMetrics('Ver metricas operativas'),
+  registerSale('Registrar ventas'),
+  viewBranchSales('Ver ventas de sucursal'),
   createReservation('Crear reservas'),
   approveReservation('Aprobar reservas'),
   updateReservation('Cerrar o cancelar reservas'),
@@ -20,6 +22,7 @@ enum AppPermission {
   manageInventory('Ajustar inventario'),
   manageBranches('Gestionar sucursales'),
   viewMasterData('Ver catalogo maestro'),
+  manageMasterData('Gestionar catalogo maestro'),
   manageEmployees('Gestionar empleados'),
   seedMasterData('Inicializar la base maestra'),
   viewUsers('Ver usuarios'),
@@ -34,13 +37,15 @@ enum AppModule {
   inventory('Inventario', AppPermission.viewOwnInventory),
   notifications('Notificaciones', AppPermission.viewNotifications),
   requestTracking('Seguimiento', AppPermission.viewRequestTracking),
-  syncStatus('Sincronizacion', AppPermission.viewSyncStatus),
+  syncStatus('Actualizacion', AppPermission.viewSyncStatus),
   lowStock('Stock bajo', AppPermission.viewLowStock),
+  sales('Ventas', AppPermission.registerSale),
+  salesReport('Reporte de ventas', AppPermission.viewBranchSales),
   reservations('Reservas', AppPermission.viewBranchReservations),
   transfers('Traslados', AppPermission.viewBranchTransfers),
   approvals('Aprobaciones', AppPermission.approveTransfer),
   metrics('Metricas', AppPermission.viewOperationalMetrics),
-  masterData('Base maestra', AppPermission.viewMasterData),
+  masterData('Base maestra', AppPermission.manageMasterData),
   employees('Empleados', AppPermission.manageEmployees),
   users('Usuarios', AppPermission.viewUsers),
   permissionMatrix('Permisos', AppPermission.viewPermissionMatrix);
@@ -68,6 +73,7 @@ extension UserRolePermissions on UserRole {
       AppPermission.viewOwnInventory ||
       AppPermission.viewStockByBranch ||
       AppPermission.viewLowStock ||
+      AppPermission.registerSale ||
       AppPermission.createReservation ||
       AppPermission.updateReservation ||
       AppPermission.requestTransfer ||
@@ -84,6 +90,8 @@ extension UserRolePermissions on UserRole {
       AppPermission.viewBranchReservations ||
       AppPermission.viewBranchTransfers ||
       AppPermission.viewOperationalMetrics ||
+      AppPermission.registerSale ||
+      AppPermission.viewBranchSales ||
       AppPermission.createReservation ||
       AppPermission.approveReservation ||
       AppPermission.updateReservation ||

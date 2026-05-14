@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_multibranch_proyect/src/app.dart';
 import 'package:flutter_multibranch_proyect/src/features/auth/application/auth_session.dart';
 import 'package:flutter_multibranch_proyect/src/features/auth/application/auth_service.dart';
+import 'package:flutter_multibranch_proyect/src/features/auth/presentation/auth_page.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/application/inventory_workflow_service.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/data/sample_seed_data.dart';
 import 'package:flutter_multibranch_proyect/src/features/inventory/domain/models.dart';
@@ -24,18 +25,28 @@ void main() {
   testWidgets('renders auth page when there is no signed in user', (
     WidgetTester tester,
   ) async {
+    final firestore = FakeFirebaseFirestore();
+    final auth = MockFirebaseAuth();
+    final authService = AuthService(
+      auth: auth,
+      firestore: firestore,
+      secureSessionStore: InMemorySecureSessionStore(),
+      enableSessionRefreshMonitoring: false,
+    );
+    final inventoryService = InventoryWorkflowService(firestore: firestore);
+
     await tester.pumpWidget(
-      MyApp(
-        firestore: FakeFirebaseFirestore(),
-        auth: MockFirebaseAuth(),
-        secureSessionStore: InMemorySecureSessionStore(),
-        enableSessionRefreshMonitoring: false,
+      MaterialApp(
+        home: AuthPage(
+          authService: authService,
+          inventoryService: inventoryService,
+        ),
       ),
     );
     await tester.pumpAndSettle();
 
     expect(
-      find.text('Conecta y gestiona tu inventario entre sucursales.'),
+      find.textContaining('Conecta y gestiona tu inventario'),
       findsOneWidget,
     );
     expect(find.text('Iniciar Sesion'), findsOneWidget);
@@ -76,7 +87,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Dashboard Administrativo'), findsOneWidget);
-    expect(find.text('Sincronizacion operativa'), findsOneWidget);
+    expect(find.text('Actualizacion operativa'), findsOneWidget);
     expect(find.text('Metricas'), findsOneWidget);
     expect(find.text('Control administrativo'), findsNothing);
     expect(find.text('Acciones administrativas'), findsNothing);
@@ -118,7 +129,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byType(Drawer),
-        matching: find.widgetWithText(ListTile, 'Estado de sincronizacion'),
+        matching: find.widgetWithText(ListTile, 'Estado de actualizacion'),
       ),
       findsOneWidget,
     );
@@ -128,7 +139,18 @@ void main() {
     expect(find.text('Crear base de datos inicial'), findsOneWidget);
     expect(find.text('Cerrar sesion'), findsOneWidget);
 
-    await tester.tap(find.text('Gestion de empleados'));
+    await tester.ensureVisible(
+      find.descendant(
+        of: find.byType(Drawer),
+        matching: find.widgetWithText(ListTile, 'Gestion de empleados'),
+      ),
+    );
+    await tester.tap(
+      find.descendant(
+        of: find.byType(Drawer),
+        matching: find.widgetWithText(ListTile, 'Gestion de empleados'),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Empleados registrados'), findsOneWidget);
@@ -300,7 +322,7 @@ void main() {
     expect(find.text('Consultas sin stock'), findsNothing);
     await tester.pumpAndSettle();
     expect(find.text('Productos mas consultados'), findsNothing);
-    expect(find.text('Ultimas sincronizaciones'), findsNothing);
+    expect(find.text('Ultimas actualizaciones'), findsNothing);
     expect(find.text('Crear base inicial'), findsNothing);
     expect(find.text('Ingresar nuevo empleado'), findsNothing);
     expect(find.text('Matriz de permisos'), findsNothing);
@@ -311,8 +333,8 @@ void main() {
 
     expect(find.text('Menu de ventas'), findsOneWidget);
     expect(find.text('Inventario y alertas'), findsOneWidget);
-    expect(find.text('Compromisos y sincronizacion'), findsOneWidget);
-    expect(find.text('Modulos habilitados'), findsOneWidget);
+    expect(find.text('Compromisos y monitoreo'), findsOneWidget);
+    expect(find.text('Navegacion'), findsOneWidget);
     expect(find.text('Sucursales'), findsOneWidget);
     expect(
       find.descendant(
@@ -331,7 +353,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byType(Drawer),
-        matching: find.widgetWithText(ListTile, 'Estado de sincronizacion'),
+        matching: find.widgetWithText(ListTile, 'Confiabilidad del inventario'),
       ),
       findsOneWidget,
     );
@@ -342,17 +364,18 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('Reservar producto'), findsOneWidget);
+    expect(find.text('Conseguir producto'), findsOneWidget);
+    expect(find.text('Apartar en otra sede'), findsOneWidget);
     await tester.scrollUntilVisible(
       find.descendant(
         of: find.byType(Drawer),
-        matching: find.widgetWithText(ListTile, 'Solicitar traslado'),
+        matching: find.widgetWithText(ListTile, 'Traer a mi sede'),
       ),
       120,
       scrollable: find.byType(Scrollable).last,
     );
     await tester.pumpAndSettle();
-    expect(find.text('Solicitar traslado'), findsOneWidget);
+    expect(find.text('Traer a mi sede'), findsOneWidget);
   });
 
   testWidgets(
@@ -476,7 +499,7 @@ void main() {
       expect(find.text('Solicitar traslado'), findsOneWidget);
       expect(find.text('Formulario de solicitud'), findsOneWidget);
       expect(
-        find.textContaining('Sin stock local para Samsung A55'),
+        find.textContaining('Sin stock en tu sede para Samsung A55'),
         findsOneWidget,
       );
 
@@ -608,8 +631,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Estado de sincronizacion'), findsOneWidget);
-    expect(find.text('API de sincronizacion'), findsOneWidget);
+    expect(find.text('Estado de actualizacion'), findsOneWidget);
+    expect(find.text('Monitoreo de actualizacion de datos'), findsOneWidget);
     expect(find.text('Alertas de monitoreo'), findsOneWidget);
     expect(find.text('Solicitar reintento'), findsWidgets);
     await tester.scrollUntilVisible(
@@ -620,12 +643,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Reglas de fallo'), findsOneWidget);
     await tester.scrollUntilVisible(
-      find.text('Ultima sincronizacion por sucursal'),
+      find.text('Ultima actualizacion por sucursal'),
       220,
       scrollable: find.byType(Scrollable).first,
     );
     await tester.pumpAndSettle();
-    expect(find.text('Ultima sincronizacion por sucursal'), findsOneWidget);
+    expect(find.text('Ultima actualizacion por sucursal'), findsOneWidget);
     expect(find.text('Sucursal Norte'), findsWidgets);
     expect(find.text('Con fallo'), findsWidgets);
   });
@@ -752,6 +775,83 @@ void main() {
       expect(find.text('Historial de cambios'), findsOneWidget);
       expect(find.text('Traslado en transito'), findsOneWidget);
       expect(find.text('Solicitud aprobada'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'supervisor can open transfer traceability and confirm reception from request tracking',
+    (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1280, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final firestore = FakeFirebaseFirestore();
+      var currentTime = DateTime.utc(2026, 3, 26, 12, 0);
+      final service = InventoryWorkflowService(
+        firestore: firestore,
+        clock: () => currentTime,
+      );
+      final sampleData = SampleSeedData.build(currentTime);
+      await service.seedMasterData(actorUser: sampleData.users.first);
+      final supervisor = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.secondBranchSeller,
+      );
+      final admin = sampleData.users.firstWhere(
+        (user) => user.id == DemoIds.adminUser,
+      );
+
+      final transfer = await service.requestTransfer(
+        actorUser: supervisor,
+        productId: DemoIds.laptopProduct,
+        fromBranchId: DemoIds.branchCenter,
+        toBranchId: DemoIds.branchNorth,
+        quantity: 2,
+        reason: 'Recepcion desde seguimiento',
+        notes: 'Validar ingreso en bodega norte',
+      );
+      await service.approveTransfer(actorUser: admin, transferId: transfer.id);
+      currentTime = currentTime.add(const Duration(minutes: 5));
+      await service.markTransferInTransit(
+        actorUser: admin,
+        transferId: transfer.id,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(useMaterial3: true),
+          home: RequestTrackingPage(service: service, currentUser: supervisor),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final enTransitoFilter = find.widgetWithText(ChoiceChip, 'En transito');
+      await tester.ensureVisible(enTransitoFilter);
+      await tester.tap(enTransitoFilter);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(ExpansionTile).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Ver trazabilidad').first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Trazabilidad del traslado'), findsOneWidget);
+      expect(find.text('Actores clave'), findsOneWidget);
+      expect(find.text('Timeline auditado'), findsOneWidget);
+      expect(find.text('Confirmar recepcion'), findsOneWidget);
+      expect(find.textContaining('Recepcion desde seguimiento'), findsWidgets);
+
+      await tester.tap(find.text('Confirmar recepcion'));
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Recibido'), findsWidgets);
+      expect(
+        find.textContaining('El traslado fue recibido correctamente.'),
+        findsOneWidget,
+      );
     },
   );
 
@@ -1199,8 +1299,8 @@ void main() {
       expect(find.text('Menu de sucursal'), findsOneWidget);
       expect(find.text('KPIs operativos'), findsOneWidget);
       expect(find.text('Inventario y alertas'), findsOneWidget);
-      expect(find.text('Solicitudes y sincronizacion'), findsWidgets);
-      expect(find.text('Modulos habilitados'), findsOneWidget);
+      expect(find.text('Solicitudes y monitoreo'), findsWidgets);
+      expect(find.text('Navegacion'), findsOneWidget);
       expect(
         find.descendant(
           of: find.byType(Drawer),
@@ -1218,7 +1318,7 @@ void main() {
       expect(
         find.descendant(
           of: find.byType(Drawer),
-          matching: find.widgetWithText(ListTile, 'Estado de sincronizacion'),
+          matching: find.widgetWithText(ListTile, 'Estado de actualizacion'),
         ),
         findsOneWidget,
       );
@@ -1262,15 +1362,12 @@ void main() {
       await tester.tap(
         find.descendant(
           of: find.byType(Drawer),
-          matching: find.widgetWithText(
-            ListTile,
-            'Solicitudes y sincronizacion',
-          ),
+          matching: find.widgetWithText(ListTile, 'Solicitudes y monitoreo'),
         ),
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Solicitudes y sincronizacion'), findsWidgets);
+      expect(find.text('Solicitudes y monitoreo'), findsWidgets);
       expect(find.text('Bandeja de aprobaciones'), findsWidgets);
     },
   );

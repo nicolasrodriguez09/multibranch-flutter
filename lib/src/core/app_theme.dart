@@ -1,23 +1,23 @@
 import 'package:flutter/material.dart';
 
 abstract final class AppPalette {
-  static const midnight = Color(0xFF06152A);
-  static const deepNavy = Color(0xFF07162C);
-  static const ocean = Color(0xFF0A2A52);
-  static const storm = Color(0xFF0B2141);
-  static const blue = Color(0xFF2E7BFF);
-  static const blueDark = Color(0xFF2251D1);
-  static const blueSoft = Color(0xFF79B7FF);
-  static const cyan = Color(0xFF97E5FF);
-  static const amber = Color(0xFFFFA94D);
-  static const amberSoft = Color(0xFFFFD2A1);
-  static const mint = Color(0xFF5ED6B3);
-  static const danger = Color(0xFFFF7B7B);
-  static const textPrimary = Color(0xFFF4F8FF);
-  static const textMuted = Color(0xB3D7E5FF);
-  static const panel = Color(0x26112642);
-  static const panelStrong = Color(0xAA0C1D36);
-  static const panelBorder = Color(0x33FFFFFF);
+  static const midnight = Color(0xFF050506);
+  static const deepNavy = Color(0xFF08090C);
+  static const ocean = Color(0xFF101116);
+  static const storm = Color(0xFF17191F);
+  static const blue = Color(0xFFFF2636);
+  static const blueDark = Color(0xFFB20D19);
+  static const blueSoft = Color(0xFFFF6B73);
+  static const cyan = Color(0xFFFF9AA1);
+  static const amber = Color(0xFFFF3B47);
+  static const amberSoft = Color(0xFFFFC6CA);
+  static const mint = Color(0xFFFFDDE0);
+  static const danger = Color(0xFFFF4C63);
+  static const textPrimary = Color(0xFFF6F7FA);
+  static const textMuted = Color(0xB8D6D7DE);
+  static const panel = Color(0x331B1D23);
+  static const panelStrong = Color(0xD0101116);
+  static const panelBorder = Color(0x4DFF2636);
 }
 
 ThemeData buildAppTheme() {
@@ -26,7 +26,7 @@ ThemeData buildAppTheme() {
     primary: AppPalette.blue,
     onPrimary: Colors.white,
     secondary: AppPalette.amber,
-    onSecondary: AppPalette.deepNavy,
+    onSecondary: Colors.white,
     error: AppPalette.danger,
     onError: Colors.white,
     surface: AppPalette.deepNavy,
@@ -122,7 +122,7 @@ ThemeData buildAppTheme() {
       labelStyle: const TextStyle(color: AppPalette.textMuted),
       hintStyle: const TextStyle(color: AppPalette.textMuted),
       filled: true,
-      fillColor: const Color(0x40142E52),
+      fillColor: const Color(0x401D1F26),
       contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(18),

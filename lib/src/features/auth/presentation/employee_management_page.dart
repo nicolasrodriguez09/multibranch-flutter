@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/app_theme.dart';
+import '../../inventory/application/inventory_workflow_service.dart';
 import '../../inventory/domain/models.dart';
 import '../../inventory/domain/role_permissions.dart';
+import '../../inventory/presentation/branch_panel_drawer.dart';
 import '../application/auth_service.dart';
 import 'create_employee_dialog.dart';
 import 'update_employee_dialog.dart';
@@ -11,10 +13,12 @@ class EmployeeManagementPage extends StatefulWidget {
   const EmployeeManagementPage({
     super.key,
     required this.authService,
+    this.inventoryService,
     required this.currentUser,
   });
 
   final AuthService authService;
+  final InventoryWorkflowService? inventoryService;
   final AppUser currentUser;
 
   @override
@@ -132,6 +136,14 @@ class _EmployeeManagementPageState extends State<EmployeeManagementPage> {
   Widget build(BuildContext context) {
     if (!widget.currentUser.can(AppPermission.manageEmployees)) {
       return Scaffold(
+        drawer: widget.inventoryService == null
+            ? null
+            : BranchPanelDrawer(
+                service: widget.inventoryService!,
+                currentUser: widget.currentUser,
+                currentDestination: BranchPanelDestination.employeeManagement,
+                authService: widget.authService,
+              ),
         appBar: AppBar(title: const Text('Gestion de empleados')),
         body: const Center(
           child: Text('No tienes permiso para gestionar empleados.'),
@@ -140,9 +152,17 @@ class _EmployeeManagementPageState extends State<EmployeeManagementPage> {
     }
 
     return Scaffold(
+      drawer: widget.inventoryService == null
+          ? null
+          : BranchPanelDrawer(
+              service: widget.inventoryService!,
+              currentUser: widget.currentUser,
+              currentDestination: BranchPanelDestination.employeeManagement,
+              authService: widget.authService,
+            ),
       appBar: AppBar(title: const Text('Gestion de empleados')),
       body: Container(
-        color: const Color(0xFF08172D),
+        color: const Color(0xFF08090C),
         child: SafeArea(
           top: false,
           child: StreamBuilder<List<Branch>>(
@@ -229,9 +249,9 @@ class _EmployeeManagementSummary extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -339,9 +359,9 @@ class _EmployeeCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -447,9 +467,9 @@ class _ManagementNotice extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Text(
         message,

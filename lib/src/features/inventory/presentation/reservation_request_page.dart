@@ -2,19 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/app_theme.dart';
+import '../../auth/application/auth_service.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
+import 'branch_panel_drawer.dart';
 
 class ReservationRequestPage extends StatefulWidget {
   const ReservationRequestPage({
     super.key,
     required this.service,
     required this.currentUser,
+    this.authService,
     this.initialProductId,
   });
 
   final InventoryWorkflowService service;
   final AppUser currentUser;
+  final AuthService? authService;
   final String? initialProductId;
 
   @override
@@ -203,6 +207,12 @@ class _ReservationRequestPageState extends State<ReservationRequestPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      drawer: BranchPanelDrawer(
+        service: widget.service,
+        currentUser: widget.currentUser,
+        currentDestination: BranchPanelDestination.reservationRequest,
+        authService: widget.authService,
+      ),
       appBar: AppBar(
         title: const Text('Solicitar reserva'),
         actions: [
@@ -214,7 +224,7 @@ class _ReservationRequestPageState extends State<ReservationRequestPage> {
         ],
       ),
       body: Container(
-        color: const Color(0xFF08172D),
+        color: const Color(0xFF08090C),
         child: SafeArea(
           top: false,
           child: FutureBuilder<List<ReservationRequestCatalogItem>>(
@@ -346,9 +356,9 @@ class _ReservationHeader extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -391,9 +401,9 @@ class _ReservationRulesCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -443,9 +453,9 @@ class _ReservationProductSelector extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -457,6 +467,13 @@ class _ReservationProductSelector extends StatelessWidget {
             ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 8),
+          Text(
+            'Los productos sin stock local aparecen primero para priorizar ventas que requieren apoyo de otra sede.',
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+          ),
+          const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             key: ValueKey<String?>('reservation_product_$selectedProductId'),
             initialValue: selectedProductId,
@@ -500,9 +517,9 @@ class _ReservationStockContextCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -541,6 +558,10 @@ class _ReservationStockContextCard extends StatelessWidget {
               ),
             ],
           ),
+          if (currentAvailable > 0) ...[
+            const SizedBox(height: 12),
+            _ReservationLocalStockNotice(availableStock: currentAvailable),
+          ],
           const SizedBox(height: 14),
           Text(
             hasSources
@@ -551,6 +572,39 @@ class _ReservationStockContextCard extends StatelessWidget {
             style: Theme.of(
               context,
             ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReservationLocalStockNotice extends StatelessWidget {
+  const _ReservationLocalStockNotice({required this.availableStock});
+
+  final int availableStock;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppPalette.amber.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppPalette.amber.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline_rounded, color: AppPalette.amber),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Tu sede tiene $availableStock unidad(es) disponibles. Usa la reserva solo si necesitas apartar stock en otra sede para ese cliente.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+            ),
           ),
         ],
       ),
@@ -595,9 +649,9 @@ class _ReservationFormCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Form(
         key: formKey,
@@ -754,41 +808,70 @@ class _RecentReservationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final title = switch (currentUser.role) {
+      UserRole.seller => 'Estado de tus reservas',
+      UserRole.supervisor => 'Reservas de tu sucursal',
+      UserRole.admin => 'Reservas recientes',
+    };
+    final subtitle = switch (currentUser.role) {
+      UserRole.seller =>
+        'Solicitudes y reservas creadas por tu usuario aunque esten en otra sucursal.',
+      UserRole.supervisor =>
+        'Reservas creadas por tu usuario o vinculadas a la operacion de tu sucursal.',
+      UserRole.admin =>
+        'Seguimiento resumido de reservas recientes en el sistema.',
+    };
+    final emptyMessage = switch (currentUser.role) {
+      UserRole.seller => 'Todavia no has creado reservas con este usuario.',
+      UserRole.supervisor =>
+        'No hay reservas recientes asociadas a tu sucursal o a tu usuario.',
+      UserRole.admin => 'Todavia no hay reservas registradas en el sistema.',
+    };
+    final Stream<List<Reservation>> reservationsStream =
+        switch (currentUser.role) {
+          UserRole.seller => service.reservations.watchReservationsByUser(
+            currentUser.id,
+          ),
+          UserRole.supervisor =>
+            service.reservations.watchReservationsForBranchTracking(
+              currentUser.branchId,
+            ),
+          UserRole.admin => service.reservations.watchReservations(),
+        };
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Estado de tus reservas',
+            title,
             style: Theme.of(
               context,
             ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 8),
           Text(
-            'Solicitudes y reservas creadas por tu usuario aunque esten en otra sucursal.',
+            subtitle,
             style: Theme.of(
               context,
             ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
           ),
           const SizedBox(height: 14),
           StreamBuilder<List<Reservation>>(
-            stream: service.reservations.watchReservationsByUser(
-              currentUser.id,
-            ),
+            stream: reservationsStream,
             builder: (context, snapshot) {
               final items = (snapshot.data ?? const <Reservation>[])
                   .take(5)
                   .toList(growable: false);
               if (items.isEmpty) {
                 return Text(
-                  'Todavia no has creado reservas con este usuario.',
+                  emptyMessage,
                   style: Theme.of(
                     context,
                   ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
@@ -882,9 +965,9 @@ class _ReservationEmptySelection extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Text(
         'Selecciona un producto para validar sucursales disponibles y enviar la solicitud.',
@@ -915,9 +998,9 @@ class _ReservationErrorState extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
-            color: const Color(0xFF102540),
+            color: const Color(0xFF17191F),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0x26FFFFFF)),
+            border: Border.all(color: const Color(0x26FF2636)),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -959,7 +1042,7 @@ class _ReservationInfoPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Text(
         label,

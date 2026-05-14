@@ -3,10 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../core/app_theme.dart';
+import '../../auth/application/auth_service.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
+import '../domain/role_permissions.dart';
 import 'auto_refresh_state_mixin.dart';
+import 'branch_panel_drawer.dart';
 import 'branch_location_resolver.dart';
+import 'create_branch_dialog.dart';
 
 enum _BranchAvailabilityFilter { all, withStock, withoutStock }
 
@@ -24,12 +28,14 @@ class BranchDirectoryPage extends StatefulWidget {
     super.key,
     required this.service,
     required this.currentUser,
+    this.authService,
     this.selectedProductId,
     this.locationResolver,
   });
 
   final InventoryWorkflowService service;
   final AppUser currentUser;
+  final AuthService? authService;
   final String? selectedProductId;
   final BranchLocationResolver? locationResolver;
 
@@ -154,6 +160,76 @@ class _BranchDirectoryPageState extends State<BranchDirectoryPage>
   Future<void> _refresh() async {
     await _refreshDirectory(forceRefresh: true, showFeedback: true);
     await _resolveDeviceLocation();
+  }
+
+  Future<void> _editBranch(Branch branch) async {
+    final request = await showDialog<CreateBranchRequest>(
+      context: context,
+      builder: (context) => CreateBranchDialog(initialBranch: branch),
+    );
+    if (request == null) {
+      return;
+    }
+
+    try {
+      await widget.service.updateBranch(
+        actorUser: widget.currentUser,
+        branchId: branch.id,
+        name: request.name,
+        address: request.address,
+        city: request.city,
+        phone: request.phone,
+        email: request.email,
+        managerName: request.managerName,
+        openingHours: request.openingHours,
+        latitude: request.latitude,
+        longitude: request.longitude,
+        isActive: branch.isActive,
+      );
+      if (!mounted) {
+        return;
+      }
+      _showStatusMessage('Sucursal actualizada: ${request.name}.');
+      await _refreshDirectory(forceRefresh: true, showFeedback: false);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showStatusMessage('No se pudo actualizar la sucursal: $error');
+    }
+  }
+
+  Future<void> _toggleBranch(Branch branch) async {
+    try {
+      final updatedBranch = await widget.service.updateBranch(
+        actorUser: widget.currentUser,
+        branchId: branch.id,
+        name: branch.name,
+        address: branch.address,
+        city: branch.city,
+        phone: branch.phone,
+        email: branch.email,
+        managerName: branch.managerName,
+        openingHours: branch.openingHours,
+        latitude: branch.location.lat,
+        longitude: branch.location.lng,
+        isActive: !branch.isActive,
+      );
+      if (!mounted) {
+        return;
+      }
+      _showStatusMessage(
+        updatedBranch.isActive
+            ? 'Sucursal reactivada: ${updatedBranch.name}.'
+            : 'Sucursal desactivada: ${updatedBranch.name}.',
+      );
+      await _refreshDirectory(forceRefresh: true, showFeedback: false);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showStatusMessage('No se pudo cambiar el estado: $error');
+    }
   }
 
   void _showStatusMessage(String message) {
@@ -388,6 +464,11 @@ class _BranchDirectoryPageState extends State<BranchDirectoryPage>
                         currentBranchId: data.currentBranch?.id,
                         selectedProduct: data.selectedProduct,
                         distanceReferenceLabel: _distanceReferenceLabel(data),
+                        canManage: widget.currentUser.can(
+                          AppPermission.manageBranches,
+                        ),
+                        onEdit: () => _editBranch(entry.entry.branch),
+                        onToggle: () => _toggleBranch(entry.entry.branch),
                       ),
                     ),
                   ),
@@ -406,6 +487,12 @@ class _BranchDirectoryPageState extends State<BranchDirectoryPage>
     }
 
     return Scaffold(
+      drawer: BranchPanelDrawer(
+        service: widget.service,
+        currentUser: widget.currentUser,
+        currentDestination: BranchPanelDestination.branches,
+        authService: widget.authService,
+      ),
       appBar: AppBar(
         title: const Text('Sucursales'),
         actions: [
@@ -421,7 +508,7 @@ class _BranchDirectoryPageState extends State<BranchDirectoryPage>
         ],
       ),
       body: Container(
-        color: const Color(0xFF08172D),
+        color: const Color(0xFF08090C),
         child: SafeArea(top: false, child: content),
       ),
     );
@@ -444,9 +531,9 @@ class _BranchDirectoryHeader extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -530,9 +617,9 @@ class _BranchDirectoryFilters extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -738,12 +825,18 @@ class _BranchCard extends StatelessWidget {
     required this.currentBranchId,
     required this.selectedProduct,
     required this.distanceReferenceLabel,
+    required this.canManage,
+    required this.onEdit,
+    required this.onToggle,
   });
 
   final _ResolvedBranchEntry resolvedEntry;
   final String? currentBranchId;
   final Product? selectedProduct;
   final String distanceReferenceLabel;
+  final bool canManage;
+  final VoidCallback onEdit;
+  final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -760,9 +853,9 @@ class _BranchCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -791,6 +884,9 @@ class _BranchCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
+              if (!entry.branch.isActive)
+                const _StatusTag(label: 'Inactiva', color: AppPalette.danger),
+              if (!entry.branch.isActive) const SizedBox(width: 8),
               if (isCurrentBranch)
                 const _StatusTag(label: 'Tu sucursal', color: AppPalette.blue),
             ],
@@ -852,6 +948,31 @@ class _BranchCard extends StatelessWidget {
               ],
             ),
           ],
+          if (canManage) ...[
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: onEdit,
+                  icon: const Icon(Icons.edit_rounded),
+                  label: const Text('Editar'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: onToggle,
+                  icon: Icon(
+                    entry.branch.isActive
+                        ? Icons.block_rounded
+                        : Icons.check_circle_rounded,
+                  ),
+                  label: Text(
+                    entry.branch.isActive ? 'Desactivar' : 'Reactivar',
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -874,9 +995,9 @@ class _BranchDirectoryEmptyState extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF102540),
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Text(
         'No hay sucursales que coincidan con los filtros actuales.',
@@ -907,9 +1028,9 @@ class _BranchDirectoryErrorState extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
-              color: const Color(0xFF102540),
+              color: const Color(0xFF17191F),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0x26FFFFFF)),
+              border: Border.all(color: const Color(0x26FF2636)),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1006,7 +1127,7 @@ class _InfoPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+        border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Text(
         label,
@@ -1032,7 +1153,7 @@ class _StockChip extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0x1FFFFFFF)),
+        border: Border.all(color: const Color(0x1FFF2636)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

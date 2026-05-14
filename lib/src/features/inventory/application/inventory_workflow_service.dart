@@ -256,6 +256,47 @@ class StockAlertFeedData {
   bool get hasCritical => criticalCount > 0;
 }
 
+class SalesCatalogItem {
+  const SalesCatalogItem({required this.product, required this.inventory});
+
+  final Product product;
+  final InventoryItem inventory;
+
+  int get availableStock => inventory.availableStock;
+  double get unitPrice => product.price;
+  String get currency => product.currency;
+}
+
+class DailySalesMetric {
+  const DailySalesMetric({
+    required this.day,
+    required this.quantity,
+    required this.total,
+  });
+
+  final DateTime day;
+  final int quantity;
+  final double total;
+}
+
+class SalesReportData {
+  const SalesReportData({
+    required this.sales,
+    required this.dailyMetrics,
+    required this.generatedAt,
+  });
+
+  final List<SaleRecord> sales;
+  final List<DailySalesMetric> dailyMetrics;
+  final DateTime generatedAt;
+
+  int get totalTransactions => sales.length;
+  int get totalUnits =>
+      sales.fold<int>(0, (total, sale) => total + sale.quantity);
+  double get totalRevenue =>
+      sales.fold<double>(0, (total, sale) => total + sale.totalPrice);
+}
+
 class ProductSearchResult {
   const ProductSearchResult({
     required this.product,
@@ -757,6 +798,7 @@ class InventoryWorkflowService {
        inventories = InventoryRepository(firestore),
        reservations = ReservationRepository(firestore),
        transfers = TransferRepository(firestore),
+       sales = SalesRepository(firestore),
        system = SystemRepository(firestore);
 
   final FirebaseFirestore _firestore;
@@ -768,6 +810,7 @@ class InventoryWorkflowService {
   final InventoryRepository inventories;
   final ReservationRepository reservations;
   final TransferRepository transfers;
+  final SalesRepository sales;
   final SystemRepository system;
   final Map<String, DateTime> _refreshRegistry = <String, DateTime>{};
   final Map<String, ProductSearchData> _productSearchCache =
@@ -792,7 +835,9 @@ class InventoryWorkflowService {
 
   static const Duration _greenDataThreshold = Duration(minutes: 15);
   static const Duration _yellowDataThreshold = Duration(minutes: 30);
-  static const Duration _redDataThreshold = Duration(minutes: 60);
+  static const Duration _greenSyncThreshold = Duration(hours: 4);
+  static const Duration _yellowSyncThreshold = Duration(hours: 12);
+  static const Duration _redSyncThreshold = Duration(hours: 24);
   static const Duration _syncStatusTick = Duration(minutes: 1);
   static const Duration _syncFailureBurstWindow = Duration(hours: 2);
   static const int _syncStatusLogLimit = 180;
@@ -840,6 +885,8 @@ class InventoryWorkflowService {
       _firestore.collection(FirestoreCollections.reservations);
   CollectionReference<Map<String, dynamic>> get _transfersCollection =>
       _firestore.collection(FirestoreCollections.transfers);
+  CollectionReference<Map<String, dynamic>> get _salesCollection =>
+      _firestore.collection(FirestoreCollections.sales);
   CollectionReference<Map<String, dynamic>> get _syncLogsCollection =>
       _firestore.collection(FirestoreCollections.syncLogs);
   CollectionReference<Map<String, dynamic>> get _notificationsCollection =>
@@ -1359,7 +1406,7 @@ class InventoryWorkflowService {
     }
 
     throw const InventoryException(
-      'Solo el administrador puede registrar errores o solicitar reintentos de sincronizacion.',
+      'Solo el administrador puede registrar errores o solicitar reintentos de actualizacion.',
     );
   }
 
@@ -1720,6 +1767,546 @@ class InventoryWorkflowService {
     _invalidateBranchCatalogCache();
 
     return branch;
+  }
+
+  Future<Branch> updateBranch({
+    required AppUser actorUser,
+    required String branchId,
+    required String name,
+    required String address,
+    required String city,
+    String phone = '',
+    String email = '',
+    String managerName = '',
+    String openingHours = '08:00-18:00',
+    double latitude = 0,
+    double longitude = 0,
+    required bool isActive,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.manageBranches);
+
+    final currentBranch = await catalog.fetchBranch(branchId);
+    if (currentBranch == null) {
+      throw const InventoryException('La sucursal no existe.');
+    }
+    final normalizedName = name.trim();
+    final normalizedAddress = address.trim();
+    final normalizedCity = city.trim();
+    if (normalizedName.isEmpty ||
+        normalizedAddress.isEmpty ||
+        normalizedCity.isEmpty) {
+      throw const InventoryException(
+        'Nombre, direccion y ciudad son obligatorios.',
+      );
+    }
+
+    final now = _clock();
+    final updatedBranch = Branch(
+      id: currentBranch.id,
+      name: normalizedName,
+      code: currentBranch.code,
+      address: normalizedAddress,
+      city: normalizedCity,
+      phone: phone.trim(),
+      email: email.trim(),
+      location: BranchLocation(lat: latitude, lng: longitude),
+      isActive: isActive,
+      managerName: managerName.trim(),
+      openingHours: openingHours.trim().isEmpty
+          ? currentBranch.openingHours
+          : openingHours.trim(),
+      lastSyncAt: currentBranch.lastSyncAt,
+      createdAt: currentBranch.createdAt,
+      updatedAt: now,
+    );
+    final branchInventories = await inventories.fetchBranchInventory(branchId);
+    final auditLog = _buildAuditLog(
+      actorUser: actorUser,
+      action: isActive ? 'branch_updated' : 'branch_deactivated',
+      entityType: 'branch',
+      entityId: updatedBranch.id,
+      entityLabel: updatedBranch.name,
+      message: isActive ? 'Actualizo una sucursal.' : 'Desactivo una sucursal.',
+      metadata: {
+        'code': updatedBranch.code,
+        'city': updatedBranch.city,
+        'managerName': updatedBranch.managerName,
+        'isActive': '${updatedBranch.isActive}',
+        'inventoriesUpdated': '${branchInventories.length}',
+      },
+      branchId: updatedBranch.id,
+      branchName: updatedBranch.name,
+    );
+
+    final batch = _firestore.batch();
+    batch.set(
+      _firestore
+          .collection(FirestoreCollections.branches)
+          .doc(updatedBranch.id),
+      updatedBranch.toFirestore(),
+    );
+    for (final inventory in branchInventories) {
+      final refreshedInventory = inventory.recalculate(
+        branchName: updatedBranch.name,
+        isActive: isActive ? inventory.isActive : false,
+        updatedBy: actorUser.id,
+        updatedAt: now,
+      );
+      batch.set(
+        _inventoriesCollection.doc(refreshedInventory.id),
+        refreshedInventory.toFirestore(),
+      );
+    }
+    batch.set(_auditLogsCollection.doc(auditLog.id), auditLog.toFirestore());
+    await batch.commit();
+    _invalidateProductCaches();
+    _invalidateBranchCatalogCache();
+    return updatedBranch;
+  }
+
+  Future<Category> createCategory({
+    required AppUser actorUser,
+    required String name,
+    String description = '',
+    int? lowStockThreshold,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.manageMasterData);
+
+    final normalizedName = name.trim();
+    if (normalizedName.isEmpty) {
+      throw const InventoryException(
+        'El nombre de la categoria es obligatorio.',
+      );
+    }
+    if (lowStockThreshold != null && lowStockThreshold < 0) {
+      throw const InventoryException(
+        'El umbral de stock bajo no puede ser negativo.',
+      );
+    }
+
+    final categoryId = 'cat_${_normalizeBranchCode(normalizedName)}';
+    final existingCategory = await catalog.fetchCategory(categoryId);
+    if (existingCategory != null) {
+      throw InventoryException(
+        'Ya existe una categoria registrada con el nombre $normalizedName.',
+      );
+    }
+
+    final now = _clock();
+    final category = Category(
+      id: categoryId,
+      name: normalizedName,
+      description: description.trim(),
+      lowStockThreshold: lowStockThreshold,
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    );
+    final auditLog = _buildAuditLog(
+      actorUser: actorUser,
+      action: 'category_created',
+      entityType: 'category',
+      entityId: category.id,
+      entityLabel: category.name,
+      message: 'Registro una nueva categoria.',
+      metadata: {
+        if (category.lowStockThreshold != null)
+          'lowStockThreshold': '${category.lowStockThreshold}',
+      },
+    );
+
+    final batch = _firestore.batch();
+    batch.set(
+      _firestore.collection(FirestoreCollections.categories).doc(category.id),
+      category.toFirestore(),
+    );
+    batch.set(_auditLogsCollection.doc(auditLog.id), auditLog.toFirestore());
+    await batch.commit();
+    _categoryCatalogCache = null;
+    return category;
+  }
+
+  Future<Category> updateCategory({
+    required AppUser actorUser,
+    required String categoryId,
+    required String name,
+    String description = '',
+    int? lowStockThreshold,
+    required bool isActive,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.manageMasterData);
+
+    final currentCategory = await catalog.fetchCategory(categoryId);
+    if (currentCategory == null) {
+      throw const InventoryException('La categoria no existe.');
+    }
+    final normalizedName = name.trim();
+    if (normalizedName.isEmpty) {
+      throw const InventoryException(
+        'El nombre de la categoria es obligatorio.',
+      );
+    }
+    if (lowStockThreshold != null && lowStockThreshold < 0) {
+      throw const InventoryException(
+        'El umbral de stock bajo no puede ser negativo.',
+      );
+    }
+    final existingCategories = await catalog.fetchCategories();
+    final duplicatedName = existingCategories.any(
+      (category) =>
+          category.id != categoryId &&
+          category.name.trim().toLowerCase() == normalizedName.toLowerCase(),
+    );
+    if (duplicatedName) {
+      throw InventoryException(
+        'Ya existe una categoria registrada con el nombre $normalizedName.',
+      );
+    }
+
+    final now = _clock();
+    final updatedCategory = Category(
+      id: currentCategory.id,
+      name: normalizedName,
+      description: description.trim(),
+      lowStockThreshold: lowStockThreshold,
+      isActive: isActive,
+      createdAt: currentCategory.createdAt,
+      updatedAt: now,
+    );
+    final auditLog = _buildAuditLog(
+      actorUser: actorUser,
+      action: isActive ? 'category_updated' : 'category_deactivated',
+      entityType: 'category',
+      entityId: updatedCategory.id,
+      entityLabel: updatedCategory.name,
+      message: isActive
+          ? 'Actualizo una categoria.'
+          : 'Desactivo una categoria.',
+      metadata: {
+        if (updatedCategory.lowStockThreshold != null)
+          'lowStockThreshold': '${updatedCategory.lowStockThreshold}',
+        'isActive': '${updatedCategory.isActive}',
+      },
+    );
+
+    final batch = _firestore.batch();
+    batch.set(
+      _firestore.collection(FirestoreCollections.categories).doc(categoryId),
+      updatedCategory.toFirestore(),
+    );
+    batch.set(_auditLogsCollection.doc(auditLog.id), auditLog.toFirestore());
+    await batch.commit();
+    _categoryCatalogCache = null;
+    return updatedCategory;
+  }
+
+  Future<Product> createProduct({
+    required AppUser actorUser,
+    required String sku,
+    required String barcode,
+    required String name,
+    required String description,
+    required String categoryId,
+    required String brand,
+    String imageUrl = '',
+    required double price,
+    required double cost,
+    String currency = 'USD',
+    List<String> tags = const <String>[],
+    int minimumStock = 0,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.manageMasterData);
+
+    final normalizedSku = sku.trim().toUpperCase();
+    final normalizedName = name.trim();
+    final normalizedBrand = brand.trim();
+    final normalizedCurrency = currency.trim().toUpperCase();
+    final normalizedBarcode = barcode.trim();
+
+    if (normalizedSku.isEmpty || normalizedName.isEmpty) {
+      throw const InventoryException(
+        'El SKU y el nombre del producto son obligatorios.',
+      );
+    }
+    if (categoryId.trim().isEmpty) {
+      throw const InventoryException('Debes seleccionar una categoria.');
+    }
+    if (price <= 0) {
+      throw const InventoryException(
+        'El precio de venta debe ser mayor que cero.',
+      );
+    }
+    if (cost < 0 || cost > price) {
+      throw const InventoryException(
+        'El costo no puede ser negativo ni mayor que el precio de venta.',
+      );
+    }
+    if (minimumStock < 0) {
+      throw const InventoryException(
+        'El minimo operativo no puede ser negativo.',
+      );
+    }
+
+    final category = await catalog.fetchCategory(categoryId);
+    if (category == null || !category.isActive) {
+      throw const InventoryException(
+        'La categoria seleccionada no existe o esta inactiva.',
+      );
+    }
+
+    final existingProducts = await catalog.fetchProducts();
+    final duplicatedSku = existingProducts.any(
+      (product) => product.sku.trim().toUpperCase() == normalizedSku,
+    );
+    if (duplicatedSku) {
+      throw InventoryException(
+        'Ya existe un producto registrado con el SKU $normalizedSku.',
+      );
+    }
+    if (normalizedBarcode.isNotEmpty) {
+      final duplicatedBarcode = existingProducts.any(
+        (product) => product.barcode.trim() == normalizedBarcode,
+      );
+      if (duplicatedBarcode) {
+        throw InventoryException(
+          'Ya existe un producto registrado con el codigo de barras $normalizedBarcode.',
+        );
+      }
+    }
+
+    final now = _clock();
+    final productId = 'prod_${_normalizeBranchCode(normalizedSku)}';
+    final existingProductId = await catalog.fetchProduct(productId);
+    if (existingProductId != null) {
+      throw InventoryException(
+        'Ya existe un producto registrado con el identificador $productId.',
+      );
+    }
+    final product = Product(
+      id: productId,
+      sku: normalizedSku,
+      barcode: normalizedBarcode,
+      name: normalizedName,
+      description: description.trim(),
+      categoryId: category.id,
+      brand: normalizedBrand,
+      imageUrl: imageUrl.trim(),
+      price: price,
+      cost: cost,
+      currency: normalizedCurrency.isEmpty ? 'USD' : normalizedCurrency,
+      tags: tags
+          .map((tag) => tag.trim())
+          .where((tag) => tag.isNotEmpty)
+          .toSet()
+          .toList(growable: false),
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    );
+    final branches = (await catalog.fetchBranches())
+        .where((branch) => branch.isActive)
+        .toList(growable: false);
+    final auditLog = _buildAuditLog(
+      actorUser: actorUser,
+      action: 'product_created',
+      entityType: 'product',
+      entityId: product.id,
+      entityLabel: product.name,
+      message: 'Registro un nuevo producto.',
+      metadata: {
+        'sku': product.sku,
+        'categoryId': product.categoryId,
+        'brand': product.brand,
+        'price': product.price.toStringAsFixed(2),
+        'cost': product.cost.toStringAsFixed(2),
+        'currency': product.currency,
+        'inventoryBranches': '${branches.length}',
+        'minimumStock': '$minimumStock',
+      },
+    );
+
+    final batch = _firestore.batch();
+    batch.set(
+      _firestore.collection(FirestoreCollections.products).doc(product.id),
+      product.toFirestore(),
+    );
+    for (final branch in branches) {
+      final inventory = InventoryItem.create(
+        branchId: branch.id,
+        branchName: branch.name,
+        productId: product.id,
+        productName: product.name,
+        sku: product.sku,
+        stock: 0,
+        reservedStock: 0,
+        incomingStock: 0,
+        minimumStock: minimumStock,
+        updatedBy: actorUser.id,
+        isActive: true,
+        updatedAt: now,
+        lastMovementAt: now,
+        lastSyncAt: null,
+      );
+      batch.set(
+        _inventoriesCollection.doc(inventory.id),
+        inventory.toFirestore(),
+      );
+    }
+    batch.set(_auditLogsCollection.doc(auditLog.id), auditLog.toFirestore());
+    await batch.commit();
+    _invalidateProductCaches();
+    return product;
+  }
+
+  Future<Product> updateProduct({
+    required AppUser actorUser,
+    required String productId,
+    required String sku,
+    required String barcode,
+    required String name,
+    required String description,
+    required String categoryId,
+    required String brand,
+    String imageUrl = '',
+    required double price,
+    required double cost,
+    String currency = 'USD',
+    List<String> tags = const <String>[],
+    int? minimumStock,
+    required bool isActive,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.manageMasterData);
+
+    final currentProduct = await catalog.fetchProduct(productId);
+    if (currentProduct == null) {
+      throw const InventoryException('El producto no existe.');
+    }
+    final normalizedSku = sku.trim().toUpperCase();
+    final normalizedName = name.trim();
+    final normalizedCurrency = currency.trim().toUpperCase();
+    final normalizedBarcode = barcode.trim();
+    if (normalizedSku.isEmpty || normalizedName.isEmpty) {
+      throw const InventoryException(
+        'El SKU y el nombre del producto son obligatorios.',
+      );
+    }
+    if (categoryId.trim().isEmpty) {
+      throw const InventoryException('Debes seleccionar una categoria.');
+    }
+    if (price <= 0) {
+      throw const InventoryException(
+        'El precio de venta debe ser mayor que cero.',
+      );
+    }
+    if (cost < 0 || cost > price) {
+      throw const InventoryException(
+        'El costo no puede ser negativo ni mayor que el precio de venta.',
+      );
+    }
+    if (minimumStock != null && minimumStock < 0) {
+      throw const InventoryException(
+        'El minimo operativo no puede ser negativo.',
+      );
+    }
+
+    final category = await catalog.fetchCategory(categoryId);
+    if (category == null || !category.isActive) {
+      throw const InventoryException(
+        'La categoria seleccionada no existe o esta inactiva.',
+      );
+    }
+    final existingProducts = await catalog.fetchProducts();
+    final duplicatedSku = existingProducts.any(
+      (product) =>
+          product.id != productId &&
+          product.sku.trim().toUpperCase() == normalizedSku,
+    );
+    if (duplicatedSku) {
+      throw InventoryException(
+        'Ya existe un producto registrado con el SKU $normalizedSku.',
+      );
+    }
+    if (normalizedBarcode.isNotEmpty) {
+      final duplicatedBarcode = existingProducts.any(
+        (product) =>
+            product.id != productId &&
+            product.barcode.trim() == normalizedBarcode,
+      );
+      if (duplicatedBarcode) {
+        throw InventoryException(
+          'Ya existe un producto registrado con el codigo de barras $normalizedBarcode.',
+        );
+      }
+    }
+
+    final now = _clock();
+    final updatedProduct = Product(
+      id: currentProduct.id,
+      sku: normalizedSku,
+      barcode: normalizedBarcode,
+      name: normalizedName,
+      description: description.trim(),
+      categoryId: category.id,
+      brand: brand.trim(),
+      imageUrl: imageUrl.trim(),
+      price: price,
+      cost: cost,
+      currency: normalizedCurrency.isEmpty ? 'USD' : normalizedCurrency,
+      tags: tags
+          .map((tag) => tag.trim())
+          .where((tag) => tag.isNotEmpty)
+          .toSet()
+          .toList(growable: false),
+      isActive: isActive,
+      createdAt: currentProduct.createdAt,
+      updatedAt: now,
+    );
+    final productInventories = await inventories.fetchProductInventory(
+      productId,
+    );
+    final auditLog = _buildAuditLog(
+      actorUser: actorUser,
+      action: isActive ? 'product_updated' : 'product_deactivated',
+      entityType: 'product',
+      entityId: updatedProduct.id,
+      entityLabel: updatedProduct.name,
+      message: isActive ? 'Actualizo un producto.' : 'Desactivo un producto.',
+      metadata: {
+        'sku': updatedProduct.sku,
+        'categoryId': updatedProduct.categoryId,
+        'brand': updatedProduct.brand,
+        'price': updatedProduct.price.toStringAsFixed(2),
+        'cost': updatedProduct.cost.toStringAsFixed(2),
+        'currency': updatedProduct.currency,
+        'isActive': '${updatedProduct.isActive}',
+        'inventoriesUpdated': '${productInventories.length}',
+        if (minimumStock != null) 'minimumStock': '$minimumStock',
+      },
+    );
+
+    final batch = _firestore.batch();
+    batch.set(
+      _firestore.collection(FirestoreCollections.products).doc(productId),
+      updatedProduct.toFirestore(),
+    );
+    for (final inventory in productInventories) {
+      final refreshedInventory = inventory.recalculate(
+        productName: updatedProduct.name,
+        sku: updatedProduct.sku,
+        minimumStock: minimumStock ?? inventory.minimumStock,
+        isActive: isActive ? inventory.isActive : false,
+        updatedBy: actorUser.id,
+        updatedAt: now,
+      );
+      batch.set(
+        _inventoriesCollection.doc(refreshedInventory.id),
+        refreshedInventory.toFirestore(),
+      );
+    }
+    batch.set(_auditLogsCollection.doc(auditLog.id), auditLog.toFirestore());
+    await batch.commit();
+    _invalidateProductCaches(productId);
+    return updatedProduct;
   }
 
   String _buildSearchCacheKey({
@@ -2748,6 +3335,269 @@ class InventoryWorkflowService {
     return immutableItems;
   }
 
+  Future<List<SalesCatalogItem>> fetchSalesCatalog({
+    required AppUser actorUser,
+  }) async {
+    _ensurePermission(actorUser, AppPermission.registerSale);
+    final products = await _fetchProductCatalog();
+    final productsById = {
+      for (final product in products.data) product.id: product,
+    };
+    final branchInventory = await _fetchBranchInventory(actorUser.branchId);
+
+    final items =
+        branchInventory.data
+            .where((inventory) => inventory.isActive)
+            .map((inventory) {
+              final product = productsById[inventory.productId];
+              if (product == null || !product.isActive) {
+                return null;
+              }
+              return SalesCatalogItem(product: product, inventory: inventory);
+            })
+            .whereType<SalesCatalogItem>()
+            .where((item) => item.availableStock > 0)
+            .toList(growable: false)
+          ..sort((left, right) {
+            final availability = right.availableStock.compareTo(
+              left.availableStock,
+            );
+            if (availability != 0) {
+              return availability;
+            }
+            return left.product.name.compareTo(right.product.name);
+          });
+
+    return List<SalesCatalogItem>.unmodifiable(items);
+  }
+
+  Future<SaleRecord> registerSale({
+    required AppUser actorUser,
+    required String productId,
+    required int quantity,
+    required double unitPrice,
+    required SalePaymentMethod paymentMethod,
+    String customerName = '',
+    String customerPhone = '',
+    String notes = '',
+  }) async {
+    return _trackOperation(
+      actorUser: actorUser,
+      operation: 'sales.register',
+      branchId: actorUser.branchId,
+      entityType: 'sale',
+      requestSummary: {
+        'productId': productId,
+        'quantity': '$quantity',
+        'unitPrice': unitPrice.toStringAsFixed(2),
+        'paymentMethod': paymentMethod.name,
+      },
+      responseSummaryBuilder: (sale) => {
+        'saleId': sale.id,
+        'totalPrice': sale.totalPrice.toStringAsFixed(2),
+        'quantity': '${sale.quantity}',
+      },
+      branchIdBuilder: (sale) => sale.branchId,
+      branchNameBuilder: (sale) => sale.branchName,
+      entityIdBuilder: (sale) => sale.id,
+      entityLabelBuilder: (sale) => sale.productName,
+      action: () async {
+        _ensurePermission(actorUser, AppPermission.registerSale);
+        _ensureBranchAccess(actorUser, actorUser.branchId);
+
+        if (quantity <= 0) {
+          throw const InventoryException(
+            'La cantidad vendida debe ser mayor que cero.',
+          );
+        }
+        if (unitPrice <= 0) {
+          throw const InventoryException(
+            'El precio unitario debe ser mayor que cero.',
+          );
+        }
+
+        final now = _clock();
+        final branch = await catalog.fetchBranch(actorUser.branchId);
+        final product = await catalog.fetchProduct(productId);
+        if (branch == null || product == null || !product.isActive) {
+          throw const InventoryException(
+            'No se encontro el producto o la sucursal para registrar la venta.',
+          );
+        }
+
+        final inventoryRef = _inventoriesCollection.doc(
+          inventories.inventoryId(actorUser.branchId, productId),
+        );
+        final saleRef = _salesCollection.doc();
+        final auditLogRef = _auditLogsCollection.doc();
+        InventoryItem? previousInventory;
+        InventoryItem? updatedInventory;
+
+        final sale = await _firestore.runTransaction((transaction) async {
+          final inventorySnapshot = await transaction.get(inventoryRef);
+          if (!inventorySnapshot.exists) {
+            throw const InventoryException(
+              'No existe inventario para vender este producto en tu sede.',
+            );
+          }
+
+          final inventory = InventoryItem.fromFirestore(
+            inventorySnapshot.id,
+            inventorySnapshot.data()!,
+          );
+          previousInventory = inventory;
+          if (!inventory.isActive) {
+            throw const InventoryException(
+              'El inventario del producto esta inactivo.',
+            );
+          }
+          if (inventory.availableStock < quantity) {
+            throw InventoryException(
+              'Stock insuficiente. Disponible: ${inventory.availableStock}, solicitado: $quantity.',
+            );
+          }
+
+          updatedInventory = inventory.recalculate(
+            stock: inventory.stock - quantity,
+            updatedBy: actorUser.id,
+            updatedAt: now,
+            lastMovementAt: now,
+          );
+          final totalPrice = unitPrice * quantity;
+          final sale = SaleRecord(
+            id: saleRef.id,
+            branchId: branch.id,
+            branchName: branch.name,
+            sellerId: actorUser.id,
+            sellerName: actorUser.fullName,
+            productId: product.id,
+            productName: product.name,
+            sku: product.sku,
+            quantity: quantity,
+            unitPrice: unitPrice,
+            totalPrice: totalPrice,
+            currency: product.currency,
+            paymentMethod: paymentMethod,
+            customerName: customerName.trim(),
+            customerPhone: customerPhone.trim(),
+            notes: notes.trim(),
+            soldAt: now,
+            createdAt: now,
+          );
+          final auditLog = _buildAuditLog(
+            actorUser: actorUser,
+            action: 'sale_registered',
+            entityType: 'sale',
+            entityId: sale.id,
+            entityLabel: sale.productName,
+            message:
+                'Registro una venta de ${sale.quantity} unidad(es) de ${sale.productName}.',
+            metadata: {
+              'branchId': sale.branchId,
+              'branchName': sale.branchName,
+              'sellerId': sale.sellerId,
+              'sellerName': sale.sellerName,
+              'productId': sale.productId,
+              'sku': sale.sku,
+              'quantity': '${sale.quantity}',
+              'unitPrice': sale.unitPrice.toStringAsFixed(2),
+              'totalPrice': sale.totalPrice.toStringAsFixed(2),
+              'currency': sale.currency,
+              'paymentMethod': sale.paymentMethod.name,
+              if (sale.customerName.isNotEmpty)
+                'customerName': sale.customerName,
+              if (sale.customerPhone.isNotEmpty)
+                'customerPhone': sale.customerPhone,
+              if (sale.notes.isNotEmpty) 'notes': sale.notes,
+            },
+            branchId: sale.branchId,
+            branchName: sale.branchName,
+          );
+
+          transaction.set(inventoryRef, updatedInventory!.toFirestore());
+          transaction.set(saleRef, sale.toFirestore());
+          transaction.set(auditLogRef, auditLog.toFirestore());
+          return sale;
+        });
+
+        if (updatedInventory != null) {
+          await _handleLowStockAlertTransition(
+            previousInventory: previousInventory,
+            updatedInventory: updatedInventory!,
+          );
+        }
+        _invalidateProductCaches(productId);
+        return sale;
+      },
+    );
+  }
+
+  Stream<List<SaleRecord>> watchSales({required AppUser actorUser}) {
+    _ensurePermission(actorUser, AppPermission.viewBranchSales);
+    if (actorUser.role == UserRole.admin) {
+      return sales.watchSales();
+    }
+    return sales.watchSalesByBranch(actorUser.branchId);
+  }
+
+  Stream<List<SaleRecord>> watchOwnSales({required AppUser actorUser}) {
+    _ensurePermission(actorUser, AppPermission.registerSale);
+    return sales.watchSalesBySeller(actorUser.id);
+  }
+
+  SalesReportData buildSalesReport(
+    List<SaleRecord> sales, {
+    DateTime? from,
+    DateTime? to,
+  }) {
+    final filtered =
+        sales
+            .where((sale) {
+              if (from != null && sale.soldAt.isBefore(from)) {
+                return false;
+              }
+              if (to != null && !sale.soldAt.isBefore(to)) {
+                return false;
+              }
+              return true;
+            })
+            .toList(growable: false)
+          ..sort((left, right) => right.soldAt.compareTo(left.soldAt));
+
+    final grouped = <DateTime, List<SaleRecord>>{};
+    for (final sale in filtered) {
+      final day = DateTime(
+        sale.soldAt.year,
+        sale.soldAt.month,
+        sale.soldAt.day,
+      );
+      grouped.putIfAbsent(day, () => <SaleRecord>[]).add(sale);
+    }
+    final dailyMetrics =
+        grouped.entries
+            .map(
+              (entry) => DailySalesMetric(
+                day: entry.key,
+                quantity: entry.value.fold<int>(
+                  0,
+                  (total, sale) => total + sale.quantity,
+                ),
+                total: entry.value.fold<double>(
+                  0,
+                  (total, sale) => total + sale.totalPrice,
+                ),
+              ),
+            )
+            .toList(growable: false)
+          ..sort((left, right) => right.day.compareTo(left.day));
+
+    return SalesReportData(
+      sales: List<SaleRecord>.unmodifiable(filtered),
+      dailyMetrics: List<DailySalesMetric>.unmodifiable(dailyMetrics),
+      generatedAt: _clock(),
+    );
+  }
+
   Future<TransferTraceabilityData> fetchTransferTraceability({
     required AppUser actorUser,
     required String transferId,
@@ -2784,18 +3634,16 @@ class InventoryWorkflowService {
         final requesterFuture =
             actorUser.role == UserRole.admin ||
                 actorUser.id == transfer.requestedBy
-            ? users.fetchUser(transfer.requestedBy)
+            ? _safeFetchUser(transfer.requestedBy)
             : Future<AppUser?>.value(null);
         final approverFuture =
             actorUser.role == UserRole.admin && transfer.approvedBy != null
-            ? users.fetchUser(transfer.approvedBy!)
+            ? _safeFetchUser(transfer.approvedBy!)
             : Future<AppUser?>.value(null);
-        final auditTrailFuture = actorUser.role == UserRole.admin
-            ? system.fetchAuditLogsForEntity(
-                entityId: transfer.id,
-                entityType: 'transfer',
-              )
-            : Future<List<AuditLog>>.value(const <AuditLog>[]);
+        final auditTrailFuture = _safeFetchAuditTrail(
+          entityId: transfer.id,
+          entityType: 'transfer',
+        );
 
         final results = await Future.wait<Object?>([
           requesterFuture,
@@ -2853,14 +3701,12 @@ class InventoryWorkflowService {
         final requesterFuture =
             actorUser.role == UserRole.admin ||
                 actorUser.id == reservation.reservedBy
-            ? users.fetchUser(reservation.reservedBy)
+            ? _safeFetchUser(reservation.reservedBy)
             : Future<AppUser?>.value(null);
-        final auditTrailFuture = actorUser.role == UserRole.admin
-            ? system.fetchAuditLogsForEntity(
-                entityId: reservation.id,
-                entityType: 'reservation',
-              )
-            : Future<List<AuditLog>>.value(const <AuditLog>[]);
+        final auditTrailFuture = _safeFetchAuditTrail(
+          entityId: reservation.id,
+          entityType: 'reservation',
+        );
 
         final results = await Future.wait<Object?>([
           requesterFuture,
@@ -2958,6 +3804,34 @@ class InventoryWorkflowService {
       recentErrors: List<RequestLog>.unmodifiable(recentErrors),
       endpointMetrics: List<EndpointPerformanceMetric>.unmodifiable(metrics),
     );
+  }
+
+  Future<AppUser?> _safeFetchUser(String userId) async {
+    try {
+      return await users.fetchUser(userId);
+    } on FirebaseException catch (error) {
+      if (error.code == 'permission-denied') {
+        return null;
+      }
+      rethrow;
+    }
+  }
+
+  Future<List<AuditLog>> _safeFetchAuditTrail({
+    required String entityId,
+    required String entityType,
+  }) async {
+    try {
+      return await system.fetchAuditLogsForEntity(
+        entityId: entityId,
+        entityType: entityType,
+      );
+    } on FirebaseException catch (error) {
+      if (error.code == 'permission-denied') {
+        return const <AuditLog>[];
+      }
+      rethrow;
+    }
   }
 
   Stream<List<SearchHistoryEntry>> watchRecentSearches({
@@ -3463,6 +4337,79 @@ class InventoryWorkflowService {
     return controller.stream;
   }
 
+  Future<SyncLog> refreshOwnBranchData({required AppUser actorUser}) async {
+    return _trackOperation(
+      actorUser: actorUser,
+      operation: 'sync.refresh_own_branch',
+      branchId: actorUser.branchId,
+      entityType: 'sync',
+      requestSummary: {'branchId': actorUser.branchId, 'type': 'inventory'},
+      responseSummaryBuilder: (syncLog) => {
+        'syncLogId': syncLog.id,
+        'status': syncLog.status,
+        'recordsProcessed': '${syncLog.recordsProcessed}',
+      },
+      branchIdBuilder: (syncLog) => syncLog.branchId,
+      branchNameBuilder: (syncLog) => syncLog.branchName,
+      entityIdBuilder: (syncLog) => syncLog.id,
+      entityLabelBuilder: (syncLog) => syncLog.branchName,
+      action: () async {
+        _ensurePermission(actorUser, AppPermission.viewSyncStatus);
+        if (actorUser.role != UserRole.supervisor &&
+            actorUser.role != UserRole.admin) {
+          throw const InventoryException(
+            'Solo supervisores o administradores pueden actualizar la sede.',
+          );
+        }
+
+        final branch = await catalog.fetchBranch(actorUser.branchId);
+        if (branch == null) {
+          throw const InventoryException('La sucursal no existe.');
+        }
+
+        final inventory = await inventories.fetchBranchInventory(branch.id);
+        final now = _clock();
+        final syncRef = _syncLogsCollection.doc();
+        final auditLogRef = _auditLogsCollection.doc();
+        final syncLog = SyncLog(
+          id: syncRef.id,
+          branchId: branch.id,
+          branchName: branch.name,
+          type: 'inventory',
+          status: 'success',
+          recordsProcessed: inventory.length,
+          startedAt: now,
+          finishedAt: now,
+          message: 'Actualizacion de sede confirmada por supervisor.',
+          createdAt: now,
+        );
+        final auditLog = _buildAuditLog(
+          actorUser: actorUser,
+          action: 'branch_data_refreshed',
+          entityType: 'sync',
+          entityId: syncLog.id,
+          entityLabel: branch.name,
+          message: 'Actualizo la vigencia de datos de',
+          metadata: {
+            'branchId': branch.id,
+            'branchName': branch.name,
+            'syncType': syncLog.type,
+            'status': syncLog.status,
+            'recordsProcessed': '${syncLog.recordsProcessed}',
+          },
+          branchId: branch.id,
+          branchName: branch.name,
+        );
+
+        final batch = _firestore.batch();
+        batch.set(syncRef, syncLog.toFirestore());
+        batch.set(auditLogRef, auditLog.toFirestore());
+        await batch.commit();
+        return syncLog;
+      },
+    );
+  }
+
   Future<SyncLog> registerSyncError({
     required AppUser actorUser,
     required String branchId,
@@ -3524,7 +4471,7 @@ class InventoryWorkflowService {
           entityType: 'sync',
           entityId: syncLog.id,
           entityLabel: branch.name,
-          message: 'Registro un evento de error de sincronizacion para',
+          message: 'Registro un evento de error de actualizacion para',
           metadata: {
             'branchId': branch.id,
             'branchName': branch.name,
@@ -3607,7 +4554,7 @@ class InventoryWorkflowService {
           entityType: 'sync',
           entityId: syncLog.id,
           entityLabel: branch.name,
-          message: 'Solicito un reintento de sincronizacion para',
+          message: 'Solicito un reintento de actualizacion para',
           metadata: {
             'branchId': branch.id,
             'branchName': branch.name,
@@ -4121,6 +5068,10 @@ class InventoryWorkflowService {
         );
         final reservationRef = _reservationsCollection.doc();
         final auditLogRef = _auditLogsCollection.doc();
+        final reviewTargets = await _approvalNotificationTargets(
+          branchId: branchId,
+          excludeUserId: actorUser.id,
+        );
 
         final reservation = await _firestore.runTransaction((
           transaction,
@@ -4192,6 +5143,21 @@ class InventoryWorkflowService {
 
           transaction.set(reservationRef, reservation.toFirestore());
           transaction.set(auditLogRef, auditLog.toFirestore());
+          for (final target in reviewTargets) {
+            final notificationRef = _notificationsCollection.doc();
+            final notification = AppNotification(
+              id: notificationRef.id,
+              userId: target.id,
+              title: 'Nueva reserva por aprobar',
+              message:
+                  '${actorUser.fullName} solicito reservar ${reservation.quantity} unidad(es) de ${reservation.productName} en ${reservation.branchName}.',
+              type: 'reservation',
+              referenceId: reservation.id,
+              isRead: false,
+              createdAt: now,
+            );
+            transaction.set(notificationRef, notification.toFirestore());
+          }
 
           return reservation;
         });
@@ -4679,6 +5645,10 @@ class InventoryWorkflowService {
           );
         }
 
+        final reviewTargets = await _approvalNotificationTargets(
+          branchId: fromBranchId,
+          excludeUserId: actorUser.id,
+        );
         final now = _clock();
         final transferRef = _transfersCollection.doc();
         final auditLogRef = _auditLogsCollection.doc();
@@ -4720,6 +5690,21 @@ class InventoryWorkflowService {
         final batch = _firestore.batch();
         batch.set(transferRef, transfer.toFirestore());
         batch.set(auditLogRef, auditLog.toFirestore());
+        for (final target in reviewTargets) {
+          final notificationRef = _notificationsCollection.doc();
+          final notification = AppNotification(
+            id: notificationRef.id,
+            userId: target.id,
+            title: 'Nuevo traslado por aprobar',
+            message:
+                '${actorUser.fullName} solicito ${transfer.quantity} unidad(es) de ${transfer.productName} desde ${transfer.fromBranchName} hacia ${transfer.toBranchName}.',
+            type: 'transfer',
+            referenceId: transfer.id,
+            isRead: false,
+            createdAt: now,
+          );
+          batch.set(notificationRef, notification.toFirestore());
+        }
         await batch.commit();
         _invalidateProductCaches(product.id);
         return transfer;
@@ -5375,6 +6360,32 @@ class InventoryWorkflowService {
   String _stockAlertReadStateId(String userId, String alertId) =>
       '${userId}_$alertId';
 
+  Future<List<AppUser>> _approvalNotificationTargets({
+    required String branchId,
+    String? excludeUserId,
+  }) async {
+    final allUsers = await users.fetchUsers();
+    final targets =
+        allUsers
+            .where(
+              (user) =>
+                  user.isActive &&
+                  user.id != excludeUserId &&
+                  (user.role == UserRole.admin ||
+                      (user.role == UserRole.supervisor &&
+                          user.branchId == branchId)),
+            )
+            .toList(growable: false)
+          ..sort((left, right) {
+            final roleComparison = left.role.index.compareTo(right.role.index);
+            if (roleComparison != 0) {
+              return roleComparison;
+            }
+            return left.fullName.compareTo(right.fullName);
+          });
+    return targets;
+  }
+
   String _normalizeSyncType(String value) {
     final normalized = value
         .trim()
@@ -5542,7 +6553,7 @@ class InventoryWorkflowService {
         severity: SyncStatusSeverity.critical,
         summary: 'Con fallo',
         detail: latestLog.message.trim().isEmpty
-            ? 'La ultima sincronizacion reporto un error y requiere revision.'
+            ? 'La ultima actualizacion reporto un error y requiere revision.'
             : latestLog.message.trim(),
       );
     }
@@ -5570,7 +6581,7 @@ class InventoryWorkflowService {
         age: age,
         severity: SyncStatusSeverity.warning,
         summary: 'En proceso',
-        detail: 'Hay una sincronizacion en curso para esta sucursal.',
+        detail: 'Hay una actualizacion en curso para esta sucursal.',
       );
     }
 
@@ -5582,11 +6593,11 @@ class InventoryWorkflowService {
         age: null,
         severity: SyncStatusSeverity.critical,
         summary: 'Sin registro',
-        detail: 'No existe una ultima sincronizacion registrada.',
+        detail: 'No existe una ultima actualizacion registrada.',
       );
     }
 
-    if (age! <= _greenDataThreshold) {
+    if (age! <= _greenSyncThreshold) {
       return SyncBranchStatus(
         branch: branch,
         latestLog: latestLog,
@@ -5594,19 +6605,24 @@ class InventoryWorkflowService {
         age: age,
         severity: SyncStatusSeverity.healthy,
         summary: 'Al dia',
-        detail: 'Los datos de esta sucursal se ven consistentes y recientes.',
+        detail:
+            'Los datos de esta sucursal se ven recientes dentro de la ventana operativa.',
       );
     }
 
-    if (age <= _yellowDataThreshold) {
+    if (age <= _redSyncThreshold) {
       return SyncBranchStatus(
         branch: branch,
         latestLog: latestLog,
         lastSyncAt: lastSyncAt,
         age: age,
         severity: SyncStatusSeverity.warning,
-        summary: 'Con retraso',
-        detail: 'La sucursal sigue operativa, pero conviene validar el dato.',
+        summary: age <= _yellowSyncThreshold
+            ? 'Con retraso'
+            : 'Requiere validacion',
+        detail: age <= _yellowSyncThreshold
+            ? 'La sucursal sigue operativa, pero conviene validar el dato pronto.'
+            : 'La ultima actualizacion ya esta fuera de la ventana recomendada y requiere revision.',
       );
     }
 
@@ -5616,10 +6632,9 @@ class InventoryWorkflowService {
       lastSyncAt: lastSyncAt,
       age: age,
       severity: SyncStatusSeverity.critical,
-      summary: age <= _redDataThreshold ? 'Desactualizada' : 'Muy atrasada',
-      detail: age <= _redDataThreshold
-          ? 'La sincronizacion ya supero el umbral recomendado.'
-          : 'La sucursal lleva demasiado tiempo sin sincronizar.',
+      summary: 'Muy atrasada',
+      detail:
+          'La sucursal lleva mas de 24 horas sin una actualizacion confiable.',
     );
   }
 
@@ -5638,7 +6653,8 @@ class InventoryWorkflowService {
       return const SyncApiStatus(
         severity: SyncStatusSeverity.unknown,
         summary: 'Sin señal',
-        detail: 'Todavia no hay eventos de sincronizacion para evaluar la API.',
+        detail:
+            'Todavia no hay eventos de actualizacion para evaluar el monitoreo.',
         latestLog: null,
         averageResponseTime: Duration.zero,
         lastUpdatedAt: null,
@@ -5653,7 +6669,7 @@ class InventoryWorkflowService {
         severity: SyncStatusSeverity.critical,
         summary: 'Con fallas',
         detail: latestLog.message.trim().isEmpty
-            ? 'El ultimo evento de sincronizacion reporto error.'
+            ? 'El ultimo evento de actualizacion reporto error.'
             : latestLog.message.trim(),
         latestLog: latestLog,
         averageResponseTime: averageResponseTime,
@@ -5666,7 +6682,7 @@ class InventoryWorkflowService {
         severity: SyncStatusSeverity.warning,
         summary: 'Reintento pendiente',
         detail: latestLog.message.trim().isEmpty
-            ? 'Hay un reintento manual de sincronizacion pendiente de ejecucion.'
+            ? 'Hay un reintento manual de actualizacion pendiente de ejecucion.'
             : latestLog.message.trim(),
         latestLog: latestLog,
         averageResponseTime: averageResponseTime,
@@ -5674,12 +6690,12 @@ class InventoryWorkflowService {
       );
     }
 
-    if (latestAge > _redDataThreshold) {
+    if (latestAge > _redSyncThreshold) {
       return SyncApiStatus(
         severity: SyncStatusSeverity.critical,
         summary: 'Sin respuesta reciente',
         detail:
-            'No hay actividad de sincronizacion dentro del umbral esperado.',
+            'No hay actividad reciente de actualizacion dentro de las ultimas 24 horas.',
         latestLog: latestLog,
         averageResponseTime: averageResponseTime,
         lastUpdatedAt: latestLog.createdAt,
@@ -5693,8 +6709,8 @@ class InventoryWorkflowService {
         severity: SyncStatusSeverity.warning,
         summary: 'Con alertas',
         detail: averageResponseTime > const Duration(seconds: 15)
-            ? 'La API responde, pero con latencia superior a la esperada.'
-            : 'Se detectaron sucursales con retraso o incidencias de sincronizacion.',
+            ? 'El proceso central responde, pero con latencia superior a la esperada.'
+            : 'Se detectaron sucursales con retraso o incidencias de actualizacion.',
         latestLog: latestLog,
         averageResponseTime: averageResponseTime,
         lastUpdatedAt: latestLog.createdAt,
@@ -5704,7 +6720,8 @@ class InventoryWorkflowService {
     return SyncApiStatus(
       severity: SyncStatusSeverity.healthy,
       summary: 'Operativa',
-      detail: 'La sincronizacion responde dentro de los parametros esperados.',
+      detail:
+          'La actualizacion de datos se comporta dentro de los parametros esperados.',
       latestLog: latestLog,
       averageResponseTime: averageResponseTime,
       lastUpdatedAt: latestLog.createdAt,
@@ -5736,12 +6753,12 @@ class InventoryWorkflowService {
     }
     if (warningBranches.isNotEmpty) {
       warnings.add(
-        '${warningBranches.length} sucursal(es) con retraso moderado que conviene revisar.',
+        '${warningBranches.length} sucursal(es) con retraso operativo que conviene revisar.',
       );
     }
     if (missingSync > 0) {
       warnings.add(
-        '$missingSync sucursal(es) no tienen registro de ultima sincronizacion.',
+        '$missingSync sucursal(es) no tienen registro de ultima actualizacion.',
       );
     }
     final retryRequested = branchStatuses.where((item) {
@@ -5750,7 +6767,7 @@ class InventoryWorkflowService {
     }).length;
     if (retryRequested > 0) {
       warnings.add(
-        '$retryRequested sucursal(es) tienen un reintento de sincronizacion solicitado.',
+        '$retryRequested sucursal(es) tienen un reintento de actualizacion solicitado.',
       );
     }
 
@@ -5780,11 +6797,11 @@ class InventoryWorkflowService {
           recentFailureCount >= _syncFailureBurstThreshold) {
         final focusLog = latestFailureLog ?? branchStatus.latestLog;
         final title = recentFailureCount >= _syncFailureBurstThreshold
-            ? 'Racha de fallos de sincronizacion'
-            : 'Fallo de sincronizacion';
+            ? 'Racha de fallos de actualizacion'
+            : 'Fallo de actualizacion';
         final summary = recentFailureCount >= _syncFailureBurstThreshold
             ? '${branchStatus.branch.name} acumula $recentFailureCount fallos en las ultimas ${_describeDuration(_syncFailureBurstWindow)}.'
-            : '${branchStatus.branch.name} reporto un error de sincronizacion y requiere revision.';
+            : '${branchStatus.branch.name} reporto un error de actualizacion y requiere revision.';
 
         alerts.add(
           SyncMonitoringAlert(
@@ -5841,16 +6858,16 @@ class InventoryWorkflowService {
       final isStale =
           branchStatus.lastSyncAt == null ||
           (branchStatus.age != null &&
-              branchStatus.age! > _yellowDataThreshold);
+              branchStatus.age! > _yellowSyncThreshold);
       if (isStale) {
         final severity =
             branchStatus.lastSyncAt == null ||
                 (branchStatus.age != null &&
-                    branchStatus.age! > _redDataThreshold)
+                    branchStatus.age! > _redSyncThreshold)
             ? SyncStatusSeverity.critical
             : SyncStatusSeverity.warning;
         final summary = branchStatus.lastSyncAt == null
-            ? '${branchStatus.branch.name} no tiene una ultima sincronizacion registrada.'
+            ? '${branchStatus.branch.name} no tiene una ultima actualizacion registrada.'
             : '${branchStatus.branch.name} lleva ${_describeDuration(branchStatus.age!)} sin actualizarse.';
 
         alerts.add(
@@ -5861,16 +6878,16 @@ class InventoryWorkflowService {
             kind: SyncMonitoringAlertKind.staleData,
             severity: severity,
             title: severity == SyncStatusSeverity.critical
-                ? 'Sucursal sin sincronizacion reciente'
-                : 'Sucursal con retraso de sincronizacion',
+                ? 'Sucursal sin actualizacion reciente'
+                : 'Sucursal con retraso de actualizacion',
             summary: summary,
             technicalDetail: _buildSyncMonitoringTechnicalDetail(
               branchStatus: branchStatus,
               latestLog: branchStatus.latestLog,
               recentFailureCount: recentFailureCount,
               prefix: branchStatus.lastSyncAt == null
-                  ? 'No existe un punto de sincronizacion reciente para validar la sucursal.'
-                  : 'La sucursal supero el TTL de sincronizacion recomendado.',
+                  ? 'No existe un punto de actualizacion reciente para validar la sucursal.'
+                  : 'La sucursal supero la ventana de actualizacion recomendada.',
             ),
             triggeredAt:
                 branchStatus.lastSyncAt ?? branchStatus.branch.updatedAt,
@@ -5924,9 +6941,10 @@ class InventoryWorkflowService {
   List<String> _syncFailureRules() {
     return const <String>[
       'Fallo critico: el ultimo evento tecnico llega con estado failed, error o timeout.',
-      'Retraso moderado: la sucursal supera 30 minutos sin una sincronizacion reciente.',
-      'Desactualizacion critica: la sucursal supera 60 minutos sin actualizar o no tiene registro.',
-      'Racha de fallos: dos o mas errores de sincronizacion en una ventana de 2 horas.',
+      'Retraso operativo: despues de 4 horas sin actualizacion reciente, la sucursal pasa a estado de advertencia.',
+      'Monitoreo reforzado: despues de 12 horas sin actualizar, la sucursal entra en alertas activas.',
+      'Desactualizacion critica: una sucursal se considera critica si supera 24 horas sin actualizar o no tiene registro.',
+      'Racha de fallos: dos o mas errores de actualizacion en una ventana de 2 horas.',
       'Reintento pendiente: un administrador dejo registrado un retry_requested para la sucursal.',
     ];
   }

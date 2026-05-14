@@ -100,6 +100,16 @@ class CatalogRepository {
     return Branch.fromFirestore(snapshot.id, data);
   }
 
+  Stream<Branch?> watchBranch(String branchId) {
+    return _branches.doc(branchId).snapshots().map((snapshot) {
+      final data = snapshot.data();
+      if (data == null) {
+        return null;
+      }
+      return Branch.fromFirestore(snapshot.id, data);
+    });
+  }
+
   Future<Product?> fetchProduct(String productId) async {
     final snapshot = await _products.doc(productId).get();
     final data = snapshot.data();
@@ -559,6 +569,52 @@ class TransferRepository {
 
     final doc = snapshot.docs.first;
     return TransferRequest.fromFirestore(doc.id, doc.data());
+  }
+}
+
+class SalesRepository {
+  SalesRepository(this._firestore);
+
+  final FirebaseFirestore _firestore;
+
+  CollectionReference<Map<String, dynamic>> get _collection =>
+      _firestore.collection(FirestoreCollections.sales);
+
+  Stream<List<SaleRecord>> watchSales() {
+    return _collection
+        .orderBy('soldAt', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => SaleRecord.fromFirestore(doc.id, doc.data()))
+              .toList(),
+        );
+  }
+
+  Stream<List<SaleRecord>> watchSalesByBranch(String branchId) {
+    return _collection.where('branchId', isEqualTo: branchId).snapshots().map((
+      snapshot,
+    ) {
+      final items =
+          snapshot.docs
+              .map((doc) => SaleRecord.fromFirestore(doc.id, doc.data()))
+              .toList(growable: false)
+            ..sort((left, right) => right.soldAt.compareTo(left.soldAt));
+      return items;
+    });
+  }
+
+  Stream<List<SaleRecord>> watchSalesBySeller(String sellerId) {
+    return _collection.where('sellerId', isEqualTo: sellerId).snapshots().map((
+      snapshot,
+    ) {
+      final items =
+          snapshot.docs
+              .map((doc) => SaleRecord.fromFirestore(doc.id, doc.data()))
+              .toList(growable: false)
+            ..sort((left, right) => right.soldAt.compareTo(left.soldAt));
+      return items;
+    });
   }
 }
 
