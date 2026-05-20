@@ -6364,26 +6364,10 @@ class InventoryWorkflowService {
     required String branchId,
     String? excludeUserId,
   }) async {
-    final allUsers = await users.fetchUsers();
-    final targets =
-        allUsers
-            .where(
-              (user) =>
-                  user.isActive &&
-                  user.id != excludeUserId &&
-                  (user.role == UserRole.admin ||
-                      (user.role == UserRole.supervisor &&
-                          user.branchId == branchId)),
-            )
-            .toList(growable: false)
-          ..sort((left, right) {
-            final roleComparison = left.role.index.compareTo(right.role.index);
-            if (roleComparison != 0) {
-              return roleComparison;
-            }
-            return left.fullName.compareTo(right.fullName);
-          });
-    return targets;
+    return users.fetchApprovalTargets(
+      branchId: branchId,
+      excludeUserId: excludeUserId,
+    );
   }
 
   String _normalizeSyncType(String value) {

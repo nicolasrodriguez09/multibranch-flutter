@@ -248,8 +248,14 @@ service cloud.firestore {
         );
     }
 
+    function canReadOperationalUser(data) {
+      return hasUserProfile()
+        && (data.role == 'admin' || data.role == 'supervisor');
+    }
+
     match /users/{userId} {
-      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+      allow read: if signedIn()
+        && (request.auth.uid == userId || isAdmin() || canReadOperationalUser(resource.data));
       allow create: if isAdmin();
       allow update: if isAdmin()
         || (signedIn()

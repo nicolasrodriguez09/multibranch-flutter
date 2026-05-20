@@ -59,6 +59,40 @@ class UserRepository {
         .map((doc) => AppUser.fromFirestore(doc.id, doc.data()))
         .toList(growable: false);
   }
+
+  Future<List<AppUser>> fetchApprovalTargets({
+    required String branchId,
+    String? excludeUserId,
+  }) async {
+    final adminSnapshot = await _collection
+        .where('role', isEqualTo: UserRole.admin.name)
+        .get();
+    final supervisorSnapshot = await _collection
+        .where('role', isEqualTo: UserRole.supervisor.name)
+        .get();
+
+    final usersById = <String, AppUser>{};
+    for (final doc in [...adminSnapshot.docs, ...supervisorSnapshot.docs]) {
+      final user = AppUser.fromFirestore(doc.id, doc.data());
+      if (!user.isActive || user.id == excludeUserId) {
+        continue;
+      }
+      if (user.role == UserRole.admin ||
+          (user.role == UserRole.supervisor && user.branchId == branchId)) {
+        usersById[user.id] = user;
+      }
+    }
+
+    final users = usersById.values.toList(growable: false)
+      ..sort((left, right) {
+        final roleComparison = left.role.index.compareTo(right.role.index);
+        if (roleComparison != 0) {
+          return roleComparison;
+        }
+        return left.fullName.compareTo(right.fullName);
+      });
+    return users;
+  }
 }
 
 class CatalogRepository {
