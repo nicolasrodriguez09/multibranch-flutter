@@ -6,6 +6,8 @@ import '../../auth/application/auth_service.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
 import 'branch_panel_drawer.dart';
+import 'product_search_page.dart';
+import 'product_selector_field.dart';
 
 class ReservationRequestPage extends StatefulWidget {
   const ReservationRequestPage({
@@ -34,6 +36,8 @@ class _ReservationRequestPageState extends State<ReservationRequestPage> {
 
   Future<ProductDetailData>? _productDetailFuture;
   String? _selectedProductId;
+  String? _selectedProductName;
+  String? _selectedProductSku;
   String? _selectedBranchId;
   Duration _expiresIn = const Duration(hours: 24);
   bool _isSubmitting = false;
@@ -77,13 +81,16 @@ class _ReservationRequestPageState extends State<ReservationRequestPage> {
     );
   }
 
-  void _selectProduct(String? productId) {
+  void _selectProductFromSearch(ProductSearchResult? result) {
+    if (result == null) {
+      return;
+    }
     setState(() {
-      _selectedProductId = productId;
+      _selectedProductId = result.product.id;
+      _selectedProductName = result.product.name;
+      _selectedProductSku = result.product.sku;
       _selectedBranchId = null;
-      _productDetailFuture = productId == null || productId.isEmpty
-          ? null
-          : _loadProductDetail(productId);
+      _productDetailFuture = _loadProductDetail(result.product.id);
     });
   }
 
@@ -253,17 +260,16 @@ class _ReservationRequestPageState extends State<ReservationRequestPage> {
               return ListView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
                 children: [
-                  _ReservationHeader(
-                    currentUser: widget.currentUser,
-                    selectedCatalogItem: selectedCatalogItem,
-                  ),
                   const SizedBox(height: 16),
                   const _ReservationRulesCard(),
                   const SizedBox(height: 16),
                   _ReservationProductSelector(
-                    catalog: catalog,
+                    service: widget.service,
+                    currentUser: widget.currentUser,
                     selectedProductId: _selectedProductId,
-                    onChanged: _selectProduct,
+                    selectedProductName: _selectedProductName,
+                    selectedProductSku: _selectedProductSku,
+                    onProductSelected: _selectProductFromSearch,
                   ),
                   const SizedBox(height: 16),
                   if (_productDetailFuture == null)
@@ -401,25 +407,30 @@ class _ReservationRulesCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF17191F),
+        color: AppPalette.blueSoft.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FF2636)),
+        border: Border.all(color: AppPalette.blueSoft.withValues(alpha: 0.35)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Reglas de reserva',
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+          Row(
+            children: [
+              const Icon(Icons.info_outline_rounded, color: AppPalette.blueSoft),
+              const SizedBox(width: 10),
+              Text(
+                'Reglas de reserva',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: AppPalette.blueSoft,
+                    ),
+              ),
+            ],
           ),
           const SizedBox(height: 10),
           Text(
             'La solicitud queda pendiente hasta que un supervisor apruebe comprometer stock real en la sucursal origen.',
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white70),
           ),
           const SizedBox(height: 12),
           const Wrap(
@@ -439,14 +450,20 @@ class _ReservationRulesCard extends StatelessWidget {
 
 class _ReservationProductSelector extends StatelessWidget {
   const _ReservationProductSelector({
-    required this.catalog,
+    required this.service,
+    required this.currentUser,
     required this.selectedProductId,
-    required this.onChanged,
+    required this.selectedProductName,
+    required this.selectedProductSku,
+    required this.onProductSelected,
   });
 
-  final List<ReservationRequestCatalogItem> catalog;
+  final InventoryWorkflowService service;
+  final AppUser currentUser;
   final String? selectedProductId;
-  final ValueChanged<String?> onChanged;
+  final String? selectedProductName;
+  final String? selectedProductSku;
+  final ValueChanged<ProductSearchResult?> onProductSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -466,33 +483,17 @@ class _ReservationProductSelector extends StatelessWidget {
               context,
             ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Los productos sin stock local aparecen primero para priorizar ventas que requieren apoyo de otra sede.',
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
-          ),
           const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            key: ValueKey<String?>('reservation_product_$selectedProductId'),
-            initialValue: selectedProductId,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              labelText: 'Selecciona el producto a reservar',
+          ProductSelectorField(
+            service: service,
+            currentUser: currentUser,
+            initialFilters: const ProductSearchFilters(
+              availability: ProductAvailabilityFilter.available,
             ),
-            items: catalog
-                .map(
-                  (item) => DropdownMenuItem<String>(
-                    value: item.product.id,
-                    child: Text(
-                      '${item.product.name} | SKU ${item.product.sku} | local ${item.currentAvailableStock}',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                )
-                .toList(growable: false),
-            onChanged: onChanged,
+            selectedText: selectedProductName != null
+                ? '$selectedProductName | SKU $selectedProductSku'
+                : null,
+            onChanged: onProductSelected,
           ),
         ],
       ),
@@ -546,15 +547,6 @@ class _ReservationStockContextCard extends StatelessWidget {
                 label: 'Sucursales reservables',
                 value: '${detail.branchSuggestions.length}',
                 accent: hasSources ? AppPalette.mint : AppPalette.danger,
-              ),
-              _ReservationMetricChip(
-                label: 'Dato',
-                value: detail.reliability.statusLabel,
-                accent: switch (detail.reliability.level) {
-                  InventoryDataReliabilityLevel.green => AppPalette.mint,
-                  InventoryDataReliabilityLevel.yellow => AppPalette.amber,
-                  InventoryDataReliabilityLevel.red => AppPalette.danger,
-                },
               ),
             ],
           ),

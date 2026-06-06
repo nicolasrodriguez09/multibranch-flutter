@@ -20,7 +20,7 @@ import 'sales_register_page.dart';
 import 'sales_report_page.dart';
 import 'stock_alerts_page.dart';
 import 'sync_status_page.dart';
-import 'transfer_request_page.dart';
+import 'transfers_hub_page.dart';
 
 enum BranchPanelDestination {
   dashboard,
@@ -34,7 +34,7 @@ enum BranchPanelDestination {
   salesReport,
   requestTracking,
   reservationRequest,
-  transferRequest,
+  transfersHub,
   adminCatalog,
   employeeManagement,
   adminTraceability,
@@ -131,7 +131,7 @@ class BranchPanelDrawer extends StatelessWidget {
         currentUser: currentUser,
         authService: authService,
       ),
-      BranchPanelDestination.transferRequest => TransferRequestPage(
+      BranchPanelDestination.transfersHub => TransfersHubPage(
         service: service,
         currentUser: currentUser,
         authService: authService,
@@ -255,11 +255,17 @@ class BranchPanelDrawer extends StatelessWidget {
                 ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 10),
-              Text(
-                '${currentUser.fullName} | ${currentUser.branchId}',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+              FutureBuilder<Branch?>(
+                future: service.catalog.fetchBranch(currentUser.branchId),
+                builder: (context, snapshot) {
+                  final branchName = snapshot.data?.name ?? currentUser.branchId;
+                  return Text(
+                    '${currentUser.fullName} | $branchName',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+                  );
+                },
               ),
               const SizedBox(height: 22),
               Expanded(
@@ -271,7 +277,7 @@ class BranchPanelDrawer extends StatelessWidget {
                       const SizedBox(height: 10),
                       _DrawerTile(
                         icon: Icons.space_dashboard_rounded,
-                        title: 'Panel principal',
+                        title: 'Volver al panel (Resumen)',
                         selected:
                             currentDestination ==
                             BranchPanelDestination.dashboard,
@@ -503,7 +509,7 @@ class BranchPanelDrawer extends StatelessWidget {
                         _DrawerTile(
                           icon: Icons.bookmark_add_rounded,
                           title: currentUser.role == UserRole.seller
-                              ? 'Apartar en otra sede'
+                              ? 'Reservar'
                               : 'Reservar producto',
                           selected:
                               currentDestination ==
@@ -513,20 +519,22 @@ class BranchPanelDrawer extends StatelessWidget {
                             BranchPanelDestination.reservationRequest,
                           ),
                         ),
-                        const SizedBox(height: 10),
-                        _DrawerTile(
-                          icon: Icons.local_shipping_rounded,
-                          title: currentUser.role == UserRole.seller
-                              ? 'Traer a mi sede'
-                              : 'Solicitar traslado',
-                          selected:
-                              currentDestination ==
-                              BranchPanelDestination.transferRequest,
-                          onTap: () => _open(
-                            context,
-                            BranchPanelDestination.transferRequest,
+                        if (currentUser.role.can(AppPermission.requestTransfer) || currentUser.role.can(AppPermission.receiveTransfer)) ...[
+                          const SizedBox(height: 10),
+                          _DrawerTile(
+                            icon: Icons.local_shipping_rounded,
+                            title: currentUser.role == UserRole.seller
+                                ? 'Recibir traslados'
+                                : 'Gestión de traslados',
+                            selected:
+                                currentDestination ==
+                                BranchPanelDestination.transfersHub,
+                            onTap: () => _open(
+                              context,
+                              BranchPanelDestination.transfersHub,
+                            ),
                           ),
-                        ),
+                        ],
                       ],
                       if (!isAdmin) ...[
                         const SizedBox(height: 18),

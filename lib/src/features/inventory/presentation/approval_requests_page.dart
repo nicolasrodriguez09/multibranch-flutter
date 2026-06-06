@@ -95,70 +95,6 @@ class _ApprovalRequestsPageState extends State<ApprovalRequestsPage> {
     }
   }
 
-  Future<void> _decideTransfer({
-    required TransferRequest transfer,
-    required bool approve,
-  }) async {
-    final comment = await _openDecisionDialog(
-      title: approve ? 'Aprobar traslado' : 'Rechazar traslado',
-      subtitle: approve
-          ? 'Puedes dejar una observacion para despacho o coordinacion interna.'
-          : 'Debes registrar el motivo del rechazo para notificar al solicitante.',
-      actionLabel: approve ? 'Aprobar' : 'Rechazar',
-      requireComment: !approve,
-    );
-    if (!mounted || comment == null) {
-      return;
-    }
-
-    final key = 'transfer_${transfer.id}';
-    setState(() {
-      _busyItems.add(key);
-    });
-
-    try {
-      if (approve) {
-        await widget.service.approveTransfer(
-          actorUser: widget.currentUser,
-          transferId: transfer.id,
-          reviewComment: comment,
-        );
-      } else {
-        await widget.service.rejectTransfer(
-          actorUser: widget.currentUser,
-          transferId: transfer.id,
-          reviewComment: comment,
-        );
-      }
-
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            approve
-                ? 'Traslado ${transfer.id} aprobado.'
-                : 'Traslado ${transfer.id} rechazado.',
-          ),
-        ),
-      );
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('No se pudo actualizar: $error')));
-    } finally {
-      if (mounted) {
-        setState(() {
-          _busyItems.remove(key);
-        });
-      }
-    }
-  }
-
   Future<String?> _openDecisionDialog({
     required String title,
     required String subtitle,
@@ -236,25 +172,9 @@ class _ApprovalRequestsPageState extends State<ApprovalRequestsPage> {
                       children: [
                         Expanded(
                           child: _ApprovalMetricTile(
-                            label: 'Pendientes totales',
-                            value: '${data.totalPending}',
-                            accent: AppPalette.amber,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _ApprovalMetricTile(
-                            label: 'Reservas',
+                            label: 'Reservas por aprobar',
                             value: '${data.pendingReservations.length}',
                             accent: AppPalette.blueSoft,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _ApprovalMetricTile(
-                            label: 'Traslados',
-                            value: '${data.pendingTransfers.length}',
-                            accent: AppPalette.mint,
                           ),
                         ),
                       ],
@@ -291,38 +211,7 @@ class _ApprovalRequestsPageState extends State<ApprovalRequestsPage> {
                             .toList(growable: false),
                       ),
                     ),
-                    const SizedBox(height: 16),
-                    _ApprovalSectionCard(
-                      title: 'Traslados pendientes',
-                      subtitle:
-                          'Solicitudes entre sucursales que requieren decision del supervisor origen.',
-                      emptyMessage:
-                          'No hay traslados pendientes dentro del alcance actual.',
-                      hasItems: data.pendingTransfers.isNotEmpty,
-                      child: Column(
-                        children: data.pendingTransfers
-                            .map(
-                              (transfer) => Padding(
-                                padding: const EdgeInsets.only(bottom: 12),
-                                child: _PendingTransferCard(
-                                  transfer: transfer,
-                                  isBusy: _busyItems.contains(
-                                    'transfer_${transfer.id}',
-                                  ),
-                                  onApprove: () => _decideTransfer(
-                                    transfer: transfer,
-                                    approve: true,
-                                  ),
-                                  onReject: () => _decideTransfer(
-                                    transfer: transfer,
-                                    approve: false,
-                                  ),
-                                ),
-                              ),
-                            )
-                            .toList(growable: false),
-                      ),
-                    ),
+
                   ],
                 );
               },
@@ -378,8 +267,8 @@ class _ApprovalHeader extends StatelessWidget {
             children: [
               _ApprovalInfoPill(label: scopeLabel),
               _ApprovalInfoPill(
-                label: data.hasItems
-                    ? '${data.totalPending} solicitudes por revisar'
+                label: data.pendingReservations.isNotEmpty
+                    ? '${data.pendingReservations.length} reservas por revisar'
                     : 'Sin pendientes por revisar',
               ),
             ],
@@ -598,101 +487,6 @@ class _PendingReservationCard extends StatelessWidget {
   }
 }
 
-class _PendingTransferCard extends StatelessWidget {
-  const _PendingTransferCard({
-    required this.transfer,
-    required this.isBusy,
-    required this.onApprove,
-    required this.onReject,
-  });
-
-  final TransferRequest transfer;
-  final bool isBusy;
-  final VoidCallback onApprove;
-  final VoidCallback onReject;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0x26FF2636)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      transfer.productName,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${transfer.fromBranchName} -> ${transfer.toBranchName} | ${transfer.quantity} unidad(es)',
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              const _StatusBadge(label: 'Pendiente', color: AppPalette.amber),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _ApprovalInfoPill(label: 'SKU ${transfer.sku}'),
-              _ApprovalInfoPill(
-                label: 'Solicitado ${_formatDateTime(transfer.requestedAt)}',
-              ),
-              _ApprovalInfoPill(
-                label:
-                    'Solicita ${transfer.requestedByName.isNotEmpty ? transfer.requestedByName : transfer.requestedBy}',
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _DetailRow(label: 'Motivo', value: transfer.reason),
-          if (transfer.notes.isNotEmpty)
-            _DetailRow(label: 'Notas internas', value: transfer.notes),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: isBusy ? null : onReject,
-                  child: Text(isBusy ? 'Procesando...' : 'Rechazar'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: FilledButton(
-                  onPressed: isBusy ? null : onApprove,
-                  child: Text(isBusy ? 'Procesando...' : 'Aprobar'),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _DecisionDialog extends StatefulWidget {
   const _DecisionDialog({
     required this.title,
@@ -906,9 +700,10 @@ class _DetailRow extends StatelessWidget {
 }
 
 String _formatDateTime(DateTime value) {
-  final day = value.day.toString().padLeft(2, '0');
-  final month = value.month.toString().padLeft(2, '0');
-  final hour = value.hour.toString().padLeft(2, '0');
-  final minute = value.minute.toString().padLeft(2, '0');
-  return '$day/$month ${value.year} $hour:$minute';
+  final v = value.toUtc().subtract(const Duration(hours: 5));
+  final day = v.day.toString().padLeft(2, '0');
+  final month = v.month.toString().padLeft(2, '0');
+  final hour = v.hour.toString().padLeft(2, '0');
+  final minute = v.minute.toString().padLeft(2, '0');
+  return '$day/$month ${v.year} $hour:$minute';
 }

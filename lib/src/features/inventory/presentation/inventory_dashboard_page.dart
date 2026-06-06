@@ -6,6 +6,7 @@ import '../../../core/app_theme.dart';
 import '../../auth/application/auth_service.dart';
 import '../../auth/presentation/employee_management_page.dart';
 import '../application/inventory_workflow_service.dart';
+import '../application/seeder_service.dart';
 import '../domain/models.dart';
 import '../domain/role_permissions.dart';
 import 'approval_requests_page.dart';
@@ -23,7 +24,7 @@ import 'sales_register_page.dart';
 import 'sales_report_page.dart';
 import 'sync_status_page.dart';
 import 'stock_alerts_page.dart';
-import 'transfer_request_page.dart';
+import 'transfers_hub_page.dart';
 
 enum _BranchDashboardSection { overview, inventory, workflow, metrics }
 
@@ -48,6 +49,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
   bool _isCreating = false;
   bool _isCreatingBranch = false;
   bool _isRefreshing = false;
+  String _currentBranchName = '';
   _BranchDashboardSection _selectedBranchSection =
       _BranchDashboardSection.overview;
 
@@ -62,8 +64,36 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
   @override
   void initState() {
     super.initState();
+    _currentBranchName = widget.currentUser.branchId.toUpperCase();
+    unawaited(_loadBranchName());
     configureAutoRefresh();
     unawaited(_refreshDashboard(isManual: false));
+  }
+
+  @override
+  void didUpdateWidget(covariant InventoryDashboardPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentUser.role != widget.currentUser.role ||
+        oldWidget.currentUser.branchId != widget.currentUser.branchId) {
+      _selectedBranchSection = _BranchDashboardSection.overview;
+      _currentBranchName = widget.currentUser.branchId.toUpperCase();
+      unawaited(_loadBranchName());
+      unawaited(_refreshDashboard(isManual: true, forceRefresh: true));
+    }
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+  }
+
+  Future<void> _loadBranchName() async {
+    final branch = await widget.service.catalog.fetchBranch(widget.currentUser.branchId);
+    if (mounted && branch != null) {
+      setState(() {
+        _currentBranchName = branch.name;
+      });
+    }
   }
 
   void _showStatusMessage(String message) {
@@ -207,10 +237,10 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
     );
   }
 
-  Future<void> _openTransferRequestPage() async {
+  Future<void> _openTransfersHubPage() async {
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => TransferRequestPage(
+      MaterialPageRoute(
+        builder: (context) => TransfersHubPage(
           service: widget.service,
           currentUser: widget.currentUser,
           authService: widget.authService,
@@ -469,7 +499,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
   List<Widget> _buildBranchSectionShell(AppUser user, String title) {
     return [
       const SizedBox(height: 12),
-      _AdminRoleBar(user: user),
+      _AdminRoleBar(user: user, branchName: _currentBranchName),
       const SizedBox(height: 20),
       Text(
         title,
@@ -483,7 +513,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
   List<Widget> _buildAdminSections(AppUser user) {
     return [
       const SizedBox(height: 12),
-      _AdminRoleBar(user: user),
+      _AdminRoleBar(user: user, branchName: _currentBranchName),
       const SizedBox(height: 20),
       Text(
         'Dashboard Administrativo',
@@ -498,7 +528,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
           context,
         ).textTheme.bodyMedium?.copyWith(color: AppPalette.textMuted),
       ),
-      const SizedBox(height: 18),
+
       _AdminOperationalHero(
         service: widget.service,
         onPressed: _openSyncStatusPage,
@@ -508,12 +538,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
       const SizedBox(height: 12),
       _AdminMetricsStrip(service: widget.service),
       const SizedBox(height: 18),
-      _NotificationsOverviewPanel(
-        service: widget.service,
-        currentUser: user,
-        onOpen: _openNotificationsPage,
-      ),
-      const SizedBox(height: 18),
+
       _StockAlertsOverviewPanel(
         service: widget.service,
         currentUser: user,
@@ -631,12 +656,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         role: user.role,
       ),
       const SizedBox(height: 18),
-      _NotificationsOverviewPanel(
-        service: widget.service,
-        currentUser: user,
-        onOpen: _openNotificationsPage,
-      ),
-      const SizedBox(height: 18),
+
       _StockAlertsOverviewPanel(
         service: widget.service,
         currentUser: user,
@@ -827,7 +847,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
           if (user.role == UserRole.seller)
             _SellerProductAcquisitionCard(
               onReserve: _openReservationRequestPage,
-              onTransfer: _openTransferRequestPage,
+              onTransfer: _openTransfersHubPage,
             )
           else ...[
             _WorkflowActionCard(
@@ -840,13 +860,13 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
               onPressed: _openReservationRequestPage,
             ),
             _WorkflowActionCard(
-              title: 'Solicitar traslado',
+              title: 'Gestionar traslados',
               subtitle:
-                  'Crea una solicitud hacia tu sucursal cuando otra sede tenga disponibilidad.',
-              buttonLabel: 'Nuevo traslado',
+                  'Solicita, despacha y recibe mercancía desde un solo lugar.',
+              buttonLabel: 'Abrir gestión',
               icon: Icons.local_shipping_rounded,
               accent: AppPalette.amber,
-              onPressed: _openTransferRequestPage,
+              onPressed: _openTransfersHubPage,
             ),
           ],
         ],
@@ -953,6 +973,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
       ),
       drawer: _AdminDrawer(
         user: user,
+        branchName: _currentBranchName,
         onOpenDashboard: () => Navigator.of(context).pop(),
         isCreating: _isCreating,
         isCreatingBranch: _isCreatingBranch,
@@ -961,9 +982,6 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         onOpenSyncStatus: () => _runDrawerAction(_openSyncStatusPage),
         onOpenApprovalRequests: () =>
             _runDrawerAction(_openApprovalRequestsPage),
-        onCreateBaseData: _isCreating
-            ? null
-            : () => _runDrawerAction(_createBaseData),
         onCreateBranch: _isCreatingBranch
             ? null
             : () => _runDrawerAction(_openCreateBranchDialog),
@@ -1047,6 +1065,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
       ),
       drawer: _BranchDrawer(
         user: user,
+        branchName: _currentBranchName,
         sections: availableSections,
         selectedSection: _selectedBranchSection,
         sectionLabelBuilder: (section) =>
@@ -1075,7 +1094,7 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
         onOpenReservationRequests: () =>
             _runDrawerAction(_openReservationRequestPage),
         onOpenTransferRequests: () =>
-            _runDrawerAction(_openTransferRequestPage),
+            _runDrawerAction(_openTransfersHubPage),
         onSignOut: widget.authService.signOut,
       ),
       body: Container(
@@ -1116,9 +1135,10 @@ class _InventoryDashboardPageState extends State<InventoryDashboardPage>
 }
 
 class _AdminRoleBar extends StatelessWidget {
-  const _AdminRoleBar({required this.user});
+  const _AdminRoleBar({required this.user, required this.branchName});
 
   final AppUser user;
+  final String branchName;
 
   @override
   Widget build(BuildContext context) {
@@ -1154,7 +1174,7 @@ class _AdminRoleBar extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Sucursal: ${user.branchId.toUpperCase()}',
+              'Sucursal: $branchName',
               style: Theme.of(
                 context,
               ).textTheme.bodyMedium?.copyWith(color: AppPalette.textPrimary),
@@ -1184,11 +1204,50 @@ class _AdminOperationalHero extends StatelessWidget {
             ? 'Sin actualizaciones registradas'
             : '${_formatSyncStatus(latest.status)} | ${latest.recordsProcessed} registros';
 
+        final age = latest == null ? null : DateTime.now().difference(latest.createdAt);
+        SyncStatusSeverity severity = SyncStatusSeverity.critical;
+        if (age != null) {
+          if (age.inHours <= 2) {
+            severity = SyncStatusSeverity.healthy;
+          } else if (age.inHours <= 5) {
+            severity = SyncStatusSeverity.warning;
+          }
+        }
+
+        final colors = switch (severity) {
+          SyncStatusSeverity.healthy => const [
+            Color(0xFF06402B),
+            Color(0xFF021E12),
+            Color(0xFF151016),
+          ],
+          SyncStatusSeverity.warning => const [
+            Color(0xFF8A5A19),
+            Color(0xFF3B2305),
+            Color(0xFF151016),
+          ],
+          SyncStatusSeverity.critical => const [
+            Color(0xFF7A101A),
+            Color(0xFF3A1116),
+            Color(0xFF151016),
+          ],
+          SyncStatusSeverity.unknown => const [
+            Color(0xFF1E3A8A),
+            Color(0xFF0F172A),
+            Color(0xFF151016),
+          ],
+        };
+        final iconColor = switch (severity) {
+          SyncStatusSeverity.healthy => AppPalette.mint,
+          SyncStatusSeverity.warning => AppPalette.amber,
+          SyncStatusSeverity.critical => AppPalette.danger,
+          SyncStatusSeverity.unknown => AppPalette.blueSoft,
+        };
+
         return Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(22),
-            gradient: const LinearGradient(
-              colors: [Color(0xFF7A101A), Color(0xFF3A1116), Color(0xFF151016)],
+            gradient: LinearGradient(
+              colors: colors,
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
@@ -1217,7 +1276,7 @@ class _AdminOperationalHero extends StatelessWidget {
                 right: 24,
                 child: Icon(
                   Icons.location_on_rounded,
-                  color: AppPalette.amber,
+                  color: iconColor,
                   size: 28,
                 ),
               ),
@@ -1250,7 +1309,7 @@ class _AdminOperationalHero extends StatelessWidget {
                           width: 34,
                           height: 34,
                           decoration: BoxDecoration(
-                            color: AppPalette.mint,
+                            color: iconColor,
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: const Icon(
@@ -1372,27 +1431,44 @@ class _BranchOperationalHero extends StatelessWidget {
                       UserRole.supervisor => 'Operacion de sucursal',
                       UserRole.admin => 'Operacion general',
                     };
-                    final colors = switch (role) {
-                      UserRole.seller => const [
-                        Color(0xFF75111A),
-                        Color(0xFF3A1116),
+
+                    final age = latestSync == null ? null : DateTime.now().difference(latestSync.createdAt);
+                    SyncStatusSeverity severity = SyncStatusSeverity.critical;
+                    if (age != null) {
+                      if (age.inHours <= 2) {
+                        severity = SyncStatusSeverity.healthy;
+                      } else if (age.inHours <= 5) {
+                        severity = SyncStatusSeverity.warning;
+                      }
+                    }
+
+                    final colors = switch (severity) {
+                      SyncStatusSeverity.healthy => const [
+                        Color(0xFF06402B),
+                        Color(0xFF021E12),
                         Color(0xFF151016),
                       ],
-                      UserRole.supervisor => const [
+                      SyncStatusSeverity.warning => const [
+                        Color(0xFF8A5A19),
+                        Color(0xFF3B2305),
+                        Color(0xFF151016),
+                      ],
+                      SyncStatusSeverity.critical => const [
                         Color(0xFF7A101A),
                         Color(0xFF3A1116),
                         Color(0xFF151016),
                       ],
-                      UserRole.admin => const [
-                        Color(0xFF7A101A),
-                        Color(0xFF3A1116),
+                      SyncStatusSeverity.unknown => const [
+                        Color(0xFF1E3A8A),
+                        Color(0xFF0F172A),
                         Color(0xFF151016),
                       ],
                     };
-                    final iconColor = switch (role) {
-                      UserRole.seller => AppPalette.blueSoft,
-                      UserRole.supervisor => AppPalette.amber,
-                      UserRole.admin => AppPalette.mint,
+                    final iconColor = switch (severity) {
+                      SyncStatusSeverity.healthy => AppPalette.mint,
+                      SyncStatusSeverity.warning => AppPalette.amber,
+                      SyncStatusSeverity.critical => AppPalette.danger,
+                      SyncStatusSeverity.unknown => AppPalette.blueSoft,
                     };
                     final icon = switch (role) {
                       UserRole.seller => Icons.storefront_rounded,
@@ -4196,26 +4272,30 @@ class _InventoryTraceabilityCard extends StatelessWidget {
                 context,
               ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
             )
-          else ...[
-            _TraceabilityDataRow(label: 'Fisico', value: '${inventory!.stock}'),
-            _TraceabilityDataRow(
-              label: 'Reservado',
-              value: '${inventory!.reservedStock}',
+          else
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _StatPill(label: 'Fisico', value: '${inventory!.stock}'),
+                    _StatPill(label: 'Reservado', value: '${inventory!.reservedStock}'),
+                    _StatPill(label: 'Disponible', value: '${inventory!.availableStock}'),
+                    _StatPill(label: 'En camino', value: '${inventory!.incomingStock}'),
+                    _StatPill(label: 'Minimo', value: '${inventory!.minimumStock}'),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Actualizado el ${_formatDateTimeStamp(inventory!.updatedAt)}',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: Colors.white54),
+                ),
+              ],
             ),
-            _TraceabilityDataRow(
-              label: 'Disponible',
-              value: '${inventory!.availableStock}',
-            ),
-            _TraceabilityDataRow(
-              label: 'En transito',
-              value: '${inventory!.incomingStock}',
-            ),
-            _TraceabilityDataRow(
-              label: 'Actualizado',
-              value: _formatDateTimeStamp(inventory!.updatedAt),
-              isLast: true,
-            ),
-          ],
         ],
       ),
     );
@@ -4535,12 +4615,7 @@ class _SellerProductAcquisitionCard extends StatelessWidget {
               FilledButton.icon(
                 onPressed: () => unawaited(onReserve()),
                 icon: const Icon(Icons.bookmark_add_rounded),
-                label: const Text('Apartar en otra sede'),
-              ),
-              OutlinedButton.icon(
-                onPressed: () => unawaited(onTransfer()),
-                icon: const Icon(Icons.local_shipping_rounded),
-                label: const Text('Traer a mi sede'),
+                label: const Text('Reservar'),
               ),
             ],
           ),
@@ -4799,6 +4874,7 @@ class _BranchPopupActionLabel extends StatelessWidget {
 class _AdminDrawer extends StatelessWidget {
   const _AdminDrawer({
     required this.user,
+    required this.branchName,
     required this.onOpenDashboard,
     required this.isCreating,
     required this.isCreatingBranch,
@@ -4806,7 +4882,6 @@ class _AdminDrawer extends StatelessWidget {
     required this.onOpenStockAlerts,
     required this.onOpenSyncStatus,
     required this.onOpenApprovalRequests,
-    required this.onCreateBaseData,
     required this.onCreateBranch,
     required this.onOpenCatalog,
     required this.onOpenBranches,
@@ -4819,6 +4894,7 @@ class _AdminDrawer extends StatelessWidget {
   });
 
   final AppUser user;
+  final String branchName;
   final VoidCallback onOpenDashboard;
   final bool isCreating;
   final bool isCreatingBranch;
@@ -4826,7 +4902,6 @@ class _AdminDrawer extends StatelessWidget {
   final VoidCallback onOpenStockAlerts;
   final VoidCallback onOpenSyncStatus;
   final VoidCallback onOpenApprovalRequests;
-  final VoidCallback? onCreateBaseData;
   final VoidCallback? onCreateBranch;
   final VoidCallback? onOpenCatalog;
   final VoidCallback? onOpenBranches;
@@ -4855,7 +4930,7 @@ class _AdminDrawer extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               Text(
-                '${user.fullName} | ${user.branchId}',
+                '${user.fullName} | $branchName',
                 style: Theme.of(
                   context,
                 ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
@@ -4952,13 +5027,6 @@ class _AdminDrawer extends StatelessWidget {
                         title: 'Agregar sucursal',
                         loading: isCreatingBranch,
                         onTap: onCreateBranch,
-                      ),
-                      const SizedBox(height: 10),
-                      _AdminDrawerTile(
-                        icon: Icons.storage_rounded,
-                        title: 'Crear base de datos inicial',
-                        loading: isCreating,
-                        onTap: onCreateBaseData,
                       ),
                     ],
                   ),
@@ -5108,6 +5176,7 @@ class _AdminDrawerTile extends StatelessWidget {
 class _BranchDrawer extends StatelessWidget {
   const _BranchDrawer({
     required this.user,
+    required this.branchName,
     required this.sections,
     required this.selectedSection,
     required this.sectionLabelBuilder,
@@ -5128,6 +5197,7 @@ class _BranchDrawer extends StatelessWidget {
   });
 
   final AppUser user;
+  final String branchName;
   final List<_BranchDashboardSection> sections;
   final _BranchDashboardSection selectedSection;
   final String Function(_BranchDashboardSection section) sectionLabelBuilder;
@@ -5166,7 +5236,7 @@ class _BranchDrawer extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               Text(
-                '${user.fullName} | ${user.branchId}',
+                '${user.fullName} | $branchName',
                 style: Theme.of(
                   context,
                 ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
@@ -5252,20 +5322,20 @@ class _BranchDrawer extends StatelessWidget {
                       _BranchDrawerTile(
                         icon: Icons.bookmark_add_rounded,
                         title: user.role == UserRole.seller
-                            ? 'Apartar en otra sede'
+                            ? 'Reservar'
                             : 'Reservar producto',
                         isSelected: false,
                         onTap: onOpenReservationRequests,
                       ),
-                      const SizedBox(height: 10),
-                      _BranchDrawerTile(
-                        icon: Icons.local_shipping_rounded,
-                        title: user.role == UserRole.seller
-                            ? 'Traer a mi sede'
-                            : 'Solicitar traslado',
-                        isSelected: false,
-                        onTap: onOpenTransferRequests,
-                      ),
+                      if (user.role.can(AppPermission.requestTransfer) || user.role.can(AppPermission.receiveTransfer)) ...[
+                        const SizedBox(height: 10),
+                        _BranchDrawerTile(
+                          icon: Icons.local_shipping_rounded,
+                          title: user.role == UserRole.seller ? 'Recibir traslados' : 'Gestión de traslados',
+                          isSelected: false,
+                          onTap: onOpenTransferRequests,
+                        ),
+                      ],
                       const SizedBox(height: 18),
                       const _BranchDrawerSectionLabel(text: 'Monitoreo'),
                       const SizedBox(height: 10),
@@ -5655,16 +5725,8 @@ class _DashboardPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
+        color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(20),
-        gradient: LinearGradient(
-          colors: [
-            accent.withValues(alpha: 0.22),
-            const Color(0xFF3A1116),
-            const Color(0xFF121318),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
         border: Border.all(color: const Color(0x26FF2636)),
       ),
       child: Padding(
@@ -6284,8 +6346,9 @@ Color _reservationStatusColor(ReservationStatus status) {
 }
 
 String _formatDateTimeStamp(DateTime value) {
-  final minute = value.minute.toString().padLeft(2, '0');
-  return '${value.day}/${value.month}/${value.year} ${value.hour}:$minute';
+  final v = value.toUtc().subtract(const Duration(hours: 5));
+  final minute = v.minute.toString().padLeft(2, '0');
+  return '${v.day}/${v.month}/${v.year} ${v.hour}:$minute';
 }
 
 String _formatAuditMetadataLabel(String value) {
@@ -6330,6 +6393,37 @@ String _formatRelativeTime(DateTime? value) {
     return 'hace ${difference.inHours} h';
   }
   return 'hace ${difference.inDays} d';
+}
+
+class _StatPill extends StatelessWidget {
+  const _StatPill({required this.label, required this.value});
+  
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$label: ',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.white60),
+          ),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 String _twoDigits(int value) => value.toString().padLeft(2, '0');

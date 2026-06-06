@@ -197,15 +197,79 @@ class _AuthGate extends StatelessWidget {
               );
             }
 
-            return InventoryDashboardPage(
+            return _GlobalHeartbeatWrapper(
               service: inventoryService,
-              authService: authService,
               currentUser: profile,
+              child: InventoryDashboardPage(
+                service: inventoryService,
+                authService: authService,
+                currentUser: profile,
+              ),
             );
           },
         );
       },
     );
+  }
+}
+
+class _GlobalHeartbeatWrapper extends StatefulWidget {
+  const _GlobalHeartbeatWrapper({
+    required this.service,
+    required this.currentUser,
+    required this.child,
+  });
+
+  final InventoryWorkflowService service;
+  final AppUser currentUser;
+  final Widget child;
+
+  @override
+  State<_GlobalHeartbeatWrapper> createState() => _GlobalHeartbeatWrapperState();
+}
+
+class _GlobalHeartbeatWrapperState extends State<_GlobalHeartbeatWrapper> {
+  Timer? _heartbeatTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    // TODO: Aumentar a 15 minutos cuando termine la prueba del usuario.
+    _heartbeatTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      unawaited(
+        widget.service.refreshOwnBranchData(
+          actorUser: widget.currentUser,
+          isAutomatic: true,
+        ),
+      );
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _GlobalHeartbeatWrapper oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentUser.role != widget.currentUser.role) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+        final navigator = Navigator.of(context);
+        if (navigator.canPop()) {
+          navigator.popUntil((route) => route.isFirst);
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _heartbeatTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.child;
   }
 }
 

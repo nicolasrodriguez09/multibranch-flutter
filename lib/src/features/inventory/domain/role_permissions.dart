@@ -76,7 +76,6 @@ extension UserRolePermissions on UserRole {
       AppPermission.registerSale ||
       AppPermission.createReservation ||
       AppPermission.updateReservation ||
-      AppPermission.requestTransfer ||
       AppPermission.receiveTransfer => true,
       _ => false,
     },

@@ -167,6 +167,40 @@ class Branch {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  Branch copyWith({
+    String? id,
+    String? name,
+    String? code,
+    String? address,
+    String? city,
+    String? phone,
+    String? email,
+    BranchLocation? location,
+    bool? isActive,
+    String? managerName,
+    String? openingHours,
+    DateTime? lastSyncAt,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) {
+    return Branch(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      code: code ?? this.code,
+      address: address ?? this.address,
+      city: city ?? this.city,
+      phone: phone ?? this.phone,
+      email: email ?? this.email,
+      location: location ?? this.location,
+      isActive: isActive ?? this.isActive,
+      managerName: managerName ?? this.managerName,
+      openingHours: openingHours ?? this.openingHours,
+      lastSyncAt: lastSyncAt ?? this.lastSyncAt,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
   Map<String, dynamic> toFirestore() => {
     'name': name,
     'code': code,

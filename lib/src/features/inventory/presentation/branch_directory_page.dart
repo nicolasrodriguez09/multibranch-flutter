@@ -924,10 +924,6 @@ class _BranchCard extends StatelessWidget {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  _StatusTag(
-                    label: reliability.statusLabel,
-                    color: _reliabilityColor(reliability.level),
-                  ),
                   _InfoPill(label: lastUpdatedLabel),
                 ],
               ),
@@ -979,11 +975,12 @@ class _BranchCard extends StatelessWidget {
   }
 
   static String _formatDateTime(DateTime value) {
-    final hour = value.hour.toString().padLeft(2, '0');
-    final minute = value.minute.toString().padLeft(2, '0');
-    final day = value.day.toString().padLeft(2, '0');
-    final month = value.month.toString().padLeft(2, '0');
-    return '$day/$month $hour:$minute';
+    final v = value.toUtc().subtract(const Duration(hours: 5));
+    final day = v.day.toString().padLeft(2, '0');
+    final month = v.month.toString().padLeft(2, '0');
+    final hour = v.hour.toString().padLeft(2, '0');
+    final minute = v.minute.toString().padLeft(2, '0');
+    return '$day/$month ${v.year} $hour:$minute';
   }
 }
 

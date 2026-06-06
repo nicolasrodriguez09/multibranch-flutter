@@ -7,6 +7,8 @@ import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
 import '../domain/role_permissions.dart';
 import 'branch_panel_drawer.dart';
+import 'product_search_page.dart';
+import 'product_selector_field.dart';
 
 class InventoryAdjustmentPage extends StatefulWidget {
   const InventoryAdjustmentPage({
@@ -30,6 +32,10 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage> {
   String _query = '';
   String? _busyInventoryId;
   String? _selectedBranchId;
+  
+  String? _selectedProductId;
+  String? _selectedProductName;
+  String? _selectedProductSku;
 
   @override
   void initState() {
@@ -98,6 +104,10 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage> {
   }
 
   bool _matchesQuery(InventoryItem item) {
+    if (_selectedProductId != null) {
+      return item.productId == _selectedProductId;
+    }
+
     if (_query.isEmpty) {
       return true;
     }
@@ -142,7 +152,14 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage> {
         actions: [
           IconButton(
             tooltip: 'Limpiar filtro',
-            onPressed: _query.isEmpty ? null : () => _searchController.clear(),
+            onPressed: _query.isEmpty && _selectedProductId == null ? null : () {
+              _searchController.clear();
+              setState(() {
+                _selectedProductId = null;
+                _selectedProductName = null;
+                _selectedProductSku = null;
+              });
+            },
             icon: const Icon(Icons.clear_rounded),
           ),
         ],
@@ -181,7 +198,26 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage> {
               final allItems = snapshot.data ?? const <InventoryItem>[];
               final filteredItems = allItems
                   .where(_matchesQuery)
-                  .toList(growable: false);
+                  .toList(growable: true);
+
+              if (_selectedProductId != null && filteredItems.isEmpty && _selectedProductName != null) {
+                filteredItems.add(
+                  InventoryItem.create(
+                    branchId: effectiveBranchId,
+                    branchName: '',
+                    productId: _selectedProductId!,
+                    productName: _selectedProductName!,
+                    sku: _selectedProductSku ?? '',
+                    stock: 0,
+                    reservedStock: 0,
+                    incomingStock: 0,
+                    minimumStock: 0,
+                    updatedBy: widget.currentUser.id,
+                    isActive: true,
+                    updatedAt: DateTime.now(),
+                  ),
+                );
+              }
 
               return ListView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
@@ -210,12 +246,41 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage> {
                     ),
                     const SizedBox(height: 16),
                   ],
-                  TextField(
-                    controller: _searchController,
-                    decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.search_rounded),
-                      labelText: 'Buscar por producto o SKU',
+                  if (_selectedProductId == null)
+                    TextField(
+                      controller: _searchController,
+                      decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.search_rounded),
+                        labelText: 'Buscar por nombre o SKU',
+                      ),
                     ),
+                  const SizedBox(height: 12),
+                  ProductSelectorField(
+                    service: widget.service,
+                    currentUser: widget.currentUser,
+                    initialFilters: ProductSearchFilters(branchId: effectiveBranchId),
+                    selectedText: _selectedProductName != null
+                        ? '$_selectedProductName | SKU $_selectedProductSku'
+                        : null,
+                    labelText: 'Filtro por Producto Especifico',
+                    hintText: 'Toca para buscar y escanear...',
+                    onChanged: (result) {
+                      if (result != null) {
+                        setState(() {
+                          _selectedProductId = result.product.id;
+                          _selectedProductName = result.product.name;
+                          _selectedProductSku = result.product.sku;
+                          _searchController.clear();
+                        });
+                      }
+                    },
+                    onClear: _selectedProductId != null ? () {
+                      setState(() {
+                        _selectedProductId = null;
+                        _selectedProductName = null;
+                        _selectedProductSku = null;
+                      });
+                    } : null,
                   ),
                   const SizedBox(height: 16),
                   if (filteredItems.isEmpty)

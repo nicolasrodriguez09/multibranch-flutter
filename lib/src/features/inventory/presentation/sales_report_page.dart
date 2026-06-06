@@ -447,7 +447,10 @@ String _formatDate(DateTime value) {
 }
 
 String _formatDateTime(DateTime value) {
-  final local = value.toLocal();
-  String two(int n) => n.toString().padLeft(2, '0');
-  return '${two(local.day)}/${two(local.month)}/${local.year} ${two(local.hour)}:${two(local.minute)}';
+  final v = value.toUtc().subtract(const Duration(hours: 5));
+  final day = v.day.toString().padLeft(2, '0');
+  final month = v.month.toString().padLeft(2, '0');
+  final hour = v.hour.toString().padLeft(2, '0');
+  final minute = v.minute.toString().padLeft(2, '0');
+  return '$day/$month ${v.year} $hour:$minute';
 }

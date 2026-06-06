@@ -6,20 +6,24 @@ import '../../auth/application/auth_service.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
 import 'branch_panel_drawer.dart';
+import 'product_search_page.dart';
+import 'product_selector_field.dart';
 
 class TransferRequestPage extends StatefulWidget {
+  final InventoryWorkflowService service;
+  final AppUser currentUser;
+  final AuthService? authService;
+  final String? initialProductId;
+  final bool isTab;
+
   const TransferRequestPage({
     super.key,
     required this.service,
     required this.currentUser,
     this.authService,
     this.initialProductId,
+    this.isTab = false,
   });
-
-  final InventoryWorkflowService service;
-  final AppUser currentUser;
-  final AuthService? authService;
-  final String? initialProductId;
 
   @override
   State<TransferRequestPage> createState() => _TransferRequestPageState();
@@ -35,6 +39,8 @@ class _TransferRequestPageState extends State<TransferRequestPage> {
   Future<ProductDetailData>? _productDetailFuture;
   late Future<SyncStatusOverview?> _syncStatusFuture;
   String? _selectedProductId;
+  String? _selectedProductName;
+  String? _selectedProductSku;
   String? _selectedSourceBranchId;
   bool _isSubmitting = false;
 
@@ -88,13 +94,16 @@ class _TransferRequestPageState extends State<TransferRequestPage> {
     );
   }
 
-  void _selectProduct(String? productId) {
+  void _selectProductFromSearch(ProductSearchResult? result) {
+    if (result == null) {
+      return;
+    }
     setState(() {
-      _selectedProductId = productId;
+      _selectedProductId = result.product.id;
+      _selectedProductName = result.product.name;
+      _selectedProductSku = result.product.sku;
       _selectedSourceBranchId = null;
-      _productDetailFuture = productId == null || productId.isEmpty
-          ? null
-          : _loadProductDetail(productId);
+      _productDetailFuture = _loadProductDetail(result.product.id);
     });
   }
 
@@ -114,21 +123,26 @@ class _TransferRequestPageState extends State<TransferRequestPage> {
     });
   }
 
+  List<ProductBranchSuggestion> _validSuggestions(ProductDetailData detail) {
+    return detail.branchSuggestions
+        .where((s) => s.branch.id != widget.currentUser.branchId)
+        .toList(growable: false);
+  }
+
   String? _effectiveSourceBranchId(ProductDetailData detail) {
-    if (detail.branchSuggestions.isEmpty) {
+    final valid = _validSuggestions(detail);
+    if (valid.isEmpty) {
       return null;
     }
 
     final requestedBranchId = _selectedSourceBranchId;
     if (requestedBranchId == null || requestedBranchId.isEmpty) {
-      return detail.branchSuggestions.first.branch.id;
+      return valid.first.branch.id;
     }
 
-    final exists = detail.branchSuggestions.any(
-      (item) => item.branch.id == requestedBranchId,
-    );
+    final exists = valid.any((item) => item.branch.id == requestedBranchId);
     if (!exists) {
-      return detail.branchSuggestions.first.branch.id;
+      return valid.first.branch.id;
     }
     return requestedBranchId;
   }
@@ -139,7 +153,7 @@ class _TransferRequestPageState extends State<TransferRequestPage> {
       return null;
     }
 
-    return detail.branchSuggestions.cast<ProductBranchSuggestion?>().firstWhere(
+    return _validSuggestions(detail).cast<ProductBranchSuggestion?>().firstWhere(
       (item) => item?.branch.id == sourceBranchId,
       orElse: () => null,
     );
@@ -238,27 +252,10 @@ class _TransferRequestPageState extends State<TransferRequestPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      drawer: BranchPanelDrawer(
-        service: widget.service,
-        currentUser: widget.currentUser,
-        currentDestination: BranchPanelDestination.transferRequest,
-        authService: widget.authService,
-      ),
-      appBar: AppBar(
-        title: const Text('Solicitar traslado'),
-        actions: [
-          IconButton(
-            tooltip: 'Actualizar formulario',
-            onPressed: _refreshSelectedProduct,
-            icon: const Icon(Icons.refresh_rounded),
-          ),
-        ],
-      ),
-      body: Container(
-        color: const Color(0xFF08090C),
-        child: SafeArea(
-          top: false,
+    Widget content = Container(
+      color: const Color(0xFF08090C),
+      child: SafeArea(
+        top: false,
           child: FutureBuilder<List<TransferRequestCatalogItem>>(
             future: _catalogFuture,
             builder: (context, catalogSnapshot) {
@@ -288,13 +285,15 @@ class _TransferRequestPageState extends State<TransferRequestPage> {
                 children: [
                   _TransferRequestHeader(
                     currentUser: widget.currentUser,
-                    selectedCatalogItem: selectedCatalogItem,
                   ),
                   const SizedBox(height: 16),
-                  _TransferProductSelectorCard(
-                    catalog: catalog,
+                  _TransferProductSelector(
+                    service: widget.service,
+                    currentUser: widget.currentUser,
                     selectedProductId: _selectedProductId,
-                    onChanged: _selectProduct,
+                    selectedProductName: _selectedProductName,
+                    selectedProductSku: _selectedProductSku,
+                    onProductSelected: _selectProductFromSearch,
                   ),
                   const SizedBox(height: 16),
                   if (_productDetailFuture == null)
@@ -335,6 +334,7 @@ class _TransferRequestPageState extends State<TransferRequestPage> {
                               children: [
                                 _TransferStockContextCard(
                                   detail: detail,
+                                  validSuggestions: _validSuggestions(detail),
                                   selectedSource: selectedSource,
                                   syncStatuses: syncStatuses,
                                 ),
@@ -342,6 +342,7 @@ class _TransferRequestPageState extends State<TransferRequestPage> {
                                 _TransferRequestFormCard(
                                   formKey: _formKey,
                                   detail: detail,
+                                  validSuggestions: _validSuggestions(detail),
                                   syncStatuses: syncStatuses,
                                   selectedSourceBranchId:
                                       _effectiveSourceBranchId(detail),
@@ -372,7 +373,30 @@ class _TransferRequestPageState extends State<TransferRequestPage> {
             },
           ),
         ),
+      );
+
+    if (widget.isTab) {
+      return content;
+    }
+
+    return Scaffold(
+      drawer: BranchPanelDrawer(
+        service: widget.service,
+        currentUser: widget.currentUser,
+        currentDestination: BranchPanelDestination.transfersHub,
+        authService: widget.authService,
       ),
+      appBar: AppBar(
+        title: const Text('Solicitar traslado'),
+        actions: [
+          IconButton(
+            tooltip: 'Actualizar formulario',
+            onPressed: _refreshSelectedProduct,
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+        ],
+      ),
+      body: content,
     );
   }
 }
@@ -380,20 +404,12 @@ class _TransferRequestPageState extends State<TransferRequestPage> {
 class _TransferRequestHeader extends StatelessWidget {
   const _TransferRequestHeader({
     required this.currentUser,
-    required this.selectedCatalogItem,
   });
 
   final AppUser currentUser;
-  final TransferRequestCatalogItem? selectedCatalogItem;
 
   @override
   Widget build(BuildContext context) {
-    final stockLabel = selectedCatalogItem == null
-        ? 'Selecciona un producto para validar disponibilidad en otras sedes.'
-        : selectedCatalogItem!.isOutOfStock
-        ? 'Sin stock en tu sede para ${selectedCatalogItem!.product.name}.'
-        : 'Stock en tu sede: ${selectedCatalogItem!.currentAvailableStock} unidad(es).';
-
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -423,7 +439,6 @@ class _TransferRequestHeader extends StatelessWidget {
             runSpacing: 8,
             children: [
               _TransferInfoPill(label: 'Destino ${currentUser.branchId}'),
-              _TransferInfoPill(label: stockLabel),
             ],
           ),
         ],
@@ -432,16 +447,22 @@ class _TransferRequestHeader extends StatelessWidget {
   }
 }
 
-class _TransferProductSelectorCard extends StatelessWidget {
-  const _TransferProductSelectorCard({
-    required this.catalog,
+class _TransferProductSelector extends StatelessWidget {
+  const _TransferProductSelector({
+    required this.service,
+    required this.currentUser,
     required this.selectedProductId,
-    required this.onChanged,
+    required this.selectedProductName,
+    required this.selectedProductSku,
+    required this.onProductSelected,
   });
 
-  final List<TransferRequestCatalogItem> catalog;
+  final InventoryWorkflowService service;
+  final AppUser currentUser;
   final String? selectedProductId;
-  final ValueChanged<String?> onChanged;
+  final String? selectedProductName;
+  final String? selectedProductSku;
+  final ValueChanged<ProductSearchResult?> onProductSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -456,38 +477,21 @@ class _TransferProductSelectorCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Producto',
+            '1. Producto',
             style: Theme.of(
               context,
             ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Los productos sin stock local aparecen primero para solicitar apoyo de otra sede con menos friccion.',
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
-          ),
           const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            key: ValueKey<String?>('product_$selectedProductId'),
-            initialValue: selectedProductId,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              labelText: 'Selecciona el producto a reponer',
-            ),
-            items: catalog
-                .map(
-                  (item) => DropdownMenuItem<String>(
-                    value: item.product.id,
-                    child: Text(
-                      '${item.product.name} | SKU ${item.product.sku} | local ${item.currentAvailableStock}',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                )
-                .toList(growable: false),
-            onChanged: onChanged,
+          ProductSelectorField(
+            service: service,
+            currentUser: currentUser,
+            initialFilters: const ProductSearchFilters(),
+            selectedText: selectedProductName != null
+                ? '$selectedProductName | SKU $selectedProductSku'
+                : null,
+            onChanged: onProductSelected,
+            hintText: 'Toca para buscar producto para trasladar',
           ),
         ],
       ),
@@ -498,11 +502,13 @@ class _TransferProductSelectorCard extends StatelessWidget {
 class _TransferStockContextCard extends StatelessWidget {
   const _TransferStockContextCard({
     required this.detail,
+    required this.validSuggestions,
     required this.selectedSource,
     required this.syncStatuses,
   });
 
   final ProductDetailData detail;
+  final List<ProductBranchSuggestion> validSuggestions;
   final ProductBranchSuggestion? selectedSource;
   final Map<String, SyncBranchStatus> syncStatuses;
 
@@ -510,7 +516,7 @@ class _TransferStockContextCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final currentAvailable = detail.inventory?.availableStock ?? 0;
     final incomingStock = detail.inventory?.incomingStock ?? 0;
-    final hasSources = detail.branchSuggestions.isNotEmpty;
+    final hasSources = validSuggestions.isNotEmpty;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -547,7 +553,7 @@ class _TransferStockContextCard extends StatelessWidget {
               ),
               _TransferMetricChip(
                 label: 'Sedes con stock',
-                value: '${detail.branchSuggestions.length}',
+                value: '${validSuggestions.length}',
                 accent: hasSources ? AppPalette.mint : AppPalette.danger,
               ),
             ],
@@ -616,6 +622,7 @@ class _TransferRequestFormCard extends StatelessWidget {
   const _TransferRequestFormCard({
     required this.formKey,
     required this.detail,
+    required this.validSuggestions,
     required this.syncStatuses,
     required this.selectedSourceBranchId,
     required this.quantityController,
@@ -628,6 +635,7 @@ class _TransferRequestFormCard extends StatelessWidget {
 
   final GlobalKey<FormState> formKey;
   final ProductDetailData detail;
+  final List<ProductBranchSuggestion> validSuggestions;
   final Map<String, SyncBranchStatus> syncStatuses;
   final String? selectedSourceBranchId;
   final TextEditingController quantityController;
@@ -639,7 +647,7 @@ class _TransferRequestFormCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sourceSuggestions = detail.branchSuggestions;
+    final sourceSuggestions = validSuggestions;
     final effectiveSelectedSourceBranchId =
         selectedSourceBranchId ??
         (sourceSuggestions.isEmpty ? null : sourceSuggestions.first.branch.id);

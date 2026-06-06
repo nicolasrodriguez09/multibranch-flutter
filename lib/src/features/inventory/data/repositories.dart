@@ -59,6 +59,40 @@ class UserRepository {
         .map((doc) => AppUser.fromFirestore(doc.id, doc.data()))
         .toList(growable: false);
   }
+
+  Future<List<AppUser>> fetchApprovalTargets({
+    required String branchId,
+    String? excludeUserId,
+  }) async {
+    final adminSnapshot = await _collection
+        .where('role', isEqualTo: UserRole.admin.name)
+        .get();
+    final supervisorSnapshot = await _collection
+        .where('role', isEqualTo: UserRole.supervisor.name)
+        .get();
+
+    final usersById = <String, AppUser>{};
+    for (final doc in [...adminSnapshot.docs, ...supervisorSnapshot.docs]) {
+      final user = AppUser.fromFirestore(doc.id, doc.data());
+      if (!user.isActive || user.id == excludeUserId) {
+        continue;
+      }
+      if (user.role == UserRole.admin ||
+          (user.role == UserRole.supervisor && user.branchId == branchId)) {
+        usersById[user.id] = user;
+      }
+    }
+
+    final users = usersById.values.toList(growable: false)
+      ..sort((left, right) {
+        final roleComparison = left.role.index.compareTo(right.role.index);
+        if (roleComparison != 0) {
+          return roleComparison;
+        }
+        return left.fullName.compareTo(right.fullName);
+      });
+    return users;
+  }
 }
 
 class CatalogRepository {
@@ -128,7 +162,7 @@ class CatalogRepository {
     return Category.fromFirestore(snapshot.id, data);
   }
 
-  Future<List<Branch>> fetchBranches() async {
+  Future<List<Branch>> fetchBranches({bool forceServer = false}) async {
     final snapshot = await _branches.orderBy('name').get();
     return snapshot.docs
         .map((doc) => Branch.fromFirestore(doc.id, doc.data()))
@@ -863,9 +897,11 @@ class SystemRepository {
     required String entityId,
     String? entityType,
   }) async {
-    final snapshot = await _auditLogs
-        .where('entityId', isEqualTo: entityId)
-        .get();
+    var query = _auditLogs.where('entityId', isEqualTo: entityId);
+    if (entityType != null) {
+      query = query.where('entityType', isEqualTo: entityType);
+    }
+    final snapshot = await query.get();
     final items =
         snapshot.docs
             .map((doc) => AuditLog.fromFirestore(doc.id, doc.data()))

@@ -5,8 +5,11 @@ import '../../../core/app_theme.dart';
 import '../../auth/application/auth_service.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
+import '../domain/models.dart';
 import '../domain/role_permissions.dart';
 import 'branch_panel_drawer.dart';
+import 'product_detail_page.dart';
+import 'product_form_page.dart';
 
 class AdminCatalogPage extends StatefulWidget {
   const AdminCatalogPage({
@@ -149,9 +152,14 @@ class _AdminCatalogPageState extends State<AdminCatalogPage> {
       _showMessage('Primero crea una categoria para asociar el producto.');
       return;
     }
-    final request = await showDialog<_ProductInput>(
-      context: context,
-      builder: (context) => _ProductDialog(categories: categories),
+    final request = await Navigator.of(context).push<ProductInputData>(
+      MaterialPageRoute<ProductInputData>(
+        builder: (context) => ProductFormPage(
+          service: widget.service,
+          currentUser: widget.currentUser,
+          categories: categories,
+        ),
+      ),
     );
     if (request == null) {
       return;
@@ -196,6 +204,18 @@ class _AdminCatalogPageState extends State<AdminCatalogPage> {
     }
   }
 
+  void _selectProduct(Product product) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => ProductDetailPage(
+          service: widget.service,
+          currentUser: widget.currentUser,
+          productId: product.id,
+        ),
+      ),
+    );
+  }
+
   Future<void> _editProduct(Product product, List<Category> categories) async {
     final activeCategories = categories
         .where((category) => category.isActive)
@@ -204,10 +224,15 @@ class _AdminCatalogPageState extends State<AdminCatalogPage> {
       _showMessage('Activa o crea una categoria antes de editar productos.');
       return;
     }
-    final request = await showDialog<_ProductInput>(
-      context: context,
-      builder: (context) =>
-          _ProductDialog(categories: activeCategories, initialProduct: product),
+    final request = await Navigator.of(context).push<ProductInputData>(
+      MaterialPageRoute<ProductInputData>(
+        builder: (context) => ProductFormPage(
+          service: widget.service,
+          currentUser: widget.currentUser,
+          categories: activeCategories,
+          initialProduct: product,
+        ),
+      ),
     );
     if (request == null) {
       return;
@@ -409,6 +434,7 @@ class _AdminCatalogPageState extends State<AdminCatalogPage> {
                             ? null
                             : (product) => _editProduct(product, categories),
                         onToggle: _isSaving ? null : _toggleProduct,
+                        onSelect: _isSaving ? null : _selectProduct,
                       ),
                     ],
                   );
@@ -659,12 +685,14 @@ class _ProductPanel extends StatelessWidget {
     required this.categories,
     required this.onEdit,
     required this.onToggle,
+    required this.onSelect,
   });
 
   final List<Product> products;
   final List<Category> categories;
   final ValueChanged<Product>? onEdit;
   final ValueChanged<Product>? onToggle;
+  final ValueChanged<Product>? onSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -695,6 +723,7 @@ class _ProductPanel extends StatelessWidget {
                       categoriesById[product.categoryId] ?? 'Categoria',
                   onEdit: onEdit == null ? null : () => onEdit!(product),
                   onToggle: onToggle == null ? null : () => onToggle!(product),
+                  onSelect: onSelect == null ? null : () => onSelect!(product),
                 ),
               ),
             ),
@@ -710,22 +739,29 @@ class _ProductTile extends StatelessWidget {
     required this.categoryName,
     required this.onEdit,
     required this.onToggle,
+    required this.onSelect,
   });
 
   final Product product;
   final String categoryName;
   final VoidCallback? onEdit;
   final VoidCallback? onToggle;
+  final VoidCallback? onSelect;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF14151A),
+    return Material(
+      color: const Color(0xFF14151A),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onSelect,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x26FF2636)),
-      ),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0x26FF2636)),
+          ),
       child: Row(
         children: [
           Expanded(
@@ -779,6 +815,8 @@ class _ProductTile extends StatelessWidget {
             ),
           ),
         ],
+      ),
+        ),
       ),
     );
   }
@@ -901,235 +939,6 @@ class _CategoryDialogState extends State<_CategoryDialog> {
   }
 }
 
-class _ProductDialog extends StatefulWidget {
-  const _ProductDialog({required this.categories, this.initialProduct});
-
-  final List<Category> categories;
-  final Product? initialProduct;
-
-  @override
-  State<_ProductDialog> createState() => _ProductDialogState();
-}
-
-class _ProductDialogState extends State<_ProductDialog> {
-  final _formKey = GlobalKey<FormState>();
-  final _skuController = TextEditingController();
-  final _barcodeController = TextEditingController();
-  final _nameController = TextEditingController();
-  final _descriptionController = TextEditingController();
-  final _brandController = TextEditingController();
-  final _imageUrlController = TextEditingController();
-  final _priceController = TextEditingController();
-  final _costController = TextEditingController();
-  final _currencyController = TextEditingController(text: 'USD');
-  final _tagsController = TextEditingController();
-  final _minimumStockController = TextEditingController(text: '0');
-  late String _categoryId;
-
-  @override
-  void initState() {
-    super.initState();
-    final product = widget.initialProduct;
-    final categoryIds = widget.categories
-        .map((category) => category.id)
-        .toSet();
-    _categoryId = product != null && categoryIds.contains(product.categoryId)
-        ? product.categoryId
-        : widget.categories.first.id;
-    if (product != null) {
-      _skuController.text = product.sku;
-      _barcodeController.text = product.barcode;
-      _nameController.text = product.name;
-      _descriptionController.text = product.description;
-      _brandController.text = product.brand;
-      _imageUrlController.text = product.imageUrl;
-      _priceController.text = product.price.toStringAsFixed(2);
-      _costController.text = product.cost.toStringAsFixed(2);
-      _currencyController.text = product.currency;
-      _tagsController.text = product.tags.join(', ');
-      _minimumStockController.clear();
-    }
-  }
-
-  @override
-  void dispose() {
-    _skuController.dispose();
-    _barcodeController.dispose();
-    _nameController.dispose();
-    _descriptionController.dispose();
-    _brandController.dispose();
-    _imageUrlController.dispose();
-    _priceController.dispose();
-    _costController.dispose();
-    _currencyController.dispose();
-    _tagsController.dispose();
-    _minimumStockController.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    if (!(_formKey.currentState?.validate() ?? false)) {
-      return;
-    }
-    Navigator.of(context).pop(
-      _ProductInput(
-        sku: _skuController.text.trim(),
-        barcode: _barcodeController.text.trim(),
-        name: _nameController.text.trim(),
-        description: _descriptionController.text.trim(),
-        categoryId: _categoryId,
-        brand: _brandController.text.trim(),
-        imageUrl: _imageUrlController.text.trim(),
-        price: double.parse(_priceController.text.trim()),
-        cost: double.parse(_costController.text.trim()),
-        currency: _currencyController.text.trim(),
-        tags: _tagsController.text
-            .split(',')
-            .map((tag) => tag.trim())
-            .where((tag) => tag.isNotEmpty)
-            .toList(growable: false),
-        minimumStock: _minimumStockController.text.trim().isEmpty
-            ? null
-            : int.parse(_minimumStockController.text.trim()),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(
-        widget.initialProduct == null ? 'Agregar producto' : 'Editar producto',
-      ),
-      content: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: _skuController,
-                textCapitalization: TextCapitalization.characters,
-                decoration: const InputDecoration(labelText: 'SKU'),
-                validator: _requiredValidator,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _barcodeController,
-                decoration: const InputDecoration(
-                  labelText: 'Codigo de barras opcional',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _nameController,
-                decoration: const InputDecoration(labelText: 'Nombre'),
-                validator: _requiredValidator,
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: _categoryId,
-                decoration: const InputDecoration(labelText: 'Categoria'),
-                items: widget.categories
-                    .map(
-                      (category) => DropdownMenuItem<String>(
-                        value: category.id,
-                        child: Text(category.name),
-                      ),
-                    )
-                    .toList(growable: false),
-                onChanged: (value) {
-                  if (value != null) {
-                    setState(() {
-                      _categoryId = value;
-                    });
-                  }
-                },
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _brandController,
-                decoration: const InputDecoration(labelText: 'Marca'),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _descriptionController,
-                maxLines: 2,
-                decoration: const InputDecoration(labelText: 'Descripcion'),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _priceController,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                ],
-                decoration: const InputDecoration(labelText: 'Precio de venta'),
-                validator: _positiveMoneyValidator,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _costController,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                ],
-                decoration: const InputDecoration(labelText: 'Costo'),
-                validator: _nonNegativeMoneyValidator,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _currencyController,
-                textCapitalization: TextCapitalization.characters,
-                decoration: const InputDecoration(labelText: 'Moneda'),
-                validator: _requiredValidator,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _minimumStockController,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(
-                  labelText: 'Minimo operativo',
-                ),
-                validator: widget.initialProduct == null
-                    ? _requiredValidator
-                    : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _tagsController,
-                decoration: const InputDecoration(
-                  labelText: 'Etiquetas separadas por coma',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _imageUrlController,
-                decoration: const InputDecoration(labelText: 'Imagen URL'),
-              ),
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancelar'),
-        ),
-        FilledButton(
-          onPressed: _submit,
-          child: Text(widget.initialProduct == null ? 'Crear' : 'Guardar'),
-        ),
-      ],
-    );
-  }
-}
-
 class _MetricBox extends StatelessWidget {
   const _MetricBox({required this.label, required this.value});
 
@@ -1195,52 +1004,6 @@ class _CategoryInput {
   final String name;
   final String description;
   final int? lowStockThreshold;
-}
-
-class _ProductInput {
-  const _ProductInput({
-    required this.sku,
-    required this.barcode,
-    required this.name,
-    required this.description,
-    required this.categoryId,
-    required this.brand,
-    required this.imageUrl,
-    required this.price,
-    required this.cost,
-    required this.currency,
-    required this.tags,
-    required this.minimumStock,
-  });
-
-  final String sku;
-  final String barcode;
-  final String name;
-  final String description;
-  final String categoryId;
-  final String brand;
-  final String imageUrl;
-  final double price;
-  final double cost;
-  final String currency;
-  final List<String> tags;
-  final int? minimumStock;
-}
-
-String? _requiredValidator(String? value) {
-  return (value ?? '').trim().isEmpty ? 'Campo obligatorio.' : null;
-}
-
-String? _positiveMoneyValidator(String? value) {
-  final parsed = double.tryParse((value ?? '').trim());
-  return parsed == null || parsed <= 0
-      ? 'Ingresa un valor mayor que cero.'
-      : null;
-}
-
-String? _nonNegativeMoneyValidator(String? value) {
-  final parsed = double.tryParse((value ?? '').trim());
-  return parsed == null || parsed < 0 ? 'Ingresa un valor valido.' : null;
 }
 
 String _formatMoney(double value, String currency) {

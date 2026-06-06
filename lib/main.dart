@@ -1,8 +1,14 @@
 import 'dart:async';
 
+import 'dart:ui';
+
+import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'firebase_options.dart';
 import 'src/app.dart';
 import 'src/features/inventory/data/inventory_offline_cache.dart';
 
@@ -28,12 +34,27 @@ class _BootstrapAppState extends State<BootstrapApp> {
   }
 
   Future<FirebaseApp> _bootstrapApplication() async {
-    final app = await Firebase.initializeApp().timeout(
+    final app = await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    ).timeout(
       const Duration(seconds: 20),
       onTimeout: () => throw TimeoutException(
         'Firebase no respondio durante el arranque. Revisa la configuracion y la conexion del emulador.',
       ),
     );
+    
+    // Inicializar Firebase Crashlytics solo si NO estamos en Web
+    if (!kIsWeb) {
+      FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+      PlatformDispatcher.instance.onError = (error, stack) {
+        FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+        return true;
+      };
+    }
+    
+    // Instanciar Analytics para iniciar la medicion de adopcion
+    FirebaseAnalytics.instance;
+
     await InventoryOfflineCache.initializeHiveShared();
     return app;
   }

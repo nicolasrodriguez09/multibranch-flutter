@@ -8,6 +8,8 @@ import '../../auth/application/auth_service.dart';
 import '../application/inventory_workflow_service.dart';
 import '../domain/models.dart';
 import 'branch_panel_drawer.dart';
+import 'product_selector_field.dart';
+import 'product_search_page.dart';
 
 class SalesRegisterPage extends StatefulWidget {
   const SalesRegisterPage({
@@ -34,7 +36,7 @@ class _SalesRegisterPageState extends State<SalesRegisterPage> {
   late final TextEditingController _customerPhoneController;
   late final TextEditingController _notesController;
 
-  String? _selectedProductId;
+  SalesCatalogItem? _selectedItem;
   SalePaymentMethod _paymentMethod = SalePaymentMethod.cash;
   bool _isSubmitting = false;
 
@@ -63,16 +65,35 @@ class _SalesRegisterPageState extends State<SalesRegisterPage> {
     return widget.service.fetchSalesCatalog(actorUser: widget.currentUser);
   }
 
-  void _selectProduct(String? productId, List<SalesCatalogItem> catalog) {
-    final selected = catalog.cast<SalesCatalogItem?>().firstWhere(
-      (item) => item?.product.id == productId,
+  void _selectProductFromSearch(ProductSearchResult result, List<SalesCatalogItem> catalog) {
+    SalesCatalogItem? selected = catalog.cast<SalesCatalogItem?>().firstWhere(
+      (item) => item?.product.id == result.product.id,
       orElse: () => null,
     );
+
+    if (selected == null) {
+      selected = SalesCatalogItem(
+        product: result.product,
+        inventory: result.inventory ?? InventoryItem.create(
+          branchId: widget.currentUser.branchId,
+          branchName: '',
+          productId: result.product.id,
+          productName: result.product.name,
+          sku: result.product.sku,
+          stock: 0,
+          reservedStock: 0,
+          incomingStock: 0,
+          minimumStock: 0,
+          updatedBy: widget.currentUser.id,
+          isActive: true,
+          updatedAt: DateTime.now(),
+        ),
+      );
+    }
+
     setState(() {
-      _selectedProductId = productId;
-      if (selected != null) {
-        _unitPriceController.text = selected.unitPrice.toStringAsFixed(2);
-      }
+      _selectedItem = selected;
+      _unitPriceController.text = selected!.unitPrice.toStringAsFixed(2);
     });
   }
 
@@ -87,11 +108,12 @@ class _SalesRegisterPageState extends State<SalesRegisterPage> {
     if (form == null || !form.validate()) {
       return;
     }
-    final productId = _selectedProductId;
-    if (productId == null || productId.isEmpty) {
+    
+    if (_selectedItem == null) {
       _showMessage('Selecciona un producto para registrar la venta.');
       return;
     }
+    final productId = _selectedItem!.product.id;
 
     setState(() {
       _isSubmitting = true;
@@ -207,10 +229,8 @@ class _SalesRegisterPageState extends State<SalesRegisterPage> {
               }
 
               final catalog = snapshot.requireData;
-              final selected = catalog.cast<SalesCatalogItem?>().firstWhere(
-                (item) => item?.product.id == _selectedProductId,
-                orElse: () => null,
-              );
+              // Maintain selected item if it already exists
+              final selected = _selectedItem;
 
               return RefreshIndicator(
                 onRefresh: _refresh,
@@ -224,8 +244,9 @@ class _SalesRegisterPageState extends State<SalesRegisterPage> {
                     const SizedBox(height: 16),
                     _SalesForm(
                       formKey: _formKey,
+                      service: widget.service,
+                      currentUser: widget.currentUser,
                       catalog: catalog,
-                      selectedProductId: _selectedProductId,
                       selected: selected,
                       quantityController: _quantityController,
                       unitPriceController: _unitPriceController,
@@ -234,8 +255,11 @@ class _SalesRegisterPageState extends State<SalesRegisterPage> {
                       notesController: _notesController,
                       paymentMethod: _paymentMethod,
                       isSubmitting: _isSubmitting,
-                      onProductChanged: (value) =>
-                          _selectProduct(value, catalog),
+                      onProductSelected: (result) {
+                        if (result != null) {
+                          _selectProductFromSearch(result, catalog);
+                        }
+                      },
                       onPaymentChanged: (value) {
                         if (value != null) {
                           setState(() {
@@ -314,8 +338,9 @@ class _SalesHero extends StatelessWidget {
 class _SalesForm extends StatelessWidget {
   const _SalesForm({
     required this.formKey,
+    required this.service,
+    required this.currentUser,
     required this.catalog,
-    required this.selectedProductId,
     required this.selected,
     required this.quantityController,
     required this.unitPriceController,
@@ -324,14 +349,15 @@ class _SalesForm extends StatelessWidget {
     required this.notesController,
     required this.paymentMethod,
     required this.isSubmitting,
-    required this.onProductChanged,
+    required this.onProductSelected,
     required this.onPaymentChanged,
     required this.onSubmit,
   });
 
   final GlobalKey<FormState> formKey;
+  final InventoryWorkflowService service;
+  final AppUser currentUser;
   final List<SalesCatalogItem> catalog;
-  final String? selectedProductId;
   final SalesCatalogItem? selected;
   final TextEditingController quantityController;
   final TextEditingController unitPriceController;
@@ -340,7 +366,7 @@ class _SalesForm extends StatelessWidget {
   final TextEditingController notesController;
   final SalePaymentMethod paymentMethod;
   final bool isSubmitting;
-  final ValueChanged<String?> onProductChanged;
+  final ValueChanged<ProductSearchResult?> onProductSelected;
   final ValueChanged<SalePaymentMethod?> onPaymentChanged;
   final VoidCallback onSubmit;
 
@@ -359,25 +385,18 @@ class _SalesForm extends StatelessWidget {
               ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              key: ValueKey<String?>('sale_product_$selectedProductId'),
-              initialValue: selectedProductId,
-              isExpanded: true,
-              decoration: const InputDecoration(labelText: 'Producto vendido'),
-              items: catalog
-                  .map(
-                    (item) => DropdownMenuItem<String>(
-                      value: item.product.id,
-                      child: Text(
-                        '${item.product.name} | ${item.availableStock} disp. | ${_formatMoney(item.unitPrice, item.currency)}',
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  )
-                  .toList(growable: false),
-              onChanged: catalog.isEmpty ? null : onProductChanged,
-              validator: (value) =>
-                  (value ?? '').isEmpty ? 'Selecciona un producto.' : null,
+            ProductSelectorField(
+              service: service,
+              currentUser: currentUser,
+              initialFilters: ProductSearchFilters(
+                branchId: currentUser.branchId,
+                availability: ProductAvailabilityFilter.available,
+              ),
+              selectedText: selected != null
+                  ? '${selected!.product.name} | ${selected!.availableStock} disp. | ${_formatMoney(selected!.unitPrice, selected!.currency)}'
+                  : null,
+              onChanged: onProductSelected,
+              errorText: selected == null && isSubmitting ? 'Selecciona un producto' : null,
             ),
             if (selected != null) ...[
               const SizedBox(height: 10),
@@ -586,7 +605,10 @@ String _formatMoney(double value, String currency) {
 }
 
 String _formatDateTime(DateTime value) {
-  final local = value.toLocal();
-  String two(int n) => n.toString().padLeft(2, '0');
-  return '${two(local.day)}/${two(local.month)}/${local.year} ${two(local.hour)}:${two(local.minute)}';
+  final v = value.toUtc().subtract(const Duration(hours: 5));
+  final day = v.day.toString().padLeft(2, '0');
+  final month = v.month.toString().padLeft(2, '0');
+  final hour = v.hour.toString().padLeft(2, '0');
+  final minute = v.minute.toString().padLeft(2, '0');
+  return '$day/$month/${v.year} $hour:$minute';
 }

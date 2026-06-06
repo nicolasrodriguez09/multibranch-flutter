@@ -49,7 +49,7 @@ class _ProductDetailPageState extends State<ProductDetailPage>
   @override
   void initState() {
     super.initState();
-    unawaited(_refreshDetail(forceRefresh: false));
+    unawaited(_refreshDetail(forceRefresh: true));
     configureAutoRefresh();
   }
 
@@ -242,30 +242,18 @@ class _ProductDetailContent extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                product.name,
-                                style: Theme.of(context).textTheme.headlineSmall
-                                    ?.copyWith(fontWeight: FontWeight.w800),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                '${product.brand} | ${product.sku}',
-                                style: Theme.of(context).textTheme.bodyMedium
-                                    ?.copyWith(color: Colors.white70),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        _StatusBadge(label: statusLabel, color: statusColor),
-                      ],
+                    _StatusBadge(label: statusLabel, color: statusColor),
+                    const SizedBox(height: 12),
+                    Text(
+                      product.name,
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '${product.brand} | ${product.sku}',
+                      style: Theme.of(context).textTheme.bodyMedium
+                          ?.copyWith(color: Colors.white70),
                     ),
                     const SizedBox(height: 14),
                     Text(
@@ -295,11 +283,6 @@ class _ProductDetailContent extends StatelessWidget {
               ),
             ],
           ),
-        ),
-        const SizedBox(height: 16),
-        _DataReliabilityPanel(
-          reliability: detail.reliability,
-          isFromCache: detail.isFromCache,
         ),
         if (detail.shouldShowAlternativeSuggestions) ...[
           const SizedBox(height: 16),
@@ -416,11 +399,12 @@ class _ProductDetailContent extends StatelessWidget {
   }
 
   static String _formatDateTime(DateTime value) {
-    final hour = value.hour.toString().padLeft(2, '0');
-    final minute = value.minute.toString().padLeft(2, '0');
-    final day = value.day.toString().padLeft(2, '0');
-    final month = value.month.toString().padLeft(2, '0');
-    return '$day/$month $hour:$minute';
+    final v = value.toUtc().subtract(const Duration(hours: 5));
+    final day = v.day.toString().padLeft(2, '0');
+    final month = v.month.toString().padLeft(2, '0');
+    final hour = v.hour.toString().padLeft(2, '0');
+    final minute = v.minute.toString().padLeft(2, '0');
+    return '$day/$month ${v.year} $hour:$minute';
   }
 }
 
@@ -463,42 +447,6 @@ class _StockByBranchPanel extends StatelessWidget {
               const _MetricPill(label: 'Ordenado por disponibilidad'),
             ],
           ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: const [
-              _MetricPill(label: 'Verde <= 15 min'),
-              _MetricPill(label: 'Amarillo <= 30 min'),
-              _MetricPill(label: 'Rojo > 30 min o incompleto'),
-            ],
-          ),
-          if (yellowCount > 0 || redCount > 0) ...[
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: (redCount > 0 ? AppPalette.danger : AppPalette.amber)
-                    .withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: (redCount > 0 ? AppPalette.danger : AppPalette.amber)
-                      .withValues(alpha: 0.28),
-                ),
-              ),
-              child: Text(
-                _buildReliabilitySummary(
-                  yellowCount: yellowCount,
-                  redCount: redCount,
-                ),
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ],
           const SizedBox(height: 12),
           if (entries.isEmpty)
             Text(
@@ -543,13 +491,6 @@ class _BranchStockCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final lastUpdatedLabel = entry.lastUpdatedAt == null
-        ? 'Sin actualizacion registrada'
-        : 'Ultima actualizacion ${_ProductDetailContent._formatDateTime(entry.lastUpdatedAt!)}';
-    final statusColor = _reliabilityColor(entry.reliability.level);
-    final statusLabel = entry.reliability.statusLabel;
-    final ageLabel = _formatReliabilityAge(entry.reliability.age);
-
     return Container(
       margin: const EdgeInsets.only(top: 12),
       padding: const EdgeInsets.all(14),
@@ -584,30 +525,7 @@ class _BranchStockCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 12),
-              _StatusBadge(label: statusLabel, color: statusColor),
             ],
-          ),
-          const SizedBox(height: 10),
-          Text(
-            lastUpdatedLabel,
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: Colors.white70),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Antiguedad $ageLabel',
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: Colors.white70),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            entry.reliability.message,
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: Colors.white),
           ),
           const SizedBox(height: 12),
           Wrap(
@@ -688,9 +606,9 @@ class _DataReliabilityPanel extends StatelessWidget {
             children: [
               _MetricPill(label: lastUpdatedLabel),
               _MetricPill(label: 'Antiguedad $ageLabel'),
-              const _MetricPill(label: 'Verde <= 15 min'),
-              const _MetricPill(label: 'Amarillo <= 30 min'),
-              const _MetricPill(label: 'Rojo > 30 min o incompleto'),
+              const _MetricPill(label: 'Confiable <= 1.5 horas'),
+              const _MetricPill(label: 'Precaución <= 5 horas'),
+              const _MetricPill(label: 'Vencido > 5 horas o incompleto'),
             ],
           ),
           if (isFromCache) ...[
@@ -860,11 +778,6 @@ class _AlternativeBranchSuggestionPanelState
                     _StockMetricTile(
                       label: 'ETA traslado',
                       value: selectedSuggestion.etaLabel,
-                    ),
-                    _StockMetricTile(
-                      label: 'Confiabilidad',
-                      value:
-                          selectedSuggestion.stockEntry.reliability.statusLabel,
                     ),
                   ],
                 ),
