@@ -162,7 +162,7 @@ class CatalogRepository {
     return Category.fromFirestore(snapshot.id, data);
   }
 
-  Future<List<Branch>> fetchBranches() async {
+  Future<List<Branch>> fetchBranches({bool forceServer = false}) async {
     final snapshot = await _branches.orderBy('name').get();
     return snapshot.docs
         .map((doc) => Branch.fromFirestore(doc.id, doc.data()))
@@ -897,9 +897,11 @@ class SystemRepository {
     required String entityId,
     String? entityType,
   }) async {
-    final snapshot = await _auditLogs
-        .where('entityId', isEqualTo: entityId)
-        .get();
+    var query = _auditLogs.where('entityId', isEqualTo: entityId);
+    if (entityType != null) {
+      query = query.where('entityType', isEqualTo: entityType);
+    }
+    final snapshot = await query.get();
     final items =
         snapshot.docs
             .map((doc) => AuditLog.fromFirestore(doc.id, doc.data()))

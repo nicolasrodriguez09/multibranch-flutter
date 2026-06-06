@@ -28,6 +28,22 @@ Future<void> showRequestTraceabilityDialog(
   );
 }
 
+Future<void> showTransferTraceabilityDialog(
+  BuildContext context, {
+  required InventoryWorkflowService service,
+  required AppUser currentUser,
+  required String transferId,
+}) {
+  return showDialog<void>(
+    context: context,
+    builder: (context) => _TransferRequestTraceabilityDialog(
+      service: service,
+      currentUser: currentUser,
+      transferId: transferId,
+    ),
+  );
+}
+
 class _TransferRequestTraceabilityDialog extends StatefulWidget {
   const _TransferRequestTraceabilityDialog({
     required this.service,
@@ -240,33 +256,50 @@ class _TransferRequestTraceabilityDialogState
                             ],
                           ),
                           const SizedBox(height: 18),
-                          Wrap(
-                            spacing: 10,
-                            runSpacing: 10,
+                          Column(
                             children: [
-                              _TraceabilityMetricCard(
-                                label: 'Cantidad pedida',
-                                value: '${transfer.quantity}',
-                                accent: AppPalette.amber,
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _TraceabilityMetricCard(
+                                      label: 'Cantidad pedida',
+                                      value: '${transfer.quantity}',
+                                      accent: AppPalette.amber,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: _TraceabilityMetricCard(
+                                      label: 'SKU',
+                                      value: transfer.sku,
+                                      accent: AppPalette.blueSoft,
+                                    ),
+                                  ),
+                                ],
                               ),
-                              _TraceabilityMetricCard(
-                                label: 'SKU',
-                                value: transfer.sku,
-                                accent: AppPalette.blueSoft,
-                              ),
-                              _TraceabilityMetricCard(
-                                label: 'Solicitado',
-                                value: _formatDateTimeStamp(
-                                  transfer.requestedAt,
-                                ),
-                                accent: AppPalette.mint,
-                              ),
-                              _TraceabilityMetricCard(
-                                label: 'Movido',
-                                value: transfer.approvedAt == null
-                                    ? '0'
-                                    : '${transfer.quantity}',
-                                accent: AppPalette.cyan,
+                              const SizedBox(height: 10),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _TraceabilityMetricCard(
+                                      label: 'Solicitado',
+                                      value: _formatDateTimeStamp(
+                                        transfer.requestedAt,
+                                      ),
+                                      accent: AppPalette.mint,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: _TraceabilityMetricCard(
+                                      label: 'Movido',
+                                      value: transfer.approvedAt == null
+                                          ? '0'
+                                          : '${transfer.quantity}',
+                                      accent: AppPalette.cyan,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
@@ -319,82 +352,86 @@ class _TransferRequestTraceabilityDialogState
                             title: 'Actores clave',
                           ),
                           const SizedBox(height: 10),
-                          Wrap(
-                            spacing: 12,
-                            runSpacing: 12,
+                          Column(
                             children: [
-                              _TraceabilityActorCard(
-                                title: 'Solicitante',
-                                icon: Icons.assignment_ind_rounded,
-                                name:
-                                    detail.requestLog?.actorName ??
-                                    detail.requesterUser?.fullName ??
-                                    transfer.requestedByName.ifEmpty(
-                                      transfer.requestedBy,
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: _TraceabilityActorCard(
+                                      title: 'Solicitante',
+                                      icon: Icons.assignment_ind_rounded,
+                                      name: detail.requestLog?.actorName ??
+                                          detail.requesterUser?.fullName ??
+                                          transfer.requestedByName.ifEmpty(
+                                            transfer.requestedBy,
+                                          ),
+                                      role: detail.requestLog?.actorRole.displayName ??
+                                          detail.requesterUser?.role.displayName ??
+                                          'No disponible',
+                                      branch: detail.requestLog?.branchName ??
+                                          detail.requesterUser?.branchId ??
+                                          transfer.toBranchName,
+                                      timestamp: detail.requestLog?.createdAt ??
+                                          transfer.requestedAt,
                                     ),
-                                role:
-                                    detail.requestLog?.actorRole.displayName ??
-                                    detail.requesterUser?.role.displayName ??
-                                    'No disponible',
-                                branch:
-                                    detail.requestLog?.branchName ??
-                                    detail.requesterUser?.branchId ??
-                                    transfer.toBranchName,
-                                timestamp:
-                                    detail.requestLog?.createdAt ??
-                                    transfer.requestedAt,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: _TraceabilityActorCard(
+                                      title: 'Aprobacion',
+                                      icon: Icons.verified_user_rounded,
+                                      name: detail.approvalLog?.actorName ??
+                                          detail.approverUser?.fullName ??
+                                          (transfer.approvedBy ?? 'Pendiente'),
+                                      role: detail.approvalLog?.actorRole.displayName ??
+                                          detail.approverUser?.role.displayName ??
+                                          (transfer.approvedBy == null
+                                              ? 'Pendiente'
+                                              : 'No disponible'),
+                                      branch: detail.approvalLog?.branchName ??
+                                          detail.approverUser?.branchId ??
+                                          transfer.fromBranchName,
+                                      timestamp: detail.approvalLog?.createdAt ??
+                                          transfer.approvedAt,
+                                    ),
+                                  ),
+                                ],
                               ),
-                              _TraceabilityActorCard(
-                                title: 'Aprobacion',
-                                icon: Icons.verified_user_rounded,
-                                name:
-                                    detail.approvalLog?.actorName ??
-                                    detail.approverUser?.fullName ??
-                                    (transfer.approvedBy ?? 'Pendiente'),
-                                role:
-                                    detail.approvalLog?.actorRole.displayName ??
-                                    detail.approverUser?.role.displayName ??
-                                    (transfer.approvedBy == null
-                                        ? 'Pendiente'
-                                        : 'No disponible'),
-                                branch:
-                                    detail.approvalLog?.branchName ??
-                                    detail.approverUser?.branchId ??
-                                    transfer.fromBranchName,
-                                timestamp:
-                                    detail.approvalLog?.createdAt ??
-                                    transfer.approvedAt,
-                              ),
-                              _TraceabilityActorCard(
-                                title: 'Despacho',
-                                icon: Icons.local_shipping_rounded,
-                                name:
-                                    detail.dispatchLog?.actorName ??
-                                    'Pendiente',
-                                role:
-                                    detail.dispatchLog?.actorRole.displayName ??
-                                    'Pendiente',
-                                branch:
-                                    detail.dispatchLog?.branchName ??
-                                    transfer.fromBranchName,
-                                timestamp:
-                                    detail.dispatchLog?.createdAt ??
-                                    transfer.shippedAt,
-                              ),
-                              _TraceabilityActorCard(
-                                title: 'Recepcion',
-                                icon: Icons.inventory_2_rounded,
-                                name:
-                                    detail.receiveLog?.actorName ?? 'Pendiente',
-                                role:
-                                    detail.receiveLog?.actorRole.displayName ??
-                                    'Pendiente',
-                                branch:
-                                    detail.receiveLog?.branchName ??
-                                    transfer.toBranchName,
-                                timestamp:
-                                    detail.receiveLog?.createdAt ??
-                                    transfer.receivedAt,
+                              const SizedBox(height: 12),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: _TraceabilityActorCard(
+                                      title: 'Despacho',
+                                      icon: Icons.local_shipping_rounded,
+                                      name: detail.dispatchLog?.actorName ??
+                                          'Pendiente',
+                                      role: detail.dispatchLog?.actorRole.displayName ??
+                                          'Pendiente',
+                                      branch: detail.dispatchLog?.branchName ??
+                                          transfer.fromBranchName,
+                                      timestamp: detail.dispatchLog?.createdAt ??
+                                          transfer.shippedAt,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: _TraceabilityActorCard(
+                                      title: 'Recepcion',
+                                      icon: Icons.inventory_2_rounded,
+                                      name: detail.receiveLog?.actorName ??
+                                          'Pendiente',
+                                      role: detail.receiveLog?.actorRole.displayName ??
+                                          'Pendiente',
+                                      branch: detail.receiveLog?.branchName ??
+                                          transfer.toBranchName,
+                                      timestamp: detail.receiveLog?.createdAt ??
+                                          transfer.receivedAt,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
@@ -403,21 +440,25 @@ class _TransferRequestTraceabilityDialogState
                             title: 'Inventario vinculado',
                           ),
                           const SizedBox(height: 10),
-                          Wrap(
-                            spacing: 12,
-                            runSpacing: 12,
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              _InventoryTraceabilityCard(
-                                title: 'Origen actual',
-                                branchLabel: transfer.fromBranchName,
-                                inventory: detail.sourceInventory,
-                                accent: AppPalette.amber,
+                              Expanded(
+                                child: _InventoryTraceabilityCard(
+                                  title: 'Origen actual',
+                                  branchLabel: transfer.fromBranchName,
+                                  inventory: detail.sourceInventory,
+                                  accent: AppPalette.amber,
+                                ),
                               ),
-                              _InventoryTraceabilityCard(
-                                title: 'Destino actual',
-                                branchLabel: transfer.toBranchName,
-                                inventory: detail.destinationInventory,
-                                accent: AppPalette.blueSoft,
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: _InventoryTraceabilityCard(
+                                  title: 'Destino actual',
+                                  branchLabel: transfer.toBranchName,
+                                  inventory: detail.destinationInventory,
+                                  accent: AppPalette.blueSoft,
+                                ),
                               ),
                             ],
                           ),
@@ -545,33 +586,50 @@ class _ReservationRequestTraceabilityDialog extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Wrap(
-                            spacing: 10,
-                            runSpacing: 10,
+                          Column(
                             children: [
-                              _TraceabilityMetricCard(
-                                label: 'Cantidad pedida',
-                                value: '${reservation.quantity}',
-                                accent: AppPalette.blueSoft,
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _TraceabilityMetricCard(
+                                      label: 'Cantidad pedida',
+                                      value: '${reservation.quantity}',
+                                      accent: AppPalette.blueSoft,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: _TraceabilityMetricCard(
+                                      label: 'SKU',
+                                      value: reservation.sku,
+                                      accent: AppPalette.amber,
+                                    ),
+                                  ),
+                                ],
                               ),
-                              _TraceabilityMetricCard(
-                                label: 'SKU',
-                                value: reservation.sku,
-                                accent: AppPalette.amber,
-                              ),
-                              _TraceabilityMetricCard(
-                                label: 'Creada',
-                                value: _formatDateTimeStamp(
-                                  reservation.createdAt,
-                                ),
-                                accent: AppPalette.mint,
-                              ),
-                              _TraceabilityMetricCard(
-                                label: 'Vigencia',
-                                value: _formatDateTimeStamp(
-                                  reservation.expiresAt,
-                                ),
-                                accent: AppPalette.cyan,
+                              const SizedBox(height: 10),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _TraceabilityMetricCard(
+                                      label: 'Creada',
+                                      value: _formatDateTimeStamp(
+                                        reservation.createdAt,
+                                      ),
+                                      accent: AppPalette.mint,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: _TraceabilityMetricCard(
+                                      label: 'Vigencia',
+                                      value: _formatDateTimeStamp(
+                                        reservation.expiresAt,
+                                      ),
+                                      accent: AppPalette.cyan,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
@@ -621,50 +679,46 @@ class _ReservationRequestTraceabilityDialog extends StatelessWidget {
                             title: 'Actores clave',
                           ),
                           const SizedBox(height: 10),
-                          Wrap(
-                            spacing: 12,
-                            runSpacing: 12,
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              _TraceabilityActorCard(
-                                title: 'Solicitante',
-                                icon: Icons.assignment_ind_rounded,
-                                name:
-                                    detail.requestLog?.actorName ??
-                                    detail.requesterUser?.fullName ??
-                                    reservation.requestedByName.ifEmpty(
-                                      reservation.reservedBy,
-                                    ),
-                                role:
-                                    detail.requestLog?.actorRole.displayName ??
-                                    detail.requesterUser?.role.displayName ??
-                                    'No disponible',
-                                branch:
-                                    detail.requestLog?.branchName ??
-                                    detail.requesterUser?.branchId ??
-                                    reservation.requestingBranchName.ifEmpty(
-                                      reservation.branchName,
-                                    ),
-                                timestamp:
-                                    detail.requestLog?.createdAt ??
-                                    reservation.createdAt,
+                              Expanded(
+                                child: _TraceabilityActorCard(
+                                  title: 'Solicitante',
+                                  icon: Icons.assignment_ind_rounded,
+                                  name: detail.requestLog?.actorName ??
+                                      detail.requesterUser?.fullName ??
+                                      reservation.requestedByName.ifEmpty(
+                                        reservation.reservedBy,
+                                      ),
+                                  role: detail.requestLog?.actorRole.displayName ??
+                                      detail.requesterUser?.role.displayName ??
+                                      'No disponible',
+                                  branch: detail.requestLog?.branchName ??
+                                      detail.requesterUser?.branchId ??
+                                      reservation.requestingBranchName.ifEmpty(
+                                        reservation.branchName,
+                                      ),
+                                  timestamp: detail.requestLog?.createdAt ??
+                                      reservation.createdAt,
+                                ),
                               ),
-                              _TraceabilityActorCard(
-                                title: 'Aprobacion',
-                                icon: Icons.verified_user_rounded,
-                                name:
-                                    detail.approvalLog?.actorName ??
-                                    (reservation.approvedBy ?? 'Pendiente'),
-                                role:
-                                    detail.approvalLog?.actorRole.displayName ??
-                                    (reservation.approvedBy == null
-                                        ? 'Pendiente'
-                                        : 'No disponible'),
-                                branch:
-                                    detail.approvalLog?.branchName ??
-                                    reservation.branchName,
-                                timestamp:
-                                    detail.approvalLog?.createdAt ??
-                                    reservation.approvedAt,
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: _TraceabilityActorCard(
+                                  title: 'Aprobacion',
+                                  icon: Icons.verified_user_rounded,
+                                  name: detail.approvalLog?.actorName ??
+                                      (reservation.approvedBy ?? 'Pendiente'),
+                                  role: detail.approvalLog?.actorRole.displayName ??
+                                      (reservation.approvedBy == null
+                                          ? 'Pendiente'
+                                          : 'No disponible'),
+                                  branch: detail.approvalLog?.branchName ??
+                                      reservation.branchName,
+                                  timestamp: detail.approvalLog?.createdAt ??
+                                      reservation.approvedAt,
+                                ),
                               ),
                             ],
                           ),
@@ -781,11 +835,11 @@ class _TraceabilityActionPanel extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(22),
         gradient: const LinearGradient(
-          colors: [Color(0xFF3A1116), Color(0xFF151016)],
+          colors: [Color(0xFF0C243B), Color(0xFF081423)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        border: Border.all(color: const Color(0x33FF2636)),
+        border: Border.all(color: const Color(0x334C9AFF)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -840,9 +894,9 @@ class _TraceabilityBlock extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF17191F),
+        color: const Color(0xFF111216),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0x26FF2636)),
+        border: Border.all(color: const Color(0x1AFFFFFF)),
       ),
       child: child,
     );
@@ -863,7 +917,7 @@ class _TraceabilityMetricCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 170,
+      width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: accent.withValues(alpha: 0.12),
@@ -930,8 +984,12 @@ class _TraceabilityDataRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: isLast ? 0 : 10),
+    return Container(
+      padding: EdgeInsets.only(bottom: isLast ? 0 : 12),
+      margin: EdgeInsets.only(bottom: isLast ? 0 : 12),
+      decoration: BoxDecoration(
+        border: isLast ? null : Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.05))),
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -973,14 +1031,14 @@ class _TraceabilityActorCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 190,
+      width: double.infinity,
       child: _TraceabilityBlock(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Icon(icon, color: AppPalette.amber, size: 18),
+                Icon(icon, color: AppPalette.cyan, size: 18),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -1045,7 +1103,7 @@ class _InventoryTraceabilityCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 320,
+      width: double.infinity,
       child: _TraceabilityBlock(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1073,31 +1131,25 @@ class _InventoryTraceabilityCard extends StatelessWidget {
               )
             else
               Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _TraceabilityDataRow(
-                    label: 'Fisico',
-                    value: '${inventory!.stock}',
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _StatPill(label: 'Fisico', value: '${inventory!.stock}'),
+                      _StatPill(label: 'Reservado', value: '${inventory!.reservedStock}'),
+                      _StatPill(label: 'Disponible', value: '${inventory!.availableStock}'),
+                      _StatPill(label: 'En camino', value: '${inventory!.incomingStock}'),
+                      _StatPill(label: 'Minimo', value: '${inventory!.minimumStock}'),
+                    ],
                   ),
-                  _TraceabilityDataRow(
-                    label: 'Reservado',
-                    value: '${inventory!.reservedStock}',
-                  ),
-                  _TraceabilityDataRow(
-                    label: 'Disponible',
-                    value: '${inventory!.availableStock}',
-                  ),
-                  _TraceabilityDataRow(
-                    label: 'En camino',
-                    value: '${inventory!.incomingStock}',
-                  ),
-                  _TraceabilityDataRow(
-                    label: 'Minimo',
-                    value: '${inventory!.minimumStock}',
-                  ),
-                  _TraceabilityDataRow(
-                    label: 'Actualizado',
-                    value: _formatDateTimeStamp(inventory!.updatedAt),
-                    isLast: true,
+                  const SizedBox(height: 12),
+                  Text(
+                    'Actualizado el ${_formatDateTimeStamp(inventory!.updatedAt)}',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: Colors.white54),
                   ),
                 ],
               ),
@@ -1181,7 +1233,7 @@ class _AuditTimelineTile extends StatelessWidget {
                               color: Colors.white.withValues(alpha: 0.06),
                               borderRadius: BorderRadius.circular(999),
                               border: Border.all(
-                                color: const Color(0x26FF2636),
+                                color: const Color(0x1AFFFFFF),
                               ),
                             ),
                             child: Text(
@@ -1273,8 +1325,9 @@ Color _reservationStatusColor(ReservationStatus status) {
 }
 
 String _formatDateTimeStamp(DateTime value) {
-  final minute = value.minute.toString().padLeft(2, '0');
-  return '${value.day}/${value.month}/${value.year} ${value.hour}:$minute';
+  final v = value.toUtc().subtract(const Duration(hours: 5));
+  final minute = v.minute.toString().padLeft(2, '0');
+  return '${v.day}/${v.month}/${v.year} ${v.hour}:$minute';
 }
 
 String _formatAuditAction(String value) {
@@ -1315,19 +1368,19 @@ IconData _auditActionIcon(String value) {
 
 Color _auditActionColor(String value) {
   return switch (value.trim().toLowerCase()) {
-    'transfer_requested' => const Color(0xFFFF3B47),
-    'transfer_approved' => const Color(0xFFFF6B73),
-    'transfer_rejected' => const Color(0xFFC24949),
-    'transfer_in_transit' => const Color(0xFFFF9AA1),
-    'transfer_received' => const Color(0xFFFF6B73),
-    'reservation_created' => const Color(0xFFFF6B73),
-    'reservation_approved' => const Color(0xFFFF6B73),
-    'reservation_rejected' => const Color(0xFFC24949),
-    'reservation_completed' => const Color(0xFFFF6B73),
-    'reservation_cancelled' => const Color(0xFFC24949),
-    'reservation_expired' => const Color(0xFFFF3B47),
-    'reservation_updated' => const Color(0xFF5A1018),
-    _ => const Color(0xFF5A1018),
+    'transfer_requested' => AppPalette.amber,
+    'transfer_approved' => AppPalette.mint,
+    'transfer_rejected' => AppPalette.danger,
+    'transfer_in_transit' => AppPalette.blueSoft,
+    'transfer_received' => AppPalette.mint,
+    'reservation_created' => AppPalette.amber,
+    'reservation_approved' => AppPalette.mint,
+    'reservation_rejected' => AppPalette.danger,
+    'reservation_completed' => AppPalette.cyan,
+    'reservation_cancelled' => AppPalette.danger,
+    'reservation_expired' => AppPalette.danger,
+    'reservation_updated' => AppPalette.blueSoft,
+    _ => Colors.white70,
   };
 }
 
@@ -1355,6 +1408,37 @@ String _formatAuditMetadataLabel(String value) {
     'status' => 'Estado',
     _ => value,
   };
+}
+
+class _StatPill extends StatelessWidget {
+  const _StatPill({required this.label, required this.value});
+  
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$label: ',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.white60),
+          ),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 extension on String {
