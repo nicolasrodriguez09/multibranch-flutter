@@ -583,10 +583,10 @@ class InventoryDataReliability {
   bool get isExpired => level == InventoryDataReliabilityLevel.red;
 
   String get statusLabel => switch (level) {
-    InventoryDataReliabilityLevel.green => 'Verde',
-    InventoryDataReliabilityLevel.yellow => 'Amarillo',
+    InventoryDataReliabilityLevel.green => 'Confiable',
+    InventoryDataReliabilityLevel.yellow => 'Precaución',
     InventoryDataReliabilityLevel.red =>
-      isIncomplete ? 'Rojo incompleto' : 'Rojo vencido',
+      isIncomplete ? 'Incompleto' : 'Vencido',
   };
 }
 
@@ -833,11 +833,11 @@ class InventoryWorkflowService {
   bool _categoryCatalogFromOfflineCache = false;
   bool _productCatalogFromOfflineCache = false;
 
-  static const Duration _greenDataThreshold = Duration(minutes: 15);
-  static const Duration _yellowDataThreshold = Duration(minutes: 30);
-  static const Duration _greenSyncThreshold = Duration(hours: 4);
-  static const Duration _yellowSyncThreshold = Duration(hours: 12);
-  static const Duration _redSyncThreshold = Duration(hours: 24);
+  static const Duration _greenDataThreshold = Duration(minutes: 90);
+  static const Duration _yellowDataThreshold = Duration(hours: 5);
+  static const Duration _greenSyncThreshold = Duration(hours: 2);
+  static const Duration _yellowSyncThreshold = Duration(hours: 5);
+  static const Duration _redSyncThreshold = Duration(hours: 5);
   static const Duration _syncStatusTick = Duration(minutes: 1);
   static const Duration _syncFailureBurstWindow = Duration(hours: 2);
   static const int _syncStatusLogLimit = 180;
@@ -985,7 +985,9 @@ class InventoryWorkflowService {
     }
 
     try {
-      final branches = List<Branch>.unmodifiable(await catalog.fetchBranches());
+      final branches = List<Branch>.unmodifiable(
+        await catalog.fetchBranches(forceServer: forceRefresh),
+      );
       _branchCatalogCache = branches;
       _branchCatalogFromOfflineCache = false;
       await _offlineCache.cacheBranches(branches);
@@ -1216,10 +1218,9 @@ class InventoryWorkflowService {
     InventoryItem? inventory,
     Branch? branch,
   ) {
-    return inventory?.lastSyncAt ??
-        inventory?.updatedAt ??
-        branch?.lastSyncAt ??
-        branch?.updatedAt;
+    if (branch?.lastSyncAt != null) return branch!.lastSyncAt;
+    if (branch?.updatedAt != null) return branch!.updatedAt;
+    return null;
   }
 
   InventoryDataReliability _buildInventoryReliability({
@@ -1338,11 +1339,7 @@ class InventoryWorkflowService {
   }) {
     final suggestions =
         stockByBranch
-            .where(
-              (entry) =>
-                  entry.branch.id != currentBranchId &&
-                  entry.availableStock > 0,
-            )
+            .where((entry) => entry.availableStock > 0)
             .map((entry) {
               final distanceKm = currentBranch == null
                   ? 0.0
@@ -1506,7 +1503,7 @@ class InventoryWorkflowService {
     String? errorMessage,
   }) {
     return RequestLog(
-      id: 'request_log_${createdAt.microsecondsSinceEpoch}_${math.Random().nextInt(1 << 32)}',
+      id: 'request_log_${createdAt.microsecondsSinceEpoch}_${math.Random().nextInt(999999999)}',
       operation: operation,
       source: source,
       status: status,
@@ -2017,15 +2014,18 @@ class InventoryWorkflowService {
   }) async {
     _ensurePermission(actorUser, AppPermission.manageMasterData);
 
-    final normalizedSku = sku.trim().toUpperCase();
+    final rawSku = sku.trim().toUpperCase();
+    final normalizedSku = rawSku.isEmpty
+        ? 'PRD-${DateTime.now().millisecondsSinceEpoch}'
+        : rawSku;
     final normalizedName = name.trim();
     final normalizedBrand = brand.trim();
     final normalizedCurrency = currency.trim().toUpperCase();
     final normalizedBarcode = barcode.trim();
 
-    if (normalizedSku.isEmpty || normalizedName.isEmpty) {
+    if (normalizedName.isEmpty) {
       throw const InventoryException(
-        'El SKU y el nombre del producto son obligatorios.',
+        'El nombre del producto es obligatorio.',
       );
     }
     if (categoryId.trim().isEmpty) {
@@ -2181,13 +2181,16 @@ class InventoryWorkflowService {
     if (currentProduct == null) {
       throw const InventoryException('El producto no existe.');
     }
-    final normalizedSku = sku.trim().toUpperCase();
+    final rawSku = sku.trim().toUpperCase();
+    final normalizedSku = rawSku.isEmpty
+        ? 'PRD-${DateTime.now().millisecondsSinceEpoch}'
+        : rawSku;
     final normalizedName = name.trim();
     final normalizedCurrency = currency.trim().toUpperCase();
     final normalizedBarcode = barcode.trim();
-    if (normalizedSku.isEmpty || normalizedName.isEmpty) {
+    if (normalizedName.isEmpty) {
       throw const InventoryException(
-        'El SKU y el nombre del producto son obligatorios.',
+        'El nombre del producto es obligatorio.',
       );
     }
     if (categoryId.trim().isEmpty) {
@@ -2588,7 +2591,8 @@ class InventoryWorkflowService {
       (product) =>
           product != null &&
           product.isActive &&
-          _normalizeBarcode(product.barcode) == normalizedBarcode,
+          (_normalizeBarcode(product.barcode) == normalizedBarcode ||
+           _normalizeBarcode(product.sku) == normalizedBarcode),
       orElse: () => null,
     );
 
@@ -4021,6 +4025,24 @@ class InventoryWorkflowService {
     return controller.stream;
   }
 
+  Stream<List<TransferRequest>> watchIncomingTransfers({
+    required AppUser actorUser,
+  }) {
+    if (actorUser.role == UserRole.admin) {
+      return transfers.watchTransfers();
+    }
+    return transfers.watchTransfersForBranch(actorUser.branchId);
+  }
+
+  Stream<List<TransferRequest>> watchOutgoingTransfers({
+    required AppUser actorUser,
+  }) {
+    if (actorUser.role == UserRole.admin) {
+      return transfers.watchTransfers();
+    }
+    return transfers.watchTransfersFromBranch(actorUser.branchId);
+  }
+
   Stream<List<AppNotification>> watchNotifications({
     required AppUser actorUser,
     int limit = 40,
@@ -4337,7 +4359,10 @@ class InventoryWorkflowService {
     return controller.stream;
   }
 
-  Future<SyncLog> refreshOwnBranchData({required AppUser actorUser}) async {
+  Future<SyncLog> refreshOwnBranchData({
+    required AppUser actorUser,
+    bool isAutomatic = false,
+  }) async {
     return _trackOperation(
       actorUser: actorUser,
       operation: 'sync.refresh_own_branch',
@@ -4355,7 +4380,8 @@ class InventoryWorkflowService {
       entityLabelBuilder: (syncLog) => syncLog.branchName,
       action: () async {
         _ensurePermission(actorUser, AppPermission.viewSyncStatus);
-        if (actorUser.role != UserRole.supervisor &&
+        if (!isAutomatic &&
+            actorUser.role != UserRole.supervisor &&
             actorUser.role != UserRole.admin) {
           throw const InventoryException(
             'Solo supervisores o administradores pueden actualizar la sede.',
@@ -4404,7 +4430,15 @@ class InventoryWorkflowService {
         final batch = _firestore.batch();
         batch.set(syncRef, syncLog.toFirestore());
         batch.set(auditLogRef, auditLog.toFirestore());
+        
+        final updatedBranch = branch.copyWith(
+          lastSyncAt: now,
+          updatedAt: now,
+        );
+        batch.set(_firestore.collection(FirestoreCollections.branches).doc(branch.id), updatedBranch.toFirestore(), SetOptions(merge: true));
+        
         await batch.commit();
+        _branchCatalogCache = null;
         return syncLog;
       },
     );
@@ -6602,7 +6636,7 @@ class InventoryWorkflowService {
         age: age,
         severity: SyncStatusSeverity.warning,
         summary: age <= _yellowSyncThreshold
-            ? 'Con retraso'
+            ? 'Atrasada'
             : 'Requiere validacion',
         detail: age <= _yellowSyncThreshold
             ? 'La sucursal sigue operativa, pero conviene validar el dato pronto.'
@@ -6618,7 +6652,7 @@ class InventoryWorkflowService {
       severity: SyncStatusSeverity.critical,
       summary: 'Muy atrasada',
       detail:
-          'La sucursal lleva mas de 24 horas sin una actualizacion confiable.',
+          'La sucursal lleva mas de 5 horas sin una actualizacion confiable.',
     );
   }
 
