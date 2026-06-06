@@ -47,6 +47,14 @@ class _RequestTrackingPageState extends State<RequestTrackingPage> {
   _RequestDateFilter _dateFilter = _RequestDateFilter.all;
   bool _isRefreshing = false;
   DateTime? _lastManualRefreshAt;
+  String _searchQuery = '';
+  final _searchController = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   Future<void> _refreshTracking({required bool showFeedback}) async {
     if (_isRefreshing) {
@@ -142,6 +150,39 @@ class _RequestTrackingPageState extends State<RequestTrackingPage> {
     };
   }
 
+  bool _matchesSearch(RequestTrackingItem item) {
+    if (_searchQuery.isEmpty) return true;
+    final query = _searchQuery.toLowerCase();
+    return item.productName.toLowerCase().contains(query) ||
+        item.sku.toLowerCase().contains(query) ||
+        item.primaryBranchName.toLowerCase().contains(query) ||
+        item.secondaryBranchName.toLowerCase().contains(query) ||
+        item.requesterLabel.toLowerCase().contains(query) ||
+        item.customerLabel.toLowerCase().contains(query) ||
+        item.id.toLowerCase().contains(query);
+  }
+
+  void _showFiltersBottomSheet(int filteredCount) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _FiltersBottomSheet(
+        initialTypeFilter: _typeFilter,
+        initialStatusFilter: _statusFilter,
+        initialDateFilter: _dateFilter,
+        filteredCount: filteredCount,
+        onApply: (type, status, date) {
+          setState(() {
+            _typeFilter = type;
+            _statusFilter = status;
+            _dateFilter = date;
+          });
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -202,6 +243,7 @@ class _RequestTrackingPageState extends State<RequestTrackingPage> {
 
               final allItems = snapshot.data ?? const <RequestTrackingItem>[];
               final filteredItems = allItems
+                  .where(_matchesSearch)
                   .where(_matchesType)
                   .where(_matchesStatus)
                   .where(_matchesDate)
@@ -221,26 +263,45 @@ class _RequestTrackingPageState extends State<RequestTrackingPage> {
                       lastManualRefreshAt: _lastManualRefreshAt,
                     ),
                     const SizedBox(height: 18),
-                    _TrackingFiltersCard(
-                      typeFilter: _typeFilter,
-                      statusFilter: _statusFilter,
-                      dateFilter: _dateFilter,
-                      onTypeChanged: (value) {
-                        setState(() {
-                          _typeFilter = value;
-                        });
-                      },
-                      onStatusChanged: (value) {
-                        setState(() {
-                          _statusFilter = value;
-                        });
-                      },
-                      onDateChanged: (value) {
-                        setState(() {
-                          _dateFilter = value;
-                        });
-                      },
-                      filteredCount: filteredItems.length,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _searchController,
+                            style: const TextStyle(color: Colors.white),
+                            decoration: InputDecoration(
+                              hintText: 'Buscar producto, sucursal o solicitante...',
+                              hintStyle: const TextStyle(color: Colors.white54),
+                              prefixIcon: const Icon(Icons.search_rounded, color: Colors.white54),
+                              filled: true,
+                              fillColor: const Color(0xFF17191F),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide: BorderSide.none,
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                            ),
+                            onChanged: (value) {
+                              setState(() {
+                                _searchQuery = value;
+                              });
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Container(
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF17191F),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: IconButton(
+                            onPressed: () => _showFiltersBottomSheet(filteredItems.length),
+                            icon: const Icon(Icons.tune_rounded, color: Colors.white),
+                            tooltip: 'Filtros avanzados',
+                            padding: const EdgeInsets.all(14),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 18),
                     if (filteredItems.isEmpty)
@@ -444,54 +505,95 @@ class _TrackingMetric extends StatelessWidget {
   }
 }
 
-class _TrackingFiltersCard extends StatelessWidget {
-  const _TrackingFiltersCard({
-    required this.typeFilter,
-    required this.statusFilter,
-    required this.dateFilter,
-    required this.onTypeChanged,
-    required this.onStatusChanged,
-    required this.onDateChanged,
+class _FiltersBottomSheet extends StatefulWidget {
+  const _FiltersBottomSheet({
+    required this.initialTypeFilter,
+    required this.initialStatusFilter,
+    required this.initialDateFilter,
     required this.filteredCount,
+    required this.onApply,
   });
 
-  final _RequestTypeFilter typeFilter;
-  final _RequestStatusFilter statusFilter;
-  final _RequestDateFilter dateFilter;
-  final ValueChanged<_RequestTypeFilter> onTypeChanged;
-  final ValueChanged<_RequestStatusFilter> onStatusChanged;
-  final ValueChanged<_RequestDateFilter> onDateChanged;
+  final _RequestTypeFilter initialTypeFilter;
+  final _RequestStatusFilter initialStatusFilter;
+  final _RequestDateFilter initialDateFilter;
   final int filteredCount;
+  final void Function(
+    _RequestTypeFilter type,
+    _RequestStatusFilter status,
+    _RequestDateFilter date,
+  ) onApply;
+
+  @override
+  State<_FiltersBottomSheet> createState() => _FiltersBottomSheetState();
+}
+
+class _FiltersBottomSheetState extends State<_FiltersBottomSheet> {
+  late _RequestTypeFilter _type;
+  late _RequestStatusFilter _status;
+  late _RequestDateFilter _date;
+
+  @override
+  void initState() {
+    super.initState();
+    _type = widget.initialTypeFilter;
+    _status = widget.initialStatusFilter;
+    _date = widget.initialDateFilter;
+  }
+
+  void _applyAndClose() {
+    widget.onApply(_type, _status, _date);
+    Navigator.of(context).pop();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: const Color(0xFF17191F),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0x26FF2636)),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+      decoration: const BoxDecoration(
+        color: Color(0xFF17191F),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Filtros de seguimiento',
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 20),
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
           ),
-          const SizedBox(height: 6),
-          Text(
-            '$filteredCount resultado(s) con los filtros actuales.',
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Filtros avanzados',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+              ),
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    _type = _RequestTypeFilter.all;
+                    _status = _RequestStatusFilter.all;
+                    _date = _RequestDateFilter.all;
+                  });
+                },
+                child: const Text('Limpiar'),
+              ),
+            ],
           ),
           const SizedBox(height: 14),
           _FilterSection<_RequestTypeFilter>(
-            title: 'Tipo',
-            currentValue: typeFilter,
+            title: 'Tipo de solicitud',
+            currentValue: _type,
             options: const [
               _FilterOption(value: _RequestTypeFilter.all, label: 'Todas'),
               _FilterOption(
@@ -503,12 +605,12 @@ class _TrackingFiltersCard extends StatelessWidget {
                 label: 'Traslados',
               ),
             ],
-            onSelected: onTypeChanged,
+            onSelected: (val) => setState(() => _type = val),
           ),
           const SizedBox(height: 14),
           _FilterSection<_RequestStatusFilter>(
             title: 'Estado',
-            currentValue: statusFilter,
+            currentValue: _status,
             options: const [
               _FilterOption(value: _RequestStatusFilter.all, label: 'Todos'),
               _FilterOption(
@@ -544,12 +646,12 @@ class _TrackingFiltersCard extends StatelessWidget {
                 label: 'Vencida',
               ),
             ],
-            onSelected: onStatusChanged,
+            onSelected: (val) => setState(() => _status = val),
           ),
           const SizedBox(height: 14),
           _FilterSection<_RequestDateFilter>(
             title: 'Fecha de solicitud',
-            currentValue: dateFilter,
+            currentValue: _date,
             options: const [
               _FilterOption(value: _RequestDateFilter.all, label: 'Todo'),
               _FilterOption(value: _RequestDateFilter.today, label: 'Hoy'),
@@ -562,7 +664,16 @@ class _TrackingFiltersCard extends StatelessWidget {
                 label: 'Ultimos 30 dias',
               ),
             ],
-            onSelected: onDateChanged,
+            onSelected: (val) => setState(() => _date = val),
+          ),
+          const SizedBox(height: 24),
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: FilledButton(
+              onPressed: _applyAndClose,
+              child: const Text('Aplicar filtros'),
+            ),
           ),
         ],
       ),
