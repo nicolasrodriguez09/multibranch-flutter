@@ -255,7 +255,7 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if signedIn()
-        && (request.auth.uid == userId || isAdmin() || isSupervisor());
+        && (request.auth.uid == userId || isAdmin() || isSupervisor() || canReadOperationalUser(resource.data));
       allow create: if isAdmin();
       allow update: if isAdmin()
         || (signedIn()
