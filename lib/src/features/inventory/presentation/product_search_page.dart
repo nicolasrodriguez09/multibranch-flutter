@@ -14,10 +14,14 @@ class ProductSearchPage extends StatefulWidget {
     super.key,
     required this.service,
     required this.currentUser,
+    this.isSelectionMode = false,
+    this.initialFilters,
   });
 
   final InventoryWorkflowService service;
   final AppUser currentUser;
+  final bool isSelectionMode;
+  final ProductSearchFilters? initialFilters;
 
   @override
   State<ProductSearchPage> createState() => _ProductSearchPageState();
@@ -37,7 +41,7 @@ class _ProductSearchPageState extends State<ProductSearchPage>
 
   ProductSearchFilterOptions? _filterOptions;
   List<ProductSearchResult> _allResults = const <ProductSearchResult>[];
-  ProductSearchFilters _filters = const ProductSearchFilters();
+  late ProductSearchFilters _filters;
   int _visibleCount = 0;
   bool _isLoading = false;
   bool _isBackgroundRefreshing = false;
@@ -68,6 +72,7 @@ class _ProductSearchPageState extends State<ProductSearchPage>
   @override
   void initState() {
     super.initState();
+    _filters = widget.initialFilters ?? const ProductSearchFilters();
     _recentSearchesStream = widget.service.watchRecentSearches(
       actorUser: widget.currentUser,
     );
@@ -378,6 +383,11 @@ class _ProductSearchPageState extends State<ProductSearchPage>
   }
 
   Future<void> _openProductDetail(ProductSearchResult result) async {
+    if (widget.isSelectionMode) {
+      Navigator.of(context).pop(result);
+      return;
+    }
+
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (context) => ProductDetailPage(
@@ -463,7 +473,7 @@ class _ProductSearchPageState extends State<ProductSearchPage>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Buscar productos'),
+        title: Text(widget.isSelectionMode ? 'Seleccionar producto' : 'Buscar productos'),
         actions: [
           IconButton(
             tooltip: 'Actualizar datos',

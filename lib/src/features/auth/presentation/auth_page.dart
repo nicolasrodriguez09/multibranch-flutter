@@ -23,27 +23,9 @@ class AuthPage extends StatelessWidget {
     return Scaffold(
       backgroundColor: const Color(0xFF08090C),
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF050506), Color(0xFF101116), Color(0xFF17191F)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
+        color: Colors.black,
         child: Stack(
           children: [
-            const _AmbientGlow(
-              alignment: Alignment.topCenter,
-              color: Color(0x55FF2636),
-              size: 320,
-              offsetY: -120,
-            ),
-            const _AmbientGlow(
-              alignment: Alignment.centerRight,
-              color: Color(0x44FF2636),
-              size: 240,
-              offsetX: 110,
-            ),
             SafeArea(
               child: Center(
                 child: SingleChildScrollView(
@@ -55,21 +37,6 @@ class AuthPage extends StatelessWidget {
                     constraints: const BoxConstraints(maxWidth: 440),
                     child: Column(
                       children: [
-                        Image.asset(
-                          'assets/images/redstock_logo.png',
-                          width: 230,
-                          fit: BoxFit.contain,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Text(
-                              'RedStock',
-                              style: textTheme.displaySmall?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 10),
                         Text(
                           'Conecta y gestiona tu inventario entre sucursales.',
                           textAlign: TextAlign.center,
@@ -100,8 +67,8 @@ class AuthPage extends StatelessWidget {
                                 height: 390,
                                 width: double.infinity,
                                 child: Image.asset(
-                                  'assets/images/login_background.png',
-                                  fit: BoxFit.cover,
+                                  'assets/images/redstock_logo.png',
+                                  fit: BoxFit.contain,
                                   alignment: Alignment.center,
                                   errorBuilder: (context, error, stackTrace) {
                                     return Container(
@@ -298,28 +265,9 @@ class _LoginPageState extends State<_LoginPage> {
     return Scaffold(
       backgroundColor: const Color(0xFF08090C),
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF050506), Color(0xFF101116), Color(0xFF17191F)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
+        color: Colors.black,
         child: Stack(
           children: [
-            const _AmbientGlow(
-              alignment: Alignment.topCenter,
-              color: Color(0x55FF2636),
-              size: 320,
-              offsetY: -120,
-            ),
-            const _AmbientGlow(
-              alignment: Alignment.bottomLeft,
-              color: Color(0x44FF2636),
-              size: 240,
-              offsetX: -80,
-              offsetY: 80,
-            ),
             SafeArea(
               child: Center(
                 child: SingleChildScrollView(
@@ -358,19 +306,21 @@ class _LoginPageState extends State<_LoginPage> {
                               tooltip: 'Volver',
                             ),
                             const SizedBox(height: 20),
-                            Image.asset(
-                              'assets/images/redstock_logo.png',
-                              width: 170,
-                              fit: BoxFit.contain,
-                              errorBuilder: (context, error, stackTrace) {
-                                return Text(
-                                  'RedStock',
-                                  style: textTheme.headlineMedium?.copyWith(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                );
-                              },
+                            Center(
+                              child: Image.asset(
+                                'assets/images/redstock_logo.png',
+                                width: 240,
+                                fit: BoxFit.contain,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Text(
+                                    'RedStock',
+                                    style: textTheme.headlineMedium?.copyWith(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  );
+                                },
+                              ),
                             ),
                             const SizedBox(height: 18),
                             Text(

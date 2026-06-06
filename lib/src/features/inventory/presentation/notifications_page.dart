@@ -229,11 +229,11 @@ class _NotificationSummaryCard extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(22),
         gradient: const LinearGradient(
-          colors: [Color(0xFF8B121E), Color(0xFF551018), Color(0xFF151016)],
+          colors: [Color(0xFF0C243B), Color(0xFF081423), Color(0xFF151016)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        border: Border.all(color: const Color(0x33FF2636)),
+        border: Border.all(color: const Color(0x334C9AFF)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -412,12 +412,12 @@ class _NotificationCard extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: notification.isRead
-                ? const Color(0xFF251114)
-                : const Color(0xFF2A1014),
+                ? const Color(0xFF111216)
+                : const Color(0xFF161A25),
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
               color: notification.isRead
-                  ? const Color(0x1FFF2636)
+                  ? const Color(0x1AFFFFFF)
                   : visual.color.withValues(alpha: 0.48),
             ),
           ),
@@ -612,7 +612,7 @@ class _EmptyNotificationState extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0x26FF2636)),
+        border: Border.all(color: const Color(0x1AFFFFFF)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -692,11 +692,12 @@ String _formatNotificationType(String type) {
 }
 
 String _formatShortDateTime(DateTime value) {
-  final day = value.day.toString().padLeft(2, '0');
-  final month = value.month.toString().padLeft(2, '0');
-  final hour = value.hour.toString().padLeft(2, '0');
-  final minute = value.minute.toString().padLeft(2, '0');
-  return '$day/$month/${value.year} $hour:$minute';
+  final v = value.toUtc().subtract(const Duration(hours: 5));
+  final day = v.day.toString().padLeft(2, '0');
+  final month = v.month.toString().padLeft(2, '0');
+  final hour = v.hour.toString().padLeft(2, '0');
+  final minute = v.minute.toString().padLeft(2, '0');
+  return '$day/$month/${v.year} $hour:$minute';
 }
 
 String _formatRelativeTime(DateTime value) {

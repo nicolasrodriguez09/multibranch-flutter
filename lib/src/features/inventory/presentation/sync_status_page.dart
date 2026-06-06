@@ -541,15 +541,7 @@ class _StatusHero extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(26),
-        gradient: LinearGradient(
-          colors: [
-            accent.withValues(alpha: 0.28),
-            const Color(0xFF3A1116),
-            const Color(0xFF121318),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        color: const Color(0xFF08090C),
         border: Border.all(color: const Color(0x33FF2636)),
         boxShadow: const [
           BoxShadow(
@@ -1159,8 +1151,12 @@ class _AttentionBranchRow extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
-        color: Colors.white.withValues(alpha: 0.04),
-        border: Border.all(color: accent.withValues(alpha: 0.25)),
+        gradient: LinearGradient(
+          colors: _severityGradient(branch.severity),
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(color: accent.withValues(alpha: 0.35)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1294,8 +1290,12 @@ class _BranchStatusTile extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
-        color: Colors.white.withValues(alpha: 0.04),
-        border: Border.all(color: const Color(0x22FF2636)),
+        gradient: LinearGradient(
+          colors: _severityGradient(branch.severity),
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(color: accent.withValues(alpha: 0.35)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1516,6 +1516,15 @@ IconData _severityIcon(SyncStatusSeverity severity) {
   };
 }
 
+List<Color> _severityGradient(SyncStatusSeverity severity) {
+  return switch (severity) {
+    SyncStatusSeverity.healthy => const [Color(0xFF06402B), Color(0xFF021E12)],
+    SyncStatusSeverity.warning => const [Color(0xFF8A5A19), Color(0xFF3B2305)],
+    SyncStatusSeverity.critical => const [Color(0xFF7A101A), Color(0xFF3A1116)],
+    SyncStatusSeverity.unknown => const [Color(0xFF1E3A8A), Color(0xFF0F172A)],
+  };
+}
+
 String _formatSyncType(String value) {
   return switch (value.trim().toLowerCase()) {
     'inventory' => 'Inventario',
@@ -1565,7 +1574,8 @@ String _formatDateTime(DateTime? value) {
   if (value == null) {
     return 'sin registro';
   }
-  return '${value.day.toString().padLeft(2, '0')}/${value.month.toString().padLeft(2, '0')} ${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
+  final v = value.toUtc().subtract(const Duration(hours: 5));
+  return '${v.day.toString().padLeft(2, '0')}/${v.month.toString().padLeft(2, '0')} ${v.hour.toString().padLeft(2, '0')}:${v.minute.toString().padLeft(2, '0')}';
 }
 
 String _formatRelativeTime(DateTime? value) {

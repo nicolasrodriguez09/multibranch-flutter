@@ -12,10 +12,12 @@ class BarcodeScannerPage extends StatefulWidget {
     super.key,
     required this.service,
     required this.currentUser,
+    this.returnRawBarcode = false,
   });
 
   final InventoryWorkflowService service;
   final AppUser currentUser;
+  final bool returnRawBarcode;
 
   @override
   State<BarcodeScannerPage> createState() => _BarcodeScannerPageState();
@@ -146,6 +148,13 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage>
     });
 
     await _stopScanner();
+
+    if (widget.returnRawBarcode) {
+      if (mounted) {
+        Navigator.of(context).pop(barcode);
+      }
+      return;
+    }
 
     try {
       final result = await widget.service.findProductByBarcode(
